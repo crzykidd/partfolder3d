@@ -78,8 +78,7 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 
 ## Open threads (carry these forward)
 
-- [ ] **Push `homelab-configs`** registry commit to Gitea (`origin/main`, 1 ahead) — or
-      the user lands it. (Its own rule = no auto-push.)
+- [x] **`homelab-configs` registry entry pushed** to Gitea by the user (2026-06-27).
 - [ ] **After Phase 0 CI is green:** add `CodeQL / Analyze (python)` +
       `CodeQL / Analyze (javascript-typescript)` to `main` required status checks (deferred
       because CodeQL errors on an empty source tree).
