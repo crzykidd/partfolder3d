@@ -2,6 +2,23 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Tag tree dropped → popularity tag cloud
+
+**Reversal of the §5.2 "virtual tag-browse tree."** The N-levels-deep tag hierarchy was a
+holdover from an early design where objects were stored under a **tag-name directory
+structure on disk**. That disk layout was dropped long ago (locked decision: files are
+**never** organized by tags on disk — tags are a pure DB/UI construct, §3.2), which removed
+the only reason the hierarchy mattered.
+
+**Decision:** no tag hierarchy. Tags drive browse via a **popularity-weighted tag cloud** +
+a sortable tag list; clicking a tag filters (multiple stack as AND); popularity also a sort
+option. Built off the existing `GET /api/tags` (popularity counts).
+
+**Consequences:** the Phase 3a `GET /api/tags/tree` endpoint (category-namespace tree) and
+the `catalog.tag_tree_depth` setting are **obsolete and removed in Phase 3b**. Categories
+on tags (§5.1) remain only as an optional **filter facet**, not a tree driver. PRD §5.2/§12
+and `docs/build-plan.md` Phase 3 updated.
+
 ## 2026-06-27 — Phase 3a backend implementation decisions
 
 ### Full-text search via application-maintained TSVECTOR column

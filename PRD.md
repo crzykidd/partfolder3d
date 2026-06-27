@@ -119,9 +119,14 @@ The catalog is **fully shared**: all users see the same items, tags, files, and 
 - **Aliases/synonyms** — map source-site tags and AI suggestions onto canonical tags (e.g. `multicolor` → `mmu`). Central to reconciliation.
 - **New-tag approval queue** — AI/import-suggested *new* tags land in a pending state; admin/curator approves before they become canonical. Keeps vocabulary clean.
 
-### 5.2 Virtual tag-browse tree
-- The browse hierarchy (e.g. `mmu / animals / keychain`) is **derived from most-used tags in order**, **N levels deep** (default **4**, configurable in settings).
-- No physical directory hierarchy is created from tags. Pure DB/UI construct.
+### 5.2 Tag cloud & popularity browse
+- Tags drive browse via a **popularity-weighted tag cloud** (plus a sortable tag list) —
+  **no hierarchy**. Clicking a tag filters the catalog; multiple tags stack (AND).
+- **Popularity counts** size the cloud and provide a catalog **sort** option. Pure DB/UI
+  construct — **tags never affect on-disk layout** (files are never organized by tags; §3.2).
+- *(History: an earlier design nested tags into an N-deep browse tree because objects were
+  once stored under a tag-name directory structure on disk. That disk layout was dropped, so
+  the hierarchy is gone — popularity sorting + the cloud replace it.)*
 
 ### 5.3 Tag reconciliation on import
 1. If a **sidecar** is present, read its tags first.
@@ -252,7 +257,7 @@ Print records can be created via the REST API, enabling future integrations (e.g
 ## 12. Search & Browse UI
 
 - **Search** across tags, titles, descriptions (PostgreSQL full-text).
-- **Tag list** with click-to-search; filter/stack multiple tags; browse via virtual tag tree.
+- **Tag list / popularity tag cloud** with click-to-search; filter/stack multiple tags (AND).
 - **Creator** — click a creator to see all their models; a per-user **"My Creations"** view lists everything you designed yourself (Items whose Creator is linked to your account; §4).
 - **Two catalog views:**
   - **Table view** — small default-image icon + key details per row.

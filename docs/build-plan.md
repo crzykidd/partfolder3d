@@ -100,7 +100,7 @@ atomic with rollback; renaming preserves key/links.
 **Goal:** the catalog is usable in the browser.
 
 **Deliverables:** Postgres full-text search (titles/desc/tags); tag list + click-to-search;
-**virtual tag tree** (popularity, depth setting); **table + grid views**; **favorites**
+**popularity tag cloud** (sort + click-to-filter, no hierarchy); **table + grid views**; **favorites**
 (star/filter/sort); **browse-by-creator + per-user "My Creations" view** (§4/§12);
 **item page** (carousel + set-default, metadata, tags, creator, source/license,
 full path + prefix-rewrite + copy, downloads incl. **queued ZIP** with ~1-day/invalidate
