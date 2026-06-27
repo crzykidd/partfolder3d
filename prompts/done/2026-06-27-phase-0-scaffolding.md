@@ -1,10 +1,10 @@
 ---
 name: 2026-06-27-phase-0-scaffolding
-status: pending          # pending | completed | failed
+status: completed
 created: 2026-06-27
 model: sonnet            # execution of a locked plan
-completed:
-result:
+completed: 2026-06-27
+result: Phase 0 scaffold complete — backend/frontend/compose/Dockerfile/nginx/CI all created; ruff/tsc/pytest/vitest/compose-validate/alembic-upgrade all green locally.
 ---
 
 # Task: Phase 0 — repo scaffolding & dev loop

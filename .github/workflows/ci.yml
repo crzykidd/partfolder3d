@@ -1,9 +1,8 @@
 name: CI
 
-# Bootstrap tolerance: every job guards its real commands behind file/directory
-# existence checks so the workflow passes cleanly on an empty repo. Remove each
-# guard per-job as scaffolding adds the corresponding piece (backend/, frontend/,
-# docker-compose.yml, Dockerfile, etc.).
+# Phase 0 (2026-06-27): bootstrap existence-guards removed now that backend/,
+# frontend/, docker-compose.yml, Dockerfile, and alembic are all present.
+# Jobs enforce for real from this commit onward.
 
 on:
   # Push-only (no pull_request). Every dev push gets the full CI feedback, and the
@@ -26,22 +25,17 @@ jobs:
           python-version: "3.12"
       - name: Lint backend (ruff)
         run: |
-          if [ -d backend ]; then
-            pip install ruff
-            ruff check backend/
-          else
-            echo "no backend/ yet — bootstrap tolerance, skipping"
-          fi
+          pip install ruff
+          ruff check backend/
 
       - uses: actions/setup-node@v5
-        if: hashFiles('frontend/package.json') != ''
         with:
           node-version: "22"
-      - run: npm ci
-        if: hashFiles('frontend/package.json') != ''
+      - name: Install frontend deps
+        run: npm ci
         working-directory: frontend
-      - run: npx tsc --noEmit
-        if: hashFiles('frontend/package.json') != ''
+      - name: Type-check frontend (tsc --noEmit)
+        run: npx tsc --noEmit
         working-directory: frontend
 
   config-validate:
@@ -61,13 +55,13 @@ jobs:
           validated = []
           for f in ['docker-compose.yml', 'docker-compose.dev.yml']:
               if not os.path.exists(f):
-                  print(f'Note: {f} not present yet — bootstrap tolerance, skipping')
+                  print(f'Note: {f} not present yet — skipping')
                   continue
               try: yaml.safe_load(open(f).read()); validated.append(f)
               except Exception as e: errors.append(f'{f}: {e}')
           for f in ['.claude/settings.json', 'frontend/package.json'] + sorted(glob.glob('frontend/tsconfig*.json')):
               if not os.path.exists(f):
-                  print(f'Note: {f} not present yet — bootstrap tolerance, skipping')
+                  print(f'Note: {f} not present yet — skipping')
                   continue
               try: json.load(open(f)); validated.append(f)
               except Exception as e: errors.append(f'{f}: {e}')
@@ -77,51 +71,55 @@ jobs:
           if validated:
               print('All config files valid:', ', '.join(validated))
           else:
-              print('No config files present yet — bootstrap tolerance, nothing to validate')
+              print('No config files present yet')
           EOF
 
   migration-check:
     name: Migration check
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: partfolder3d
+          POSTGRES_USER: partfolder3d
+          POSTGRES_PASSWORD: ci_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U partfolder3d -d partfolder3d"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - name: Install backend deps
+        run: pip install -r backend/requirements.txt
       - name: Run migrations to head
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/partfolder3d
+          DATABASE_URL: postgresql+asyncpg://partfolder3d:ci_test_password@localhost:5432/partfolder3d
           DATA_DIR: /tmp/alembic-check
-        run: |
-          if [ -d backend/alembic ] || [ -f backend/alembic.ini ]; then
-            pip install -r backend/requirements.txt
-            cd backend && alembic upgrade head
-          else
-            echo "no alembic setup found yet — bootstrap tolerance, skipping"
-          fi
+        run: cd backend && alembic upgrade head
       - name: Assert at head
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/partfolder3d
+          DATABASE_URL: postgresql+asyncpg://partfolder3d:ci_test_password@localhost:5432/partfolder3d
           DATA_DIR: /tmp/alembic-check
         run: |
-          if [ -d backend/alembic ] || [ -f backend/alembic.ini ]; then
-            cd backend && alembic current 2>&1 | grep -q '(head)' || \
-              { echo 'ERROR: database is not at alembic head'; exit 1; }
-          else
-            echo "no alembic setup found yet — bootstrap tolerance, skipping"
-          fi
+          cd backend && alembic current 2>&1 | grep -q '(head)' || \
+            { echo 'ERROR: database is not at alembic head'; exit 1; }
 
   compose-validate:
     name: Compose validation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - run: |
-          if [ -f docker-compose.yml ]; then
-            docker compose config --quiet
-          else
-            echo "no compose yet — bootstrap tolerance, skipping"
-          fi
+      - name: Validate production compose
+        run: docker compose config --quiet
+      - name: Validate dev compose overlay
+        run: docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
 
   image-build:
     name: Image build
@@ -129,14 +127,13 @@ jobs:
     # The job always runs so the required "CI / Image build" check reports a
     # conclusion on push events too (a job skipped via job-level `if:` leaves the
     # required context unsatisfied → PRs stuck "blocked"). The actual build stays
-    # PR-only so push events never build an image, and additionally requires a
-    # Dockerfile (bootstrap tolerance).
+    # PR-only so push events never build an image.
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v4
-        if: github.event_name == 'pull_request' && hashFiles('Dockerfile') != ''
+        if: github.event_name == 'pull_request'
       - name: Build Docker image (no push)
-        if: github.event_name == 'pull_request' && hashFiles('Dockerfile') != ''
+        if: github.event_name == 'pull_request'
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -145,16 +142,38 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: partfolder3d
+          POSTGRES_USER: partfolder3d
+          POSTGRES_PASSWORD: ci_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U partfolder3d -d partfolder3d"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Run tests
-        run: |
-          if [ -d backend ] && find backend \( -name "test_*.py" -o -name "*_test.py" \) | grep -q .; then
-            pip install -r backend/requirements.txt
-            cd backend && pytest
-          else
-            echo "no backend tests found yet — bootstrap tolerance, skipping"
-          fi
+      - name: Install backend deps
+        run: pip install -r backend/requirements.txt
+      - name: Run pytest
+        env:
+          DATABASE_URL: postgresql+asyncpg://partfolder3d:ci_test_password@localhost:5432/partfolder3d
+          DATA_DIR: /tmp/pytest-data
+        run: cd backend && pytest -v
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: frontend
+      - name: Run vitest
+        run: npm test
+        working-directory: frontend

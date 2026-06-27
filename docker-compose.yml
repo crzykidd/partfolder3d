@@ -1,0 +1,121 @@
+# PartFolder 3D — production docker compose
+#
+# Bring up the full stack:
+#   docker compose up -d
+#
+# For local development with hot reload, overlay the dev overrides:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# Required: copy .env.example → .env and fill in secrets before first run.
+
+services:
+
+  # ── PostgreSQL database ──
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: partfolder3d
+      POSTGRES_USER: partfolder3d
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-changeme}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U partfolder3d -d partfolder3d"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Redis (job queue broker) ──
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── FastAPI backend ──
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/crzykidd/partfolder3d:dev
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false   # .env is optional; env vars can be set directly
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://partfolder3d:${POSTGRES_PASSWORD:-changeme}@db:5432/partfolder3d"
+      REDIS_URL: "redis://redis:6379"
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── arq background worker ──
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/crzykidd/partfolder3d:dev
+    restart: unless-stopped
+    command: ["python", "worker.py"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://partfolder3d:${POSTGRES_PASSWORD:-changeme}@db:5432/partfolder3d"
+      REDIS_URL: "redis://redis:6379"
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── Frontend build (produces static assets into the frontend_dist volume) ──
+  frontend:
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+      target: prod
+    image: ghcr.io/crzykidd/partfolder3d-frontend:dev
+    volumes:
+      - frontend_dist:/dist
+    restart: "no"          # build-and-exit; nginx depends on completion
+
+  # ── nginx reverse proxy (serves frontend + proxies /api/) ──
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8973}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - frontend_dist:/usr/share/nginx/html:ro
+      # Logo images (served under /img/): maps docs/images/ into nginx's html root.
+      - ./docs/images:/usr/share/nginx/html/img:ro
+    depends_on:
+      frontend:
+        condition: service_completed_successfully
+      backend:
+        condition: service_started
+
+volumes:
+  db_data:
+    driver: local
+  redis_data:
+    driver: local
+  frontend_dist:
+    driver: local
