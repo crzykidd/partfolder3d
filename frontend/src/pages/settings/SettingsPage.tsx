@@ -16,6 +16,103 @@ import { useAuth } from '@/context/AuthContext'
 import { useTheme } from '@/components/ThemeProvider'
 import * as api from '@/lib/api'
 
+// ---------------------------------------------------------------------------
+// Path prefix section
+// ---------------------------------------------------------------------------
+
+function PathPrefixSection() {
+  const queryClient = useQueryClient()
+
+  const { data } = useQuery({
+    queryKey: ['path-prefix'],
+    queryFn: api.getPathPrefix,
+  })
+
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  // Sync draft when data arrives or editing is reset
+  useEffect(() => {
+    if (!editing) {
+      setDraft(data?.path_prefix ?? '')
+    }
+  }, [data, editing])
+
+  const mutation = useMutation({
+    mutationFn: () => api.setPathPrefix(draft.trim() || null),
+    onSuccess: () => {
+      setEditing(false)
+      void queryClient.invalidateQueries({ queryKey: ['path-prefix'] })
+    },
+  })
+
+  const currentValue = data?.path_prefix ?? ''
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold mb-3">Path display</h2>
+      <div className="rounded-lg border border-border bg-card p-4">
+        <div className="flex flex-col gap-1 py-1">
+          <div className="text-sm font-medium">Path prefix</div>
+          <div className="text-xs text-muted-foreground">
+            Prefix prepended to the item directory path on item pages — useful when
+            your library is mounted at a different path locally (e.g.{' '}
+            <code className="font-mono">C:\prints\</code> or{' '}
+            <code className="font-mono">/mnt/nas/</code>).
+          </div>
+          {!editing && (
+            <div className="flex items-center gap-3 mt-2">
+              <span className="font-mono text-sm text-muted-foreground">
+                {currentValue || <em>not set</em>}
+              </span>
+              <button
+                onClick={() => {
+                  setDraft(currentValue)
+                  setEditing(true)
+                }}
+                className="text-xs text-primary hover:underline"
+              >
+                Edit
+              </button>
+            </div>
+          )}
+          {editing && (
+            <div className="flex items-center gap-2 mt-2">
+              <input
+                type="text"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="e.g. C:\prints\ or /mnt/nas/"
+                className="input-base flex-1 text-sm font-mono"
+                autoFocus
+              />
+              <button
+                onClick={() => mutation.mutate()}
+                disabled={mutation.isPending}
+                className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+              >
+                {mutation.isPending ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                onClick={() => {
+                  setEditing(false)
+                  setDraft(currentValue)
+                }}
+                className="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors"
+              >
+                Cancel
+              </button>
+              {mutation.isError && (
+                <span className="text-xs text-destructive">Save failed</span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 // Known instance settings with friendly labels.
 const KNOWN_SETTINGS: { key: string; label: string; description: string }[] = [
   {
@@ -166,6 +263,9 @@ export function SettingsPage() {
           </div>
         </div>
       </section>
+
+      {/* Per-user path prefix */}
+      <PathPrefixSection />
 
       {/* Instance settings (admin only) */}
       {isAdmin && (

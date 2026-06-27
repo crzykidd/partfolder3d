@@ -102,7 +102,9 @@ export function AppShell() {
 
           {/* Nav */}
           <nav className="ml-6 flex items-center gap-4">
-            <NavItem to="/">Dashboard</NavItem>
+            <NavItem to="/catalog">Catalog</NavItem>
+            <NavItem to="/catalog?favorited=true">My Favorites</NavItem>
+            <NavItem to="/me/creations">My Creations</NavItem>
             <NavItem to="/settings">Settings</NavItem>
             <NavItem to="/settings/api-keys">API keys</NavItem>
             {isAdmin && (

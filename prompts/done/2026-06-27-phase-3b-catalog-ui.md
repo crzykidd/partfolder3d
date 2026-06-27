@@ -1,10 +1,10 @@
 ---
 name: 2026-06-27-phase-3b-catalog-ui
-status: pending
+status: completed
 created: 2026-06-27
 model: sonnet
-completed:
-result:
+completed: 2026-06-27
+result: Built catalog browse (popularity tag cloud, virtualized grid, TanStack Table), item detail page (carousel, ZIP poll, path-prefix rewrite, downloads), creator browse, my creations, nav entries, path-prefix settings, and vitest tests; removed obsolete tag-tree backend endpoint and tests (155 passing).
 ---
 
 # Task: Phase 3b — Catalog UI (browse, item page, downloads, path prefix, settings)

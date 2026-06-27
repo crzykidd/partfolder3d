@@ -2,6 +2,79 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Phase 3b frontend implementation decisions
+
+### Tag-tree endpoint removed from backend (Phase 3b section 0)
+`GET /api/tags/tree`, the `TagTree`/`TagTreeNode` Pydantic schemas, the
+`_get_tag_tree_depth` / `_build_tree` helpers, the `TAG_TREE_DEPTH_KEY` /
+`TAG_TREE_DEPTH_DEFAULT` constants, and the `json` + `Setting` imports that
+served only the tree were deleted from `backend/app/routers/tags.py`.  The
+two corresponding tests (`test_tag_tree`, `test_tag_tree_depth_override`) were
+removed from `test_phase3_catalog.py`.  `GET /api/tags` (popularity) is kept
+and now drives the cloud exclusively.  Rationale: see "Tag tree dropped →
+popularity tag cloud" entry below.
+
+### Virtualized grid: TanStack Virtual row-at-a-time in a fixed-height container
+`useVirtualizer` from `@tanstack/react-virtual` v3 is applied to *rows* of 3
+items (not individual items) so the grid layout is kept in CSS (`grid-cols-3`).
+The virtual container uses a fixed height of 640 px with `overflow-y: auto`.
+Window-level scroll was rejected because TanStack Virtual requires a scrollable
+element with a known height.  Row height is estimated at 296 px (card 280 px +
+16 px gap); actual measurement uses `measureElement` ref for accuracy.
+Dynamic class name `grid-cols-${COLS}` was replaced with the static
+`grid-cols-3` to ensure Tailwind v4's scanner includes the class.
+
+### ZIP download polling: useEffect + setInterval, window.open for stream
+The ZIP download flow (POST /zip → poll GET /zip/{id} every 2 s → GET
+/zip/{id}?download=true) uses a `setInterval` managed inside a `useEffect`.
+The interval is stored in a ref to avoid stale closure issues; cleanup happens
+on unmount and on status reaching a terminal state.  When status is `ready`,
+`window.open(zipDownloadUrl(...))` triggers the browser's native file download.
+Rejected: a custom streaming `fetch()` into a Blob — adds complexity with no
+benefit; the backend streams via nginx/starlette `FileResponse` so a plain
+navigation URL is sufficient.
+
+### Tag-cloud weighting: min-max linear scale across 8 font-size steps
+Font size is linearly interpolated between `TAG_SIZE_SCALE = [0.75, 0.875,
+1.0, 1.125, 1.25, 1.5, 1.75, 2.0]` rem values using
+`Math.round(normalised × (n−1))` to pick a bucket.  Font weight is mapped to
+4 Tailwind classes (`font-normal / font-medium / font-semibold / font-bold`)
+based on 4 quartile thresholds.  When all tags have the same count (min ===
+max), everything renders at 1 rem / font-normal — no division-by-zero.
+Pure utility functions (`getTagFontSize`, `getTagFontWeight`) extracted to
+`frontend/src/lib/catalog-utils.ts` for unit-testing.
+
+### URL as single source of truth for catalog filter state
+All catalog filter params (q, tags, creator_id, favorited, sort, view, page)
+live in the URL via React Router's `useSearchParams`.  This makes the catalog
+fully deep-linkable.  The search input uses local state updated on every
+keystroke, with a 300 ms `setTimeout` debounce writing back to URL (to avoid
+racing requests on every character).  `view` is additionally persisted to
+`localStorage` so the user's grid/table preference survives navigation.
+Rejected: Zustand/Context for filter state — URL is simpler, free, and shareable.
+
+### Path prefix: pure `rewritePath` function, no server-side rewrite
+The dir path displayed on the item page is rewritten client-side by
+`rewritePath(dirPath, prefix)` from `catalog-utils.ts`.  The function detects
+Windows-style prefixes by checking for `\\`, converts internal separators, and
+ensures a trailing separator.  The server always stores and returns the raw
+Unix-style path.  Rejected: server-side formatted path — would require a
+per-user query param on every item request or a dedicated endpoint; client-side
+is cheaper and instantly reactive to prefix changes.
+
+### Popularity sort for items not yet in the backend
+The sort dropdown in CatalogPage omits a "Most popular" item sort because the
+backend `GET /api/items` does not have a popularity/favorites-count sort option
+in Phase 3a (`_VALID_SORTS`).  The available options (newest, oldest, title
+A–Z, title Z–A, relevance) match exactly what the backend supports.  A
+favorites-count sort is a Phase 4/9 enhancement.
+
+### Phase 7 placeholders: clearly labelled dashed-border sections
+The ItemPage renders two dashed-border placeholder sections ("Print History —
+Coming in Phase 7" and "Sharing — Coming in Phase 7") with no interactivity.
+This matches the PRD constraint that Phase 7 features must not ship in Phase 3b
+but must be visually represented.
+
 ## 2026-06-27 — Tag tree dropped → popularity tag cloud
 
 **Reversal of the §5.2 "virtual tag-browse tree."** The N-levels-deep tag hierarchy was a

@@ -22,6 +22,11 @@ import { LoginPage } from '@/pages/LoginPage'
 import { InviteAcceptPage } from '@/pages/InviteAcceptPage'
 import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
 
+import { CatalogPage } from '@/pages/CatalogPage'
+import { ItemPage } from '@/pages/ItemPage'
+import { CreatorPage } from '@/pages/CreatorPage'
+import { MyCreationsPage } from '@/pages/MyCreationsPage'
+
 import { UsersPage } from '@/pages/admin/UsersPage'
 import { InvitesPage } from '@/pages/admin/InvitesPage'
 import { PasswordResetPage } from '@/pages/admin/PasswordResetPage'
@@ -55,6 +60,12 @@ function App() {
               <Route element={<AuthGuard />}>
                 <Route element={<AppShell />}>
                   <Route index element={<VersionPage />} />
+
+                  {/* Catalog */}
+                  <Route path="/catalog" element={<CatalogPage />} />
+                  <Route path="/items/:key" element={<ItemPage />} />
+                  <Route path="/creators/:creatorId" element={<CreatorPage />} />
+                  <Route path="/me/creations" element={<MyCreationsPage />} />
 
                   {/* Settings */}
                   <Route path="/settings" element={<SettingsPage />} />

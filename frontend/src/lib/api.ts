@@ -314,3 +314,296 @@ export const createApiKey = (label: string): Promise<CreateApiKeyResponse> =>
 
 export const revokeApiKey = (keyId: number): Promise<void> =>
   apiFetch<void>(`/api/api-keys/${keyId}`, { method: 'DELETE' })
+
+// ---------------------------------------------------------------------------
+// Phase 3 — Catalog types
+// ---------------------------------------------------------------------------
+
+export interface ItemSummary {
+  id: number
+  key: string
+  title: string
+  slug: string
+  library_id: number
+  dir_path: string
+  created_at: string
+  updated_at: string
+  default_image_path: string | null
+  creator_name: string | null
+  tag_names: string[]
+  favorited: boolean
+}
+
+export interface TagOut {
+  id: number
+  name: string
+  category: string | null
+}
+
+export interface FileOut {
+  id: number
+  path: string
+  role: string
+  size: number
+  sha256: string | null
+}
+
+export interface ImageOut {
+  id: number
+  path: string
+  source: string
+  is_default: boolean
+  order: number
+}
+
+export interface CreatorOut {
+  id: number
+  name: string
+  profile_url: string | null
+  source_site: string | null
+}
+
+export interface ItemDetail {
+  id: number
+  key: string
+  title: string
+  slug: string
+  library_id: number
+  dir_path: string
+  created_at: string
+  updated_at: string
+  description: string | null
+  source_url: string | null
+  source_site: string | null
+  license: string | null
+  schema_version: number
+  creator: CreatorOut | null
+  tags: TagOut[]
+  files: FileOut[]
+  images: ImageOut[]
+}
+
+export interface PaginatedItems {
+  total: number
+  page: number
+  per_page: number
+  items: ItemSummary[]
+}
+
+export interface ItemListParams {
+  q?: string
+  tags?: string[]
+  creator_id?: number
+  favorited?: boolean
+  sort?: string
+  page?: number
+  per_page?: number
+  library_id?: number
+}
+
+export interface TagSummary {
+  id: number
+  name: string
+  category: string | null
+  popularity_count: number
+}
+
+export interface PaginatedTags {
+  total: number
+  page: number
+  per_page: number
+  tags: TagSummary[]
+}
+
+export interface CreatorDetail {
+  id: number
+  name: string
+  profile_url: string | null
+  source_site: string | null
+  item_count: number
+}
+
+export interface PaginatedCreators {
+  total: number
+  page: number
+  per_page: number
+  creators: CreatorDetail[]
+}
+
+export interface CreatorItemSummary {
+  id: number
+  key: string
+  title: string
+  slug: string
+  library_id: number
+  dir_path: string
+  created_at: string
+  updated_at: string
+}
+
+export interface PaginatedCreatorItems {
+  total: number
+  page: number
+  per_page: number
+  creator: CreatorDetail
+  items: CreatorItemSummary[]
+}
+
+export interface ItemSummaryMini {
+  id: number
+  key: string
+  title: string
+  slug: string
+  library_id: number
+  dir_path: string
+  created_at: string
+  updated_at: string
+  default_image_path: string | null
+  creator_name: string | null
+  tag_names: string[]
+}
+
+export interface PaginatedMiniItems {
+  total: number
+  page: number
+  per_page: number
+  items: ItemSummaryMini[]
+}
+
+export interface FavoriteOut {
+  item_id: number
+  favorited: boolean
+}
+
+export interface BundleOut {
+  id: string
+  status: string
+  expires_at: string | null
+  error_message: string | null
+}
+
+export interface PathPrefixResponse {
+  path_prefix: string | null
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — Catalog API functions
+// ---------------------------------------------------------------------------
+
+export const listItems = (params: ItemListParams = {}): Promise<PaginatedItems> => {
+  const sp = new URLSearchParams()
+  if (params.q) sp.set('q', params.q)
+  if (params.tags) params.tags.forEach((t) => sp.append('tags', t))
+  if (params.creator_id != null) sp.set('creator_id', String(params.creator_id))
+  if (params.favorited === true) sp.set('favorited', 'true')
+  if (params.sort) sp.set('sort', params.sort)
+  if (params.page != null) sp.set('page', String(params.page))
+  if (params.per_page != null) sp.set('per_page', String(params.per_page))
+  if (params.library_id != null) sp.set('library_id', String(params.library_id))
+  const qs = sp.toString()
+  return apiFetch<PaginatedItems>(`/api/items${qs ? `?${qs}` : ''}`)
+}
+
+export const getItem = (key: string): Promise<ItemDetail> =>
+  apiFetch<ItemDetail>(`/api/items/${key}`)
+
+export const favoriteItem = (key: string): Promise<FavoriteOut> =>
+  apiFetch<FavoriteOut>(`/api/items/${key}/favorite`, { method: 'POST' })
+
+export const unfavoriteItem = (key: string): Promise<void> =>
+  apiFetch<void>(`/api/items/${key}/favorite`, { method: 'DELETE' })
+
+export const setDefaultImage = (key: string, imageId: number): Promise<ItemDetail> =>
+  apiFetch<ItemDetail>(`/api/items/${key}/default-image`, {
+    method: 'PATCH',
+    body: JSON.stringify({ image_id: imageId }),
+  })
+
+export const listTags = (params: {
+  q?: string
+  category?: string
+  page?: number
+  per_page?: number
+} = {}): Promise<PaginatedTags> => {
+  const sp = new URLSearchParams()
+  if (params.q) sp.set('q', params.q)
+  if (params.category) sp.set('category', params.category)
+  if (params.page != null) sp.set('page', String(params.page))
+  if (params.per_page != null) sp.set('per_page', String(params.per_page))
+  const qs = sp.toString()
+  return apiFetch<PaginatedTags>(`/api/tags${qs ? `?${qs}` : ''}`)
+}
+
+export const listCreators = (params: {
+  q?: string
+  page?: number
+  per_page?: number
+} = {}): Promise<PaginatedCreators> => {
+  const sp = new URLSearchParams()
+  if (params.q) sp.set('q', params.q)
+  if (params.page != null) sp.set('page', String(params.page))
+  if (params.per_page != null) sp.set('per_page', String(params.per_page))
+  const qs = sp.toString()
+  return apiFetch<PaginatedCreators>(`/api/creators${qs ? `?${qs}` : ''}`)
+}
+
+export const getCreator = (creatorId: number): Promise<CreatorDetail> =>
+  apiFetch<CreatorDetail>(`/api/creators/${creatorId}`)
+
+export const listCreatorItems = (
+  creatorId: number,
+  params: { page?: number; per_page?: number } = {},
+): Promise<PaginatedCreatorItems> => {
+  const sp = new URLSearchParams()
+  if (params.page != null) sp.set('page', String(params.page))
+  if (params.per_page != null) sp.set('per_page', String(params.per_page))
+  const qs = sp.toString()
+  return apiFetch<PaginatedCreatorItems>(
+    `/api/creators/${creatorId}/items${qs ? `?${qs}` : ''}`,
+  )
+}
+
+export const listFavorites = (params: {
+  page?: number
+  per_page?: number
+} = {}): Promise<PaginatedMiniItems> => {
+  const sp = new URLSearchParams()
+  if (params.page != null) sp.set('page', String(params.page))
+  if (params.per_page != null) sp.set('per_page', String(params.per_page))
+  const qs = sp.toString()
+  return apiFetch<PaginatedMiniItems>(`/api/me/favorites${qs ? `?${qs}` : ''}`)
+}
+
+export const listCreations = (params: {
+  page?: number
+  per_page?: number
+} = {}): Promise<PaginatedMiniItems> => {
+  const sp = new URLSearchParams()
+  if (params.page != null) sp.set('page', String(params.page))
+  if (params.per_page != null) sp.set('per_page', String(params.per_page))
+  const qs = sp.toString()
+  return apiFetch<PaginatedMiniItems>(`/api/me/creations${qs ? `?${qs}` : ''}`)
+}
+
+export const getPathPrefix = (): Promise<PathPrefixResponse> =>
+  apiFetch<PathPrefixResponse>('/api/me/path-prefix')
+
+export const setPathPrefix = (pathPrefix: string | null): Promise<PathPrefixResponse> =>
+  apiFetch<PathPrefixResponse>('/api/me/path-prefix', {
+    method: 'PUT',
+    body: JSON.stringify({ path_prefix: pathPrefix }),
+  })
+
+export const queueZip = (key: string): Promise<BundleOut> =>
+  apiFetch<BundleOut>(`/api/items/${key}/zip`, { method: 'POST' })
+
+export const pollZip = (key: string, bundleId: string): Promise<BundleOut> =>
+  apiFetch<BundleOut>(`/api/items/${key}/zip/${bundleId}`)
+
+/** URL for directly streaming a single file (use as href or window.open). */
+export const fileDownloadUrl = (key: string, filePath: string): string =>
+  `/api/items/${key}/files/${filePath}`
+
+/** URL for streaming the ready ZIP bundle (use as href or window.open). */
+export const zipDownloadUrl = (key: string, bundleId: string): string =>
+  `/api/items/${key}/zip/${bundleId}?download=true`

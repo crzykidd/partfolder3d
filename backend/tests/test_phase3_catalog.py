@@ -5,7 +5,7 @@ Covers:
 - Full-text search (q param)
 - Tag filter (AND)
 - Sort options
-- Tag list endpoint + tag tree
+- Tag list endpoint (popularity counts — no tree; see decisions.md)
 - Creator list / creator items
 - My Creations endpoint
 - Path prefix (get / set)
@@ -345,28 +345,6 @@ async def test_list_tags_filter(client: AsyncClient, tmp_path: Path) -> None:
     assert resp.status_code == 200
     tags = resp.json()["tags"]
     assert all("key" in t["name"] for t in tags)
-
-
-@pytest.mark.asyncio
-async def test_tag_tree(client: AsyncClient, tmp_path: Path) -> None:
-    """GET /api/tags/tree returns a tree structure."""
-    csrf = await _login_admin(client, tmp_path)
-    await _create_lib_and_item(client, tmp_path, csrf, tags=["keychain"])
-
-    resp = await client.get("/api/tags/tree")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "depth" in data
-    assert "nodes" in data
-    assert isinstance(data["nodes"], list)
-
-
-@pytest.mark.asyncio
-async def test_tag_tree_depth_override(client: AsyncClient, tmp_path: Path) -> None:
-    """GET /api/tags/tree?depth=2 honours the override."""
-    resp = await client.get("/api/tags/tree", params={"depth": "2"})
-    assert resp.status_code == 200
-    assert resp.json()["depth"] == 2
 
 
 # ---------------------------------------------------------------------------
