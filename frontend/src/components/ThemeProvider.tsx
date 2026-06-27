@@ -29,7 +29,8 @@ type ThemeProviderState = {
   setTheme: (theme: Theme) => void
 }
 
-const ThemeProviderContext = createContext<ThemeProviderState>({
+// Exported so AuthContext can wrap it with server-sync setTheme.
+export const ThemeProviderContext = createContext<ThemeProviderState>({
   theme: 'system',
   setTheme: () => undefined,
 })

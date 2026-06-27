@@ -2,6 +2,50 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Phase 1b frontend identity UI decisions
+
+### ThemeProvider context wrapping for server-side theme sync
+`ThemeProvider` exports its `ThemeProviderContext` so that `AuthProvider` (which lives
+inside `ThemeProvider` in the provider chain) can re-provide it with a server-aware
+`setTheme` wrapper. When the user is authenticated, `setTheme` calls `PUT /api/me/theme`
+(fire-and-forget) in addition to updating `localStorage` and the DOM class. When not
+authenticated the original localStorage-only behavior is preserved. This avoids circular
+context dependencies and requires no changes to `ThemeToggle` — components call
+`useTheme()` and get the server-aware version transparently once `AuthProvider` wraps
+the context.
+
+Rejected alternative: pass an `onThemeChange` prop down from App.tsx. This required
+threading auth state up above `AuthProvider`, which cannot work because `AuthProvider`
+needs `QueryClientProvider` as an ancestor.
+
+### Password-reset history uses local session state (no backend list endpoint)
+`GET /api/password-reset` (a list of active tokens) is not implemented in Phase 1a.
+The admin password-reset page tracks tokens created in the current browser session in
+local React state. Per-session tracking is adequate for Phase 1 (single admin,
+short-lived resets). A full audit list is a Phase 9 item.
+
+### TanStack Table for admin users page only
+`@tanstack/react-table` is installed and used for the `/admin/users` table as specified
+in the prompt. The invites and password-reset admin pages use plain `<table>` HTML
+because their structures are simple and the table library offers no material benefit
+over styled HTML for these two pages.
+
+### `input-base` CSS component class
+A shared `input-base` Tailwind component class is defined in `src/index.css` using
+`@layer components`. This gives all form inputs a consistent look without adding
+a shadcn `<Input>` component. The style is consistent with the Phase 0 new-york/slate
+theme (same border-radius variable, border color, focus ring).
+
+### jsdom `window.matchMedia` stub added to test setup
+`ThemeProvider` calls `window.matchMedia('(prefers-color-scheme: dark)')` in a
+`useEffect`. jsdom does not implement `matchMedia`, causing all auth tests to fail.
+Added a minimal stub in `src/test/setup.ts` (matches=false) so tests run without
+importing the whole platform polyfill.
+
+### No new frontend environment variables
+All API calls use relative URLs (`/api/…`) that nginx proxies to the backend. No
+`VITE_*` vars are needed for Phase 1b. `.env.example` is unchanged.
+
 ## 2026-06-27 — Creator / designer attribution model
 
 The PRD originally had **no creator field** — only `source URL` / `source site` / `license`

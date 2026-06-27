@@ -1,9 +1,11 @@
 /**
- * AppShell — main layout: header (logo + nav + theme toggle) + page outlet.
+ * AppShell — main layout: header (logo + nav + theme toggle + user menu) + page outlet.
  */
 
-import { Outlet, NavLink } from 'react-router-dom'
+import React from 'react'
+import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { ThemeToggle } from './ThemeToggle'
+import { useAuth } from '@/context/AuthContext'
 
 /**
  * Logo using <picture> for theme-aware swap.
@@ -60,7 +62,37 @@ function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
   )
 }
 
+function UserMenu() {
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
+
+  const handleLogout = async () => {
+    await logout()
+    navigate('/login', { replace: true })
+  }
+
+  if (!user) return null
+
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-sm text-muted-foreground hidden sm:block">
+        {user.name}
+      </span>
+      <button
+        onClick={handleLogout}
+        className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+        title="Sign out"
+      >
+        Sign out
+      </button>
+    </div>
+  )
+}
+
 export function AppShell() {
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* ── Header ── */}
@@ -68,15 +100,24 @@ export function AppShell() {
         <div className="container mx-auto flex h-14 items-center px-4">
           <Logo />
 
-          {/* Nav placeholder — routes are added in Phase 3+ */}
+          {/* Nav */}
           <nav className="ml-6 flex items-center gap-4">
             <NavItem to="/">Dashboard</NavItem>
-            {/* More nav items added as pages land */}
+            <NavItem to="/settings">Settings</NavItem>
+            <NavItem to="/settings/api-keys">API keys</NavItem>
+            {isAdmin && (
+              <>
+                <NavItem to="/admin/users">Users</NavItem>
+                <NavItem to="/admin/invites">Invites</NavItem>
+                <NavItem to="/admin/password-reset">Reset</NavItem>
+              </>
+            )}
           </nav>
 
-          {/* Right side: theme toggle */}
-          <div className="ml-auto flex items-center gap-2">
+          {/* Right side: theme toggle + user menu */}
+          <div className="ml-auto flex items-center gap-4">
             <ThemeToggle />
+            <UserMenu />
           </div>
         </div>
       </header>

@@ -1,10 +1,10 @@
 ---
 name: 2026-06-27-phase-1b-frontend
-status: pending          # pending | completed | failed
+status: completed
 created: 2026-06-27
 model: sonnet            # coding against a locked plan
-completed:
-result:
+completed: 2026-06-27
+result: "Built full identity UI: API client, AuthContext with theme sync, first-run wizard, login, auth gate, logout, admin (users/invites/password-reset), settings (instance + theme), API-keys UI; tsc clean, 19/19 tests pass."
 ---
 
 # Task: Phase 1b — Identity UI (frontend)
