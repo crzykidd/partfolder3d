@@ -279,8 +279,8 @@ GPU rendering, SSO, email delivery, OctoPrint integration, federated sync).
 
 ```bash
 # (planned) clone and start the stack
-git clone https://github.com/crzykidd/partfolio3d.git
-cd partfolio3d
+git clone https://github.com/crzykidd/partfolder3d.git
+cd partfolder3d
 docker compose up -d
 ```
 
