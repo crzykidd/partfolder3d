@@ -199,8 +199,8 @@ A first-class subsystem. The filesystem is a peer source of truth: users open/ed
 
 ### 8.5 Atomic moves & rollback
 - Any operation that changes on-disk directory structure (today: only a **title rename**, §3.2) is **all-or-nothing**.
-- It either completes fully — directory renamed, sidecar + DB paths + file references updated, change-log entry written — or, on **any** failure mid-operation (file locked, directory open/in use, partial copy, permission error), it **rolls back to the exact prior state** and reports a **clear, user-facing error** with the reason.
-- **No half-moved state ever persists.** Implementation uses a journaled stage→verify→commit so an interrupted move (process crash) is detected and finished or undone on the next scan. The contract generalizes to **any** future structure-changing operation.
+- The atomic **`os.replace()` directory rename is the commit point** (the rename keeps `<key>`/`<shard>` invariant, so it's a single same-volume atomic syscall — never a copy). **Before** the commit — including a locked/in-use directory or permission error — **nothing is changed** and it reports a **clear, user-facing error** with the reason. **After** the commit, the small idempotent sidecar + DB updates **complete forward** (a failed sidecar write self-heals via the scheduled Sync job). Cross-device renames are refused, never copied.
+- **No half-moved state ever persists.** Implementation uses a filesystem **journal** (`/data/journal/<key>.json`) so an interrupted move (process crash) is detected and finished-forward or rolled back on startup/next scan. **Bulk operations are N isolated per-item transactions** — a single bad/locked item fails alone (as an Issue) and never corrupts or blocks the rest. The contract generalizes to **any** future structure-changing operation. Full spec: [`docs/atomic-moves.md`](docs/atomic-moves.md).
 
 ### 8.6 Per-item rescan
 - An item page has a **Rescan disk** button to reconcile just that one item immediately — re-hash files, re-render changed models, ingest added files, resync the sidecar — without waiting for the scheduled scan.
@@ -334,5 +334,5 @@ Print records can be created via the REST API, enabling future integrations (e.g
 
 **Remaining implementation notes:**
 - **Instance encryption key** — provisioning **done** (Phase 1: Fernet key auto-generated at first run into `DATA_DIR/config/secret.key`, 0600, never in DB; losing it means re-entering all secrets). **Rotation** remains a later utility.
-- **Move journaling / crash recovery** for an interrupted directory rename (§8.5).
+- ~~**Move journaling / crash recovery** for an interrupted directory rename (§8.5).~~ — **resolved**: filesystem journal, atomic-rename-as-commit with roll-forward, locked-file safe, bulk-isolated; see [`docs/atomic-moves.md`](docs/atomic-moves.md).
 - ~~**Title sanitization** rules for deriving `itemname` from a user-entered title~~ — **resolved** (NFKD→ASCII→lowercase→`[a-z0-9-]`, 80-char cap, collision-proofed by `<key>`): see [`docs/sidecar-schema.md`](docs/sidecar-schema.md) §2.

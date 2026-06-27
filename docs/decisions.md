@@ -2,6 +2,31 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Atomic move / move-journal approach (settled pre-Phase-2)
+
+Full spec: [`docs/atomic-moves.md`](atomic-moves.md). Settled the §8.5 journaled-rename
+mechanism before Phase 2 builds it. Driving goal (owner): **never leave the library in a
+half-applied mess** — the Manyfold-style failure where a locked file mid-bulk-op corrupts
+everything.
+
+- **Atomic `os.replace()` is the commit point.** A title rename keeps `<key>`/`<shard>`
+  invariant, so old/new dirs share a parent → the move is a single same-volume atomic
+  rename, not a copy. Cross-device (`EXDEV`) → **abort**, never copy.
+- **Locked-file protection = ordering.** The atomic rename is the *first* mutating step;
+  a locked/in-use dir makes it raise with **nothing changed** → clean abort + clear error.
+- **Roll-forward (chosen over strict rollback).** Pre-commit failures change nothing;
+  **post-commit** failures (sidecar/DB) **complete forward** (idempotent), and a failed
+  sidecar write self-heals via the scheduled Sync job. Rejected strict "reverse the rename
+  on any failure" — undoing a successful atomic op can itself fail. Slightly amends §8.5's
+  literal "roll back on any failure" wording.
+- **Journal on the filesystem** (`/data/journal/<key>.json`, fsync'd) — NOT a DB table,
+  since the DB is one of the coordinated resources and may be the inconsistent one.
+  Recovery sweep at worker startup (+ scan/Rescan): finish-forward if new dir exists, roll
+  back if old dir exists, raise an Issue if ambiguous (never guess).
+- **Bulk = N isolated per-item transactions** (no global batch lock). A bad item fails
+  alone as an Issue; committed/pending siblings are untouched. This is the core anti-mess
+  guarantee.
+
 ## 2026-06-27 — Sidecar schema & title sanitization (settled pre-Phase-2)
 
 Full spec: [`docs/sidecar-schema.md`](sidecar-schema.md). Settled the on-disk formats
