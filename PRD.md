@@ -90,9 +90,10 @@ The catalog is **fully shared**: all users see the same items, tags, files, and 
 - **PasswordResetToken** — user, token, expires_at (default 1 day), used, revoked.
 - **AiProvider** — provider (claude/openai/ollama), endpoint, model, api_key (encrypted), enabled.
 - **Library** — id, name, mount path, enabled.
-- **Item** — id, key, title, slug, description, source URL, source site, license, default image, library, dir path, file inventory + hashes, schema_version, timestamps.
+- **Item** — id, key, title, slug, description, source URL, source site, license, **creator (optional → Creator)**, default image, library, dir path, file inventory + hashes, schema_version, timestamps.
 - **File** — belongs to Item; filename, type, size, hash, mtime, role (model/zip/image/render/gcode/photo/other).
 - **Image** — belongs to Item; path, source (scraped/uploaded), is_default, order.
+- **Creator** — the model's designer/author. id, name, profile_url (optional), source_site (optional), `user_id` (optional FK to **User** — set when the creator is a local user who **self-designed** the item). **Optional and best-effort on an Item:** auto-filled from scraped source metadata when the site exposes it, otherwise set manually or left blank — never required. Deduplicated/mergeable like **Tag** (same designer across sites → one Creator). Powers **browse-by-creator** and the per-user **"everything I have created"** view (Items whose Creator is linked to the current user). Marking an item as your own design (import wizard / Add Asset) binds its Creator to **your** user account.
 - **Tag** — canonical name, optional category/namespace, popularity count, status (active/pending), created_by.
 - **TagAlias** — alias string → canonical Tag (for reconciling source-site/AI tags).
 - **ItemTag** — Item ↔ Tag association.
@@ -138,7 +139,7 @@ The catalog is **fully shared**: all users see the same items, tags, files, and 
 
 ### 6.1 Intake methods
 1. **Inbox folder drop (filesystem).** User creates a folder (e.g. "Ladybug Keychain") under the inbox, drops in model files + a URL/link file + optionally a **sidecar from another instance**. A watcher/scan detects it and queues an import wizard task. A present sidecar is used to pre-fill and match.
-2. **"Add Asset" button (web wizard).** Drag-drop file(s) to upload. Fields: optional source URL, required tags, optional description/license/images.
+2. **"Add Asset" button (web wizard).** Drag-drop file(s) to upload. Fields: optional source URL, required tags, optional description/license/images, optional **creator** (or a **"this is my own design"** toggle that attributes it to the current user — §4 Creator).
 3. **Source URL only.** Attempt to fetch metadata/images (and files where permitted). If the site needs auth, trigger **site setup** (see 6.3).
 4. **Import from another instance's share link.** Paste a share link → download all assets/metadata and reconcile against your library settings & canonical tags.
 
@@ -146,7 +147,7 @@ The catalog is **fully shared**: all users see the same items, tags, files, and 
 Both intake paths — manual **Add Asset** and **inbox-folder** ingest — run as a **background job that drives a completion wizard** (the inbox case enqueues a job that surfaces the wizard rather than auto-finalizing).
 - **Suggests a title** (from the inbox folder name, sidecar, scraped source, or filename) that the user can **edit/correct before commit**; the final, user-confirmed title becomes the on-disk `itemname` and the URL slug. The item directory is **not created/named until the wizard is committed**, so a corrected title yields the right path the first time.
 - Detects/loads sidecar if present.
-- Scrapes source URL for description, images, tags, license where permitted.
+- Scrapes source URL for description, images, tags, license, **and creator/designer** where permitted (reconciled/deduped against existing Creators; §4).
 - Generates render thumbnail(s) for mesh files (STL/3MF/OBJ now).
 - Lets user scroll images and **set a default image**.
 - Reconciles tags (§5.3); enforces required tags.
@@ -252,11 +253,12 @@ Print records can be created via the REST API, enabling future integrations (e.g
 
 - **Search** across tags, titles, descriptions (PostgreSQL full-text).
 - **Tag list** with click-to-search; filter/stack multiple tags; browse via virtual tag tree.
+- **Creator** — click a creator to see all their models; a per-user **"My Creations"** view lists everything you designed yourself (Items whose Creator is linked to your account; §4).
 - **Two catalog views:**
   - **Table view** — small default-image icon + key details per row.
   - **Grid view** — larger image cards.
 - **Favorites** — star/unstar items; filter and sort the catalog by your favorites (per-user).
-- **Item page** — image carousel (scroll, set default), full metadata, tags, source link, license, full dir path + prefix-rewrite + copy button, downloads, print history, share-link control.
+- **Item page** — image carousel (scroll, set default), full metadata, tags, **creator (linked)**, source link, license, full dir path + prefix-rewrite + copy button, downloads, print history, share-link control.
 - **Theme:** dark / light / **system default**. System default applied first; user can override and the choice persists.
 - Crisp, modern, fast.
 
@@ -310,6 +312,7 @@ Print records can be created via the REST API, enabling future integrations (e.g
 - Symlink-based tag-path mirror on disk (revisit if filesystem-tag browsing is desired).
 - Granular per-library ACLs / per-user private libraries.
 - Collections/sets per user (favorites themselves ship in v1).
+- **Per-user public "maker profile" page** — browse-by-creator + the per-user "My Creations" view ship in v1 (§4/§12), but a dedicated public profile page per maker is deferred.
 - Open public registration (toggle could be added later).
 - **SSO (OIDC/SAML)** — auth layer is designed to accept it later.
 - **Email delivery** of invites / password-resets (SMTP).

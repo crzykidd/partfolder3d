@@ -2,6 +2,29 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Creator / designer attribution model
+
+The PRD originally had **no creator field** — only `source URL` / `source site` / `license`
+on an Item — so "who designed this" was unrepresentable. Closed before Phase 2 builds the
+Item model.
+
+**Decision:** model the designer as a **normalized `Creator` entity** (like Tag), not a
+plain string. `Creator` = name, optional `profile_url`, optional `source_site`, and an
+**optional `user_id` FK to User**. It is **optional and best-effort** on an Item (never
+required): auto-filled from **scraped** source metadata when available, else manual or
+blank, and deduped/mergeable across sites.
+
+**Self-designed = per-user.** A "this is my own design" toggle binds the Item's Creator to
+the **importing user's** account (rejected: a single instance-wide "self" identity). This
+directly powers the headline requirement the user asked for — **"show me everything I have
+created"** = Items whose Creator is linked to the current user — and gives browse-by-creator
+for external designers for free.
+
+**Phasing:** `Creator` model + `Item.creator` + sidecar field in **Phase 2**;
+browse-by-creator + the **"My Creations"** view in **Phase 3**; creator scrape + self-toggle
+in **Phase 5** (import). A dedicated public **maker-profile page is out of scope for v1**
+(PRD §17). Recorded in `PRD.md` (§4/§6/§12/§17) and `docs/build-plan.md` (Phases 2/3/5).
+
 ## 2026-06-27 — Phase 1 identity layer decisions
 
 ### API-key storage scheme

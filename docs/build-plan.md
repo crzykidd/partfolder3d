@@ -86,7 +86,8 @@ revocable, history), **password reset** (1-day); settings framework; per-user th
 
 **Goal:** items exist on disk + DB with portable sidecars and a safe rename.
 
-**Models:** Library, Item, File, Image, Tag, TagAlias, ItemTag.
+**Models:** Library, Item, File, Image, **Creator** (optional designer; nullable `user_id` link
+for self-designed; deduped/mergeable like Tag — §4), Tag, TagAlias, ItemTag.
 **Deliverables:** Library mounts; **storage path layer** (shard, short-hash key gen,
 `itemname-<key>` dirs, title sanitization); **YAML sidecar read/write** (`schema_version`);
 file inventory + hashing; **atomic journaled move/rename engine** (§8.5) used by title
@@ -100,7 +101,8 @@ atomic with rollback; renaming preserves key/links.
 
 **Deliverables:** Postgres full-text search (titles/desc/tags); tag list + click-to-search;
 **virtual tag tree** (popularity, depth setting); **table + grid views**; **favorites**
-(star/filter/sort); **item page** (carousel + set-default, metadata, tags, source/license,
+(star/filter/sort); **browse-by-creator + per-user "My Creations" view** (§4/§12);
+**item page** (carousel + set-default, metadata, tags, creator, source/license,
 full path + prefix-rewrite + copy, downloads incl. **queued ZIP** with ~1-day/invalidate
 retention).
 **Exit:** browse/search/filter; open an item; set default image; download a file and a ZIP.
@@ -120,7 +122,8 @@ jobs view** (last/next/running, run-now); **mesh thumbnail rendering** (STL/3MF/
 
 **Deliverables:** **inbox folder watcher/scan**; **"Add Asset" upload**; **import wizard
 job** (title-correctable, sidecar pre-fill/match); **tag reconciliation** (existing/alias
-match + required tags; manual path always works); **URL scrape** (metadata/images) +
+match + required tags; manual path always works); **creator capture** (scraped/deduped, or
+a "my own design" toggle → current user); **URL scrape** (metadata/images/creator) +
 **site-capabilities** table + site-setup (token/manual); render on import. *(Import-from-
 another-instance share link is stubbed here, completed in Phase 7.)*
 **Exit:** drop a folder OR use Add Asset → wizard → committed item with tags, images,
