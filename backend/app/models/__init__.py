@@ -7,6 +7,8 @@ from .ai_provider import AiProvider, AiProviderType
 from .api_key import ApiKey
 from .base import Base
 from .creator import Creator
+from .download_bundle import DownloadBundle
+from .favorite import Favorite
 from .file import File, FileRole
 from .image import Image, ImageSource
 from .invite import Invite, InviteStatus
@@ -42,4 +44,7 @@ __all__ = [
     "TagStatus",
     "TagAlias",
     "ItemTag",
+    # Phase 3
+    "Favorite",
+    "DownloadBundle",
 ]

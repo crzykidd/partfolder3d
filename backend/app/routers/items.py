@@ -1,11 +1,20 @@
 """Item CRUD endpoints.
 
-POST   /api/items              → create item (auth required)
-GET    /api/items              → list items (paginated)
-GET    /api/items/{key}        → item detail
-PATCH  /api/items/{key}        → update metadata; title change = atomic rename
-DELETE /api/items/{key}        → move to trash (auth required)
-POST   /api/items/{key}/rescan → re-inventory + re-sync sidecar (auth required)
+POST   /api/items                       → create item (auth required)
+GET    /api/items                       → list items (paginated, searchable, filterable)
+GET    /api/items/{key}                 → item detail
+PATCH  /api/items/{key}                 → update metadata; title change = atomic rename
+DELETE /api/items/{key}                 → move to trash (auth required)
+POST   /api/items/{key}/rescan          → re-inventory + re-sync sidecar (auth required)
+PATCH  /api/items/{key}/default-image   → set default image (Phase 3)
+
+Phase 3 additions to GET /api/items:
+  q          — full-text search (title + description + tags via tsvector + GIN index)
+  tags       — AND-filter by tag names (repeat param)
+  creator_id — filter by creator
+  favorited  — if true, only items starred by current user (requires auth)
+  sort       — created_at_desc (default), created_at_asc, updated_at_desc,
+               title_asc, title_desc, relevance (only with q)
 
 Auth:  item writes require get_current_user.
        No admin-only gate on item operations (all authenticated users can write).
@@ -19,14 +28,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from ..auth.deps import csrf_protect, get_current_user, get_db
+from ..auth.deps import csrf_protect, get_current_user, get_db, get_optional_user
 from ..models.creator import Creator
+from ..models.favorite import Favorite
 from ..models.file import File
 from ..models.image import Image
 from ..models.item import Item
@@ -117,6 +128,10 @@ class TagOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SetDefaultImageRequest(BaseModel):
+    image_id: int
+
+
 class ItemSummary(BaseModel):
     id: int
     key: str
@@ -126,11 +141,24 @@ class ItemSummary(BaseModel):
     dir_path: str
     created_at: datetime
     updated_at: datetime
+    # Phase 3 additions: enriched catalog data (default None for backward compat)
+    default_image_path: str | None = None
+    creator_name: str | None = None
+    tag_names: list[str] = []
+    favorited: bool = False
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": False}
 
 
-class ItemDetail(ItemSummary):
+class ItemDetail(BaseModel):
+    id: int
+    key: str
+    title: str
+    slug: str
+    library_id: int
+    dir_path: str
+    created_at: datetime
+    updated_at: datetime
     description: str | None
     source_url: str | None
     source_site: str | None
@@ -180,6 +208,36 @@ async def _attach_tags(db: AsyncSession, item: Item, tag_names: list[str]) -> No
         tag = await _get_or_create_tag(db, name)
         db.add(ItemTag(item_id=item.id, tag_id=tag.id))
     await db.flush()
+
+
+async def _update_search_vector(
+    db: AsyncSession,
+    item_id: int,
+    title: str,
+    description: str | None,
+    tag_names: list[str],
+) -> None:
+    """Maintain the items.search_vector tsvector column.
+
+    The vector is built from title (weighted A), description (weighted B), and
+    tag names (weighted C) so title matches rank highest.  Called after any write
+    that changes these fields.
+
+    Uses raw SQL to avoid SQLAlchemy type-mapping complexity with TSVECTOR.
+    """
+    parts: list[str] = [title]
+    if description:
+        parts.append(description)
+    if tag_names:
+        parts.append(" ".join(tag_names))
+    combined = " ".join(parts)
+    await db.execute(
+        sa.text(
+            "UPDATE items SET search_vector = to_tsvector('english', :text)"
+            " WHERE id = :id"
+        ),
+        {"text": combined, "id": item_id},
+    )
 
 
 async def _build_sidecar_data(
@@ -403,38 +461,184 @@ async def create_item(
     )
     images = list(img_result.scalars().all())
 
+    # Update full-text search vector
+    await _update_search_vector(
+        db, item.id, item.title, item.description, [t.name for t in tags]
+    )
+
     return _build_item_detail(item, tags, file_objs, images)
+
+
+_VALID_SORTS = {
+    "created_at_desc",
+    "created_at_asc",
+    "updated_at_desc",
+    "title_asc",
+    "title_desc",
+    "relevance",
+}
+
+
+def _sort_clause(sort: str, q: str | None) -> Any:
+    """Return the ORDER BY clause for the given sort key."""
+    if sort == "relevance" and q:
+        tsq = func.websearch_to_tsquery(sa.literal("english"), q)
+        return func.ts_rank(Item.search_vector, tsq).desc()
+    if sort == "created_at_asc":
+        return Item.created_at.asc()
+    if sort == "updated_at_desc":
+        return Item.updated_at.desc()
+    if sort == "title_asc":
+        return Item.title.asc()
+    if sort == "title_desc":
+        return Item.title.desc()
+    return Item.created_at.desc()  # default: created_at_desc
 
 
 @router.get("", response_model=PaginatedItems)
 async def list_items(
     db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User | None, Depends(get_optional_user)],
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=20, ge=1, le=100),
     library_id: int | None = Query(default=None),
+    # Phase 3 search / filter params
+    q: str | None = Query(default=None, description="Full-text search (title/description/tags)"),
+    tags: list[str] | None = Query(
+        default=None,
+        description="AND-filter by tag names (repeat for multiple)",
+    ),
+    creator_id: int | None = Query(default=None, description="Filter by creator id"),
+    favorited: bool | None = Query(
+        default=None, description="If true, only return current user's favorites"
+    ),
+    sort: str = Query(
+        default="created_at_desc",
+        description=f"Sort order: {', '.join(sorted(_VALID_SORTS))}",
+    ),
 ) -> PaginatedItems:
-    """List items (paginated).  Optionally filter by library."""
-    query = select(Item)
+    """List items (paginated, searchable, filterable).
+
+    Filters are AND-combined.  `favorited=true` requires authentication; without it
+    the filter is ignored.  `sort=relevance` requires `q`; without it falls back to
+    `created_at_desc`.
+    """
+    if sort not in _VALID_SORTS:
+        sort = "created_at_desc"
+
+    query = select(Item).options(selectinload(Item.creator))
     if library_id is not None:
         query = query.where(Item.library_id == library_id)
 
-    total_result = await db.execute(
-        select(func.count()).select_from(query.subquery())
-    )
+    # Full-text search
+    params: dict[str, Any] = {}
+    if q:
+        query = query.where(
+            sa.text(
+                "items.search_vector @@ websearch_to_tsquery('english', :fts_q)"
+            ).bindparams(sa.bindparam("fts_q", q))
+        )
+        params["fts_q"] = q
+
+    # Tag filter (AND semantics using HAVING COUNT)
+    if tags:
+        clean_tags = [t.strip() for t in tags if t.strip()]
+        if clean_tags:
+            tag_subq = (
+                select(ItemTag.item_id)
+                .join(Tag, Tag.id == ItemTag.tag_id)
+                .where(Tag.name.in_(clean_tags))
+                .group_by(ItemTag.item_id)
+                .having(func.count(sa.func.distinct(Tag.id)) == len(clean_tags))
+            ).scalar_subquery()
+            query = query.where(Item.id.in_(tag_subq))
+
+    # Creator filter
+    if creator_id is not None:
+        query = query.where(Item.creator_id == creator_id)
+
+    # Favorites filter (only if user is authenticated)
+    if favorited is True and user is not None:
+        query = query.join(Favorite, sa.and_(
+            Favorite.item_id == Item.id,
+            Favorite.user_id == user.id,
+        ))
+
+    # Count (same filters, no pagination)
+    count_q = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(count_q, params)
     total = total_result.scalar_one()
 
     offset = (page - 1) * per_page
     items_result = await db.execute(
-        query.order_by(Item.created_at.desc()).offset(offset).limit(per_page)
+        query.order_by(_sort_clause(sort, q)).offset(offset).limit(per_page),
+        params,
     )
     items = list(items_result.scalars().all())
 
-    return PaginatedItems(
-        total=total,
-        page=page,
-        per_page=per_page,
-        items=items,  # type: ignore[arg-type]
+    if not items:
+        return PaginatedItems(total=total, page=page, per_page=per_page, items=[])
+
+    item_ids = [i.id for i in items]
+
+    # Batch-load default images
+    img_result = await db.execute(
+        select(Image).where(Image.item_id.in_(item_ids), Image.is_default.is_(True))
     )
+    default_imgs: dict[int, str] = {
+        img.item_id: img.path for img in img_result.scalars().all()
+    }
+    missing_ids = [iid for iid in item_ids if iid not in default_imgs]
+    if missing_ids:
+        fb_result = await db.execute(
+            select(Image)
+            .where(Image.item_id.in_(missing_ids))
+            .order_by(Image.item_id, Image.order)
+        )
+        for img in fb_result.scalars().all():
+            if img.item_id not in default_imgs:
+                default_imgs[img.item_id] = img.path
+
+    # Batch-load tag names
+    tag_result = await db.execute(
+        select(Tag.name, ItemTag.item_id)
+        .join(ItemTag, Tag.id == ItemTag.tag_id)
+        .where(ItemTag.item_id.in_(item_ids))
+    )
+    tags_by_item: dict[int, list[str]] = {}
+    for row in tag_result.all():
+        tags_by_item.setdefault(row[1], []).append(row[0])
+
+    # Batch-load favorites for authenticated user
+    favorited_ids: set[int] = set()
+    if user is not None:
+        fav_result = await db.execute(
+            select(Favorite.item_id).where(
+                Favorite.user_id == user.id,
+                Favorite.item_id.in_(item_ids),
+            )
+        )
+        favorited_ids = {row[0] for row in fav_result.all()}
+
+    items_out = [
+        ItemSummary(
+            id=item.id,
+            key=item.key,
+            title=item.title,
+            slug=item.slug,
+            library_id=item.library_id,
+            dir_path=item.dir_path,
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+            default_image_path=default_imgs.get(item.id),
+            creator_name=item.creator.name if item.creator else None,
+            tag_names=tags_by_item.get(item.id, []),
+            favorited=item.id in favorited_ids,
+        )
+        for item in items
+    ]
+
+    return PaginatedItems(total=total, page=page, per_page=per_page, items=items_out)
 
 
 @router.get("/{key}", response_model=ItemDetail)
@@ -586,6 +790,12 @@ async def update_item(
         ) if item.creator_id else None
         item.creator = creator_result.scalar_one_or_none() if creator_result else None
 
+    # Update full-text search vector if any search-relevant field changed
+    if needs_sidecar_refresh:
+        await _update_search_vector(
+            db, item.id, item.title, item.description, [t.name for t in tags]
+        )
+
     return _build_item_detail(item, tags, files, images)
 
 
@@ -683,5 +893,69 @@ async def rescan_item(
         select(Image).where(Image.item_id == item.id).order_by(Image.order)
     )
     images = list(img_result.scalars().all())
+
+    return _build_item_detail(item, tags, files, images)
+
+
+@router.patch("/{key}/default-image", response_model=ItemDetail)
+async def set_default_image(
+    key: str,
+    body: SetDefaultImageRequest,
+    _user: Annotated[User, Depends(get_current_user)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, Any]:
+    """Set the default image for an item (PRD §12 carousel set-default).
+
+    The image must belong to this item.  Clears is_default on all other images
+    for the item and updates Item.default_image_id.
+    """
+    result = await db.execute(
+        select(Item).options(selectinload(Item.creator)).where(Item.key == key)
+    )
+    item = result.scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found.")
+
+    # Verify the requested image belongs to this item
+    img_result = await db.execute(
+        select(Image).where(Image.id == body.image_id, Image.item_id == item.id)
+    )
+    image = img_result.scalar_one_or_none()
+    if image is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Image not found or does not belong to this item.",
+        )
+
+    # Clear existing is_default flags
+    await db.execute(
+        sa.update(Image).where(Image.item_id == item.id).values(is_default=False)
+    )
+    # Set new default
+    await db.execute(
+        sa.update(Image).where(Image.id == body.image_id).values(is_default=True)
+    )
+    item.default_image_id = body.image_id
+    item.updated_at = datetime.now(UTC)
+    await db.flush()
+
+    # Resync sidecar with new default
+    await _write_item_sidecar(db, item)
+
+    # Load response data
+    tag_result2 = await db.execute(
+        select(Tag).join(ItemTag, Tag.id == ItemTag.tag_id)
+        .where(ItemTag.item_id == item.id)
+    )
+    tags = list(tag_result2.scalars().all())
+
+    file_result3 = await db.execute(select(File).where(File.item_id == item.id))
+    files = list(file_result3.scalars().all())
+
+    img_result2 = await db.execute(
+        select(Image).where(Image.item_id == item.id).order_by(Image.order)
+    )
+    images = list(img_result2.scalars().all())
 
     return _build_item_detail(item, tags, files, images)

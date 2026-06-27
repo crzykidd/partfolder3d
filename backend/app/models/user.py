@@ -26,6 +26,9 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(1024), nullable=False)
     # theme_pref: "system" | "light" | "dark"
     theme_pref: Mapped[str] = mapped_column(String(16), nullable=False, default="system")
+    # Per-user path prefix for path display rewrite (PRD §3.3). e.g. "C:\prints\"
+    # The API returns the canonical dir_path; the UI rewrites it using this prefix.
+    path_prefix: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

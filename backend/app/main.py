@@ -3,6 +3,8 @@
 Phase 1: identity layer added (encryption key, models, auth, sessions, CSRF,
          invites, password reset, settings, API keys, first-run wizard).
 Phase 2: libraries, storage, sidecar, item core added.
+Phase 3: catalog UI backend — search, favorites, tag browse, creator browse,
+         downloads (single file + queued ZIP), set-default-image, path-prefix.
 """
 
 import logging
@@ -68,11 +70,15 @@ app.add_middleware(
 from .routers import (  # noqa: E402  # noqa: E402
     api_keys,
     auth,
+    creators,
+    downloads,
     invites,
     items,
     libraries,
+    me,
     password_reset,
     setup,
+    tags,
     users,
 )
 from .routers import settings as settings_router  # noqa: E402
@@ -86,6 +92,11 @@ app.include_router(settings_router.router)
 app.include_router(api_keys.router)
 app.include_router(libraries.router)
 app.include_router(items.router)
+# Phase 3
+app.include_router(tags.router)
+app.include_router(creators.router)
+app.include_router(me.router)
+app.include_router(downloads.router)
 
 
 # ---------------------------------------------------------------------------

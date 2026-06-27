@@ -2,6 +2,84 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Phase 3a backend implementation decisions
+
+### Full-text search via application-maintained TSVECTOR column
+`items.search_vector TSVECTOR` + GIN index; updated via raw SQL (`to_tsvector('english', ...)`)
+after every create/update in `_update_search_vector()`.  Queried with `websearch_to_tsquery('english', ...)`.
+Rejected: DB trigger (harder to test, more migration ceremony); generated column (not
+supported by asyncpg in SQLAlchemy's async DDL path without extensive hacks); real-time
+document indexing per-request (too slow).  The application-side update means the vector
+is always current as of the last successful write; an async task would add latency and
+complexity for no material gain at Phase 3 scale.
+
+### TSVECTOR mapped as `Mapped[Any]` in SQLAlchemy ORM
+SQLAlchemy 2.0 has no built-in `TSVECTOR` type for the `Mapped[...]` annotation.  Rather
+than defining a custom `TypeDecorator`, the column is declared `Mapped[Any]` with
+`TSVECTOR` from `sqlalchemy.dialects.postgresql` as the underlying column type.  All
+reads and writes go through raw `sa.text()` calls so the type is only needed for DDL
+generation; the `Any` annotation satisfies mypy without confusion.
+
+### Tag tree derived at request time from category namespace
+The virtual tag tree (PRD §5.2) is computed in `GET /api/tags/tree` by grouping active
+tags by the namespace part of `tag.category` (e.g. `"type:keychain"` → namespace `"type"`
+→ leaf label `"keychain"`).  No `TagNode` table is maintained.  Rationale: the tree
+changes only when tags are added/renamed/recategorized, which is infrequent; generating
+it per-request on the active tag set is cheap and always consistent.  Rejected: storing a
+precomputed tree in the DB (extra table, cache-invalidation complexity for negligible
+gain); reading the category hierarchy from a static config file (out of sync with the DB
+Tag table).
+
+### ZIP bundle tracking via DownloadBundle table + inventory hash invalidation
+`download_bundles` tracks arq-built ZIPs (UUID PK, `status`, `bundle_path`,
+`inventory_hash`, `expires_at`).  On `POST /zip`, a fresh inventory hash is computed from
+the sorted `path:sha256:size` fingerprint of all `File` rows.  A non-expired `pending`
+bundle is reused (the client just polls the existing ID).  A `ready` bundle is reused if
+and only if its `inventory_hash` matches the current hash — files changing invalidates it
+automatically without a background watcher.  Expiry is ~24 h.  Rejected: storing the ZIP
+on the item path (clutters the asset directory, confuses the file scanner); perpetual
+bundles (user expects fresh downloads after file edits); Redis-only tracking (not durable
+across worker restarts).
+
+### Download streaming via starlette FileResponse (no aiofiles)
+`GET /api/items/{key}/files/{path}` and `GET /api/items/{key}/zip/{id}?download=true`
+use starlette's built-in `FileResponse`, which streams via its own async file reader.
+`aiofiles` was not added to `requirements.txt` — starlette's own streaming is the
+idiomatic approach and avoids an extra dependency.  Path traversal is blocked by
+`Path.resolve()` + `relative_to()` in the handler.
+
+### Per-user `path_prefix` stored as a nullable VARCHAR on the User row
+PRD §3.3 requires a user-configurable prefix that is prepended to the displayed
+`dir_path` so paths match the user's local mount.  Stored as `users.path_prefix
+VARCHAR(1024)` rather than a Setting row keyed by user id.  Rationale: it is a
+per-user attribute (not an instance setting); direct FK-free column avoids joins;
+max 1024 chars covers any realistic filesystem path.
+
+### Phase 3a/3b split — backend only this pass
+The full phase (§1–§9 in the handoff) requires TanStack Virtual (not yet in
+`package.json`), a virtualized catalog grid with item cards, an image carousel,
+ZIP-download polling state machine, and vitest tests for complex client state.
+After completing all backend endpoints with 157 passing tests, the frontend is deferred
+to a dedicated 3b handoff (`prompts/2026-06-27-phase-3b-catalog-ui.md`) on Sonnet.
+
+### Test fix: `test_my_creations_with_linked_creator` uses shared test session
+The test patches `Creator.user_id` to link a creator to the current user.  The initial
+implementation used a fresh `SessionLocal()` that committed independently of the
+rolled-back test transaction.  Because the test's Creator row only exists within the
+test's in-progress transaction (NullPool, rolled-back at teardown), the independent
+`SessionLocal` UPDATE would target a row that does not exist in the committed DB state.
+Fixed by accepting `db_session: AsyncSession` as a fixture parameter and doing the
+UPDATE within the same transaction; `db_session.expire_all()` is called before the GET
+so SQLAlchemy re-reads from the DB instead of returning the cached pre-update state.
+
+### `_batch_enrich` avoids ORM relationship access to prevent async lazy-load errors
+In SQLAlchemy 2.0 async, accessing a relationship attribute (`item.creator`) triggers a
+lazy SQL load.  Lazy loads are disallowed in an async context (they require a greenlet)
+unless the relationship was eagerly loaded.  `_batch_enrich` (in `me.py`) was refactored
+to batch-query creator names via `Creator.id.in_(creator_ids)` instead of accessing
+`item.creator` — this is correct in any async route and requires no `selectinload`
+annotation on the calling query.
+
 ## 2026-06-27 — Phase 2 implementation decisions
 
 ### Key alphabet and length

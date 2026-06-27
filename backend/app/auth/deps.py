@@ -107,6 +107,21 @@ async def get_current_user(
 # ---------------------------------------------------------------------------
 
 
+async def get_optional_user(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> User | None:
+    """Like get_current_user but returns None instead of raising 401.
+
+    Used on GET endpoints that can optionally personalise responses (e.g.
+    returning a `favorited` flag) when a user is logged in.
+    """
+    try:
+        return await get_current_user(request, db)
+    except HTTPException:
+        return None
+
+
 async def require_admin(
     user: Annotated[User, Depends(get_current_user)],
 ) -> User:

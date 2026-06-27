@@ -5,8 +5,10 @@ The item's stable on-disk identity is `<slug>-<key>/`; `key` never changes.
 """
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -39,6 +41,10 @@ class Item(Base):
     # Absolute path to the item directory inside its library mount.
     dir_path: Mapped[str] = mapped_column(String(2048), nullable=False)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Full-text search vector (title + description + tag names).
+    # Maintained application-side; updated whenever title/description/tags change.
+    # GIN index added in migration 0004.
+    search_vector: Mapped[Any] = mapped_column(TSVECTOR, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
