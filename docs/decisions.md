@@ -2,7 +2,7 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
-## 2026-06-27 — CI workflows added with tolerant-bootstrap guards; required-status-checks deferred
+## 2026-06-27 — CI workflows added with tolerant-bootstrap guards; main required-checks wired
 
 - Added four GitHub Actions workflows (`.github/workflows/ci.yml`, `codeql.yml`,
   `publish.yml`, `retention.yml`) modeled on the `filament-bridge` project's proven
@@ -12,14 +12,15 @@ ADR-style log of non-obvious decisions, newest at top.
   empty repo. Each guard is a placeholder to be removed per-job as scaffolding adds the
   corresponding piece (`backend/`, `frontend/`, `docker-compose.yml`, `Dockerfile`,
   alembic, etc.). The `publish.yml` Dockerfile guard works the same way.
-- **Required-status-checks deferred:** branch-protection required-check wiring is
-  intentionally deferred to after the first CI run completes and the check-run context
-  names appear in GitHub's branch-protection UI. The orchestrator handles this wiring
-  post-first-run.
-- CI job names / check-run contexts for branch-protection wiring: `CI / Lint`,
-  `CI / Config validation`, `CI / Migration check`, `CI / Compose validation`,
-  `CI / Image build`, `CI / Test`, `CodeQL / Analyze (python)`,
-  `CodeQL / Analyze (javascript-typescript)`.
+- **Required-status-checks wired (post-first-run):** after the first `dev` push CI run
+  passed green, `main` branch protection was set (non-strict) to require the **6 CI
+  checks**: `CI / Lint`, `CI / Config validation`, `CI / Migration check`,
+  `CI / Compose validation`, `CI / Image build`, `CI / Test`.
+- **CodeQL required-checks deferred to scaffolding:** `CodeQL / Analyze (python)` and
+  `CodeQL / Analyze (javascript-typescript)` are intentionally **not** required yet —
+  CodeQL errors with "no source code seen" on an empty tree, which would block an early
+  PR to `main`. They get added to required checks once real backend + frontend source
+  exists. CodeQL still runs on `main` PR/push from now on (just not gating).
 
 ## 2026-06-27 — Adopt three engineering standards; skip sandbox; autonomous dispatch model
 
