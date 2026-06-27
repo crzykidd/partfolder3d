@@ -5,13 +5,21 @@ DATABASE_URL env var overrides the ini-file sqlalchemy.url.
 
 import asyncio
 import os
+import sys
 from logging.config import fileConfig
+from pathlib import Path
 
-from sqlalchemy import pool
-from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
+# Ensure the backend/ package root is on sys.path so `from app.models import Base`
+# works regardless of where alembic is invoked from.
+_backend_root = str(Path(__file__).resolve().parent.parent)
+if _backend_root not in sys.path:
+    sys.path.insert(0, _backend_root)
 
-from alembic import context
+from sqlalchemy import pool  # noqa: E402
+from sqlalchemy.engine import Connection  # noqa: E402
+from sqlalchemy.ext.asyncio import async_engine_from_config  # noqa: E402
+
+from alembic import context  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Alembic Config
@@ -21,10 +29,10 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Import Base.metadata here once models are defined (Phase 1+).
-# from app.models import Base
-# target_metadata = Base.metadata
-target_metadata = None
+# Import Base.metadata so autogenerate sees all Phase 1 models.
+from app.models import Base  # noqa: E402
+
+target_metadata = Base.metadata
 
 
 # ---------------------------------------------------------------------------

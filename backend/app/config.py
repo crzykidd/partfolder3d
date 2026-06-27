@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     # ---- API / CORS ----
     ALLOWED_ORIGINS: list[str] = ["http://localhost:8973", "http://localhost:5173"]
 
+    # ---- Session cookies ----
+    # Set to False for local http:// dev (Docker or plain uvicorn).
+    # MUST be True in production (https only).
+    # See docs/decisions.md for the cookie-Secure toggle decision.
+    COOKIE_SECURE: bool = True
+
     # ---- Debug ----
     DEBUG: bool = False
 

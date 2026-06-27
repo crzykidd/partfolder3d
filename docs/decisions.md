@@ -2,6 +2,84 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Phase 1 identity layer decisions
+
+### API-key storage scheme
+Per-user API keys are stored as a **SHA-256 hex digest** of the raw key only (no
+Fernet-encrypted copy).  Rationale: the PRD specifies "encrypted at rest" and
+"once-only display" (the user sees the raw key once at creation; the app never
+re-shows it).  Storing only a hash satisfies "never cleartext in DB" and is
+strictly more secure than encryption — the raw key is irrecoverable even if the
+instance key is leaked, because SHA-256 is one-way.  Storing an encrypted copy
+would enable re-display (security regression vs. the once-only model) for no
+functional gain.  The deviation from "encrypted" → "hashed" for this one field is
+documented here and in `backend/app/models/api_key.py`.
+
+### Session store choice (DB vs Redis)
+Server-side sessions are stored in the **`user_sessions` Postgres table** rather
+than Redis.  Redis is already present for the arq job queue but introducing a
+Redis dependency for session management adds operational cost (one more
+service to crash, back up, and monitor) with minimal benefit at Phase 1 scale.
+DB-backed sessions have known good performance for ≤hundreds of concurrent users,
+and a `TIMESTAMPTZ expires_at` column + a periodic cleanup job (Phase 9) keep the
+table small.  The session module is self-contained; if Redis sessions are needed
+later, only `auth/sessions.py` changes.
+
+### Cookie-Secure dev toggle
+`COOKIE_SECURE` (default `True`) controls the `Secure` flag on both the session
+and CSRF cookies.  Set it to `False` in `.env` when running over plain
+`http://` locally (the Docker dev stack).  Must be `True` in any TLS deployment.
+Without this toggle, browsers silently discard cookies on `http://` origins, making
+local dev non-functional.  The toggle is documented in `.env.example`.
+
+### Argon2id parameters
+`passlib.CryptContext` with `argon2__type="ID"`, `time_cost=2`,
+`memory_cost=65536` (64 MiB), `parallelism=2`, `hash_len=32`, `salt_len=16`.
+These are moderate defaults that balance security and latency for a personal/team
+server.  They meet or exceed the OWASP-recommended minimums for argon2id.
+Passlib's `needs_update()` path allows transparent re-hash if params are raised
+in a future version.  All hashing/verification goes through
+`backend/app/auth/password.py` — no direct passlib calls elsewhere.
+
+### Encryption-key handling
+The Fernet instance key is auto-generated at first run into
+`DATA_DIR/config/secret.key` (mode 0600) and **never stored in the DB or repo**.
+`crypto.ensure_key()` is called once in the FastAPI lifespan so the key always
+exists before the first request.  Tests patch `DATA_DIR` to a per-test temp dir
+and reset the `lru_cache` so each test gets its own isolated key.
+**Key rotation is a later utility** — `crypto.py` leaves a clear seam:
+`encrypt()`/`decrypt()` callers never touch the key directly, so a future
+`rotate()` can swap `_get_fernet()` transparently.
+Losing the key means re-entering all encrypted secrets in the DB (AI provider
+keys, etc.) — no key escrow is provided (per PRD §18).
+
+### Alembic migration: raw SQL to avoid SQLAlchemy enum auto-create
+Phase 1's migration (`0002_phase1_identity.py`) uses `op.execute(sa.text(...))`
+throughout rather than the usual `op.create_table(...)` with `sa.Enum(...)`.
+Reason: SQLAlchemy 2.x + asyncpg's `named_types` machinery attempts to issue
+`CREATE TYPE` even when `create_type=False` is passed to `sa.Enum(...)` inside
+`op.create_table`.  Postgres `DO $$ BEGIN CREATE TYPE ... EXCEPTION WHEN
+duplicate_object THEN null; END $$` blocks in the migration are idempotent and
+unambiguous.  The ORM models still use the proper `sa.Enum(...)` types; the
+divergence is migration-only.
+
+### alembic.ini: script_location uses %(here)s
+Changed `script_location = alembic` to `script_location = %(here)s/alembic` so
+alembic can be invoked from any working directory (e.g. the session scratchpad)
+without resolving the scripts path relative to the CWD.  Also added an explicit
+`sys.path` insertion in `alembic/env.py` pointing to the `backend/` root so
+`from app.models import Base` works regardless of invocation directory, without
+relying on `PYTHONPATH` (which would shadow the local `alembic/` package).
+
+### Phase 1 split: backend-only (1a); frontend deferred to 1b
+Implemented sections 1–7 (backend identity layer) fully with 54 passing tests.
+Section 8 (frontend identity UI: login page, setup wizard, admin area, API-key UI,
+theme server-persistence) is deferred to a Phase 1b handoff prompt
+(`prompts/2026-06-27-phase-1b-frontend.md`).  Rationale: the backend is
+security-sensitive and needed clean, well-tested implementation as a foundation.
+The frontend is substantial (multiple new pages + TanStack Query wiring) and
+cleaner in a dedicated pass.
+
 ## 2026-06-27 — Phase 0 scaffolding decisions
 
 ### Dockerfile layout (backend+worker)
