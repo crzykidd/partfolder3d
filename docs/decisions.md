@@ -2,6 +2,29 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Phased build plan + locked build-time technical decisions
+
+- Wrote [`docs/build-plan.md`](build-plan.md): 11 phases (0–10), each a shippable
+  increment with exit criteria, plus the dependency shape. Phase 0 = scaffolding.
+- **Locked build-time tech choices** (PRD intentionally left these open; filling them so
+  the build session doesn't re-litigate):
+  - Backend: FastAPI + **SQLAlchemy 2.0 async** (asyncpg) + Pydantic v2 + **Alembic**;
+    deps in `backend/requirements.txt`. Job queue: **arq**. DB: **Postgres 16**.
+  - **UI auth:** httpOnly secure **session cookie** (server-stored opaque token) + CSRF;
+    **argon2id** password hashing; programmatic API via **per-user API keys**; auth behind
+    a provider interface so **SSO** slots in later.
+  - **Secrets at rest:** **Fernet**; instance key auto-generated at first run into
+    `/data/config/secret.key` (0600), never in DB; rotation = re-encrypt-all (later).
+  - **Version file:** `backend/app/version.py` `__version__ = "0.1.0"` (bare); frontend
+    reads `/api/version`. Start at **0.1.0**.
+  - Frontend: Vite + React 18 + TS + Tailwind + shadcn/ui; TanStack Query/Table/Virtual +
+    React Router; theme = system→light/dark, persisted.
+  - **Mesh render:** `trimesh` parse + **pyrender/EGL** (headless GL) with **VTK offscreen**
+    fallback; headless GL in a container is the known risk → Phase 4 opens with a spike.
+  - Image: root `Dockerfile` = backend+worker (`ghcr.io/crzykidd/partfolder3d`); nginx
+    serves the built frontend; CPU-only.
+- These are veto-able before Phase 0; recorded in `docs/build-plan.md` too.
+
 ## 2026-06-27 — CI workflows added with tolerant-bootstrap guards; main required-checks wired
 
 - Added four GitHub Actions workflows (`.github/workflows/ci.yml`, `codeql.yml`,
