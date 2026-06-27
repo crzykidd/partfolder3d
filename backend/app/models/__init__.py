@@ -6,10 +6,16 @@ All models import from this package.  Alembic env.py imports Base.metadata here.
 from .ai_provider import AiProvider, AiProviderType
 from .api_key import ApiKey
 from .base import Base
+from .creator import Creator
+from .file import File, FileRole
+from .image import Image, ImageSource
 from .invite import Invite, InviteStatus
+from .item import Item
+from .library import Library
 from .password_reset import PasswordResetToken
 from .session import UserSession
 from .setting import Setting
+from .tag import ItemTag, Tag, TagAlias, TagStatus
 from .user import User, UserRole
 
 __all__ = [
@@ -24,4 +30,16 @@ __all__ = [
     "AiProvider",
     "AiProviderType",
     "UserSession",
+    # Phase 2
+    "Library",
+    "Creator",
+    "Item",
+    "File",
+    "FileRole",
+    "Image",
+    "ImageSource",
+    "Tag",
+    "TagStatus",
+    "TagAlias",
+    "ItemTag",
 ]

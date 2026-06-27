@@ -2,6 +2,60 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Phase 2 implementation decisions
+
+### Key alphabet and length
+7-character lowercase base32 (4 random bytes → `base64.b32encode` → strip `=` padding →
+`lower()` → first 7 chars). This yields 32^7 ≈ 34 billion possible keys — more than
+enough for any foreseeable library size. Lowercase-only avoids case-folding surprises in
+URLs and on case-insensitive filesystems. Recorded: `backend/app/storage/keys.py`.
+
+### Shard derivation
+`key[:2]` — the first two characters of the key, giving 1024 possible shards (32² since
+the alphabet is 32 chars). This keeps directory fan-out bounded and predictable. Matches
+the §2 spec's "first N chars" approach without hard-coding a shard depth that would be
+awkward to change later.
+
+### Slugify library: python-slugify 8.0.4 + text-unidecode 1.3
+`python-slugify` with `text-unidecode` (LGPL) performs NFKD-then-ASCII transliteration
+at the Python level without a system-level `libunicode` dependency. Rejected:
+`awesome-slugify` (heavier, GPL), hand-rolled unicodedata normalization (error-prone edge
+cases). CJK text (Japanese, Chinese) is transliterated to Latin by `text-unidecode` (e.g.
+`日本語タイトル` → `ri-ben-yu-taitoru`); only content that transliterates to empty (pure
+emoji, lone punctuation) falls back to `"item"`.
+
+### YAML library: PyYAML 6.0.2
+`yaml.safe_dump` / `yaml.safe_load` — already widely used in the Python ecosystem, no
+extra dependencies. Sidecar is always regenerated on write so round-trip comment
+preservation is not needed. Rejected: `ruamel.yaml` (preserves comments, heavier).
+
+### Delete = move to trash, not hard delete
+Item delete moves `item_dir` to `/data/trash/<timestamp>-<key>/` rather than `rm -rf`.
+Conforms to the PRD's "never lose data" principle: accidental deletes are recoverable by
+the admin. Trash is out-of-scope for automated cleanup in Phase 2; a retention/purge
+policy is Phase 9.
+
+### File role inference from subdirectory and extension
+Top-level file role is inferred in priority order: `renders/` → render, `images/` → image,
+`prints/` + photo extension → photo, `prints/` + gcode extension → gcode; extension alone
+→ model (3mf/stl/obj/ply), zip → zip, fallback → other. Recorded in
+`backend/app/storage/inventory.py`. This heuristic is intentionally simple and overridable
+via future tag-based rules.
+
+### COOKIE_SECURE=False in test conftest
+Tests run against `http://test` via httpx's `ASGITransport`. The `Secure` cookie flag
+causes httpx to silently drop session/CSRF cookies on non-HTTPS URLs, breaking all
+authenticated requests in tests. Fixed by adding
+`monkeypatch.setattr("app.config.settings.COOKIE_SECURE", False)` to the
+`isolated_data_dir` fixture. Production deployments (HTTPS) must keep `COOKIE_SECURE=True`
+(the default).
+
+### Directory fsync via os.open(O_RDONLY)
+`Path.open("rb")` raises `IsADirectoryError` on Linux when called on a directory.
+fsync'ing a directory (to durably persist a rename into the directory entry) requires
+`os.open(str(dir), os.O_RDONLY)` → `os.fsync(fd)` → `os.close(fd)`. Applied in both
+`backend/app/storage/journal.py` and `backend/app/storage/sidecar.py`.
+
 ## 2026-06-27 — Atomic move / move-journal approach (settled pre-Phase-2)
 
 Full spec: [`docs/atomic-moves.md`](atomic-moves.md). Settled the §8.5 journaled-rename

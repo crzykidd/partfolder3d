@@ -2,8 +2,10 @@
 
 Phase 1: identity layer added (encryption key, models, auth, sessions, CSRF,
          invites, password reset, settings, API keys, first-run wizard).
+Phase 2: libraries, storage, sidecar, item core added.
 """
 
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -14,6 +16,8 @@ from .config import settings
 from .crypto import ensure_key
 from .version import __version__
 
+log = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Lifespan
 # ---------------------------------------------------------------------------
@@ -21,8 +25,18 @@ from .version import __version__
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Startup: ensure the instance encryption key exists."""
+    """Startup: ensure encryption key, recover stale move journals."""
     ensure_key()
+    # Recover any stale journal files left by interrupted rename operations.
+    # This is safe to call at every startup (idempotent).
+    try:
+        from .db import SessionLocal  # noqa: PLC0415
+        from .storage.journal import recover_stale_journals  # noqa: PLC0415
+
+        async with SessionLocal() as db:
+            await recover_stale_journals(db)
+    except Exception:
+        log.exception("Startup journal recovery failed (non-fatal)")
     yield
 
 
@@ -51,7 +65,16 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Routers
 # ---------------------------------------------------------------------------
-from .routers import api_keys, auth, invites, password_reset, setup, users  # noqa: E402
+from .routers import (  # noqa: E402  # noqa: E402
+    api_keys,
+    auth,
+    invites,
+    items,
+    libraries,
+    password_reset,
+    setup,
+    users,
+)
 from .routers import settings as settings_router  # noqa: E402
 
 app.include_router(setup.router)
@@ -61,6 +84,8 @@ app.include_router(invites.router)
 app.include_router(password_reset.router)
 app.include_router(settings_router.router)
 app.include_router(api_keys.router)
+app.include_router(libraries.router)
+app.include_router(items.router)
 
 
 # ---------------------------------------------------------------------------

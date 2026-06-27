@@ -32,8 +32,14 @@ TEST_DB_URL = os.environ.get(
 # ---------------------------------------------------------------------------
 @pytest.fixture(autouse=True)
 def isolated_data_dir(tmp_path: Any, monkeypatch: Any) -> None:
-    """Point DATA_DIR at a per-test temp dir and reset the crypto cache."""
+    """Point DATA_DIR at a per-test temp dir and reset the crypto cache.
+
+    Also sets COOKIE_SECURE=False so httpx (which uses http://test as the base
+    URL) actually sends session and CSRF cookies.  In production COOKIE_SECURE
+    must be True (HTTPS only); in tests we never use a real TLS connection.
+    """
     monkeypatch.setattr("app.config.settings.DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("app.config.settings.COOKIE_SECURE", False)
     import app.crypto as crypto_mod
 
     monkeypatch.setattr(crypto_mod, "_key_path", lambda: tmp_path / "config" / "secret.key")

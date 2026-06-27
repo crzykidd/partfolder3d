@@ -23,6 +23,14 @@ cryptography==44.0.0
 argon2-cffi==23.1.0
 passlib[argon2]==1.7.4
 
+# Storage / sidecar (Phase 2)
+# python-slugify handles NFKD → ASCII transliteration + slug sanitization.
+# text-unidecode is the transliteration back-end (non-GPL, MIT licensed).
+python-slugify==8.0.4
+text-unidecode==1.3
+# PyYAML for sidecar read/write (already transitive via alembic; pinned here).
+PyYAML==6.0.2
+
 # Dev / testing
 ruff==0.8.4
 pytest==8.3.4
