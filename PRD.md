@@ -61,7 +61,7 @@ The catalog is **fully shared**: all users see the same items, tags, files, and 
 
 ```
 /<library>/<shard>/<itemname>-<key>/
-    <itemname>-<key>.yml        # sidecar (canonical, portable, full mirror)
+    <itemname>-<key>.yml        # sidecar (canonical, portable, full mirror — schema: docs/sidecar-schema.md)
     model files (stl/3mf/obj/blend/f3d/step/...)
     project.zip (optional)
     images/                      # scraped + uploaded images
@@ -333,6 +333,6 @@ Print records can be created via the REST API, enabling future integrations (e.g
 7. **Secrets** — all tokens/keys **encrypted at rest** (§4, §14).
 
 **Remaining implementation notes:**
-- **Instance encryption key** provisioning & rotation (first-run generates it; losing it means re-entering all secrets).
+- **Instance encryption key** — provisioning **done** (Phase 1: Fernet key auto-generated at first run into `DATA_DIR/config/secret.key`, 0600, never in DB; losing it means re-entering all secrets). **Rotation** remains a later utility.
 - **Move journaling / crash recovery** for an interrupted directory rename (§8.5).
-- **Title sanitization** rules for deriving `itemname` from a user-entered title (allowed chars, length cap, collision-proofed by `<key>`).
+- ~~**Title sanitization** rules for deriving `itemname` from a user-entered title~~ — **resolved** (NFKD→ASCII→lowercase→`[a-z0-9-]`, 80-char cap, collision-proofed by `<key>`): see [`docs/sidecar-schema.md`](docs/sidecar-schema.md) §2.

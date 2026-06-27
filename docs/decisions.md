@@ -2,6 +2,29 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Sidecar schema & title sanitization (settled pre-Phase-2)
+
+Full spec: [`docs/sidecar-schema.md`](sidecar-schema.md). Settled the on-disk formats
+before Phase 2 builds them (changing either after items exist on disk is costly).
+
+- **Portability rule:** the sidecar carries **no instance-specific surrogate IDs** (no DB
+  `id`, no `user_id`). Identity travels via the stable `key`; tags by name, files by
+  name + hash, creator descriptively. (`creator.is_original` does **not** auto-bind to the
+  importing user on transfer — it becomes an external named Creator.)
+- **`schema_version`:** integer starting at **1**; bumped only on breaking changes
+  (additive keys don't bump it; readers ignore unknown keys).
+- **File hashing: SHA-256** (lowercase hex). Cheap-first drift check on `size`+`mtime`;
+  full hash recomputed only when those change or on an explicit integrity/Rescan pass —
+  keeps hashing off the hot path for large libraries.
+- **Tags in the sidecar: flat canonical names.** Category/namespace lives in the instance
+  Tag vocabulary and is re-derived on import (rejected: per-item structured tag objects,
+  which risk drift vs. the canonical Tag table).
+- **Title → on-disk name:** one sanitized form for **both** the dir and the URL slug.
+  NFKD → **ASCII transliteration** → lowercase → `[a-z0-9]`-only with `-` separators →
+  empty falls back to `item` → **80-char cap**. Collisions impossible by construction via
+  the invariant `-<key>` suffix, which also defuses Windows reserved names and dot/space
+  traps. (Rejected: preserving Unicode in the slug — NAS/SMB/Windows/zip edge cases.)
+
 ## 2026-06-27 — Phase 1b frontend identity UI decisions
 
 ### ThemeProvider context wrapping for server-side theme sync
