@@ -11,6 +11,10 @@ Per-user theme:
 Per-user nav layout:
   GET   /api/me/nav-layout   → get nav layout preference (resolved by role when unset)
   PUT   /api/me/nav-layout   → set nav layout preference ('top' | 'side')
+
+Per-user dashboard layout (Phase 12):
+  GET   /api/me/dashboard    → get dashboard layout (resolved by role when unset)
+  PUT   /api/me/dashboard    → set dashboard layout
 """
 
 import json
@@ -59,6 +63,29 @@ class NavLayoutResponse(BaseModel):
 
 class NavLayoutUpdateRequest(BaseModel):
     nav_layout: str | None = None  # null = reset to role default
+
+
+class DashboardStatsLayout(BaseModel):
+    density: str = "comfortable"  # 'comfortable' | 'compact'
+    tiles: list[str] = []
+
+
+class DashboardRailLayout(BaseModel):
+    collapsed: bool = False
+    widgets: list[str] = []
+
+
+class DashboardLayout(BaseModel):
+    stats: DashboardStatsLayout
+    rail: DashboardRailLayout
+
+
+class DashboardLayoutResponse(BaseModel):
+    dashboard_layout: DashboardLayout
+
+
+class DashboardLayoutUpdateRequest(BaseModel):
+    dashboard_layout: DashboardLayout
 
 
 # ---------------------------------------------------------------------------
@@ -181,3 +208,99 @@ async def update_nav_layout(
     db_user.nav_layout = body.nav_layout
     await db.flush()
     return NavLayoutResponse(nav_layout=_resolve_nav_layout(db_user))
+
+
+# ---------------------------------------------------------------------------
+# Per-user dashboard layout (Phase 12)
+# ---------------------------------------------------------------------------
+
+# Default tile sets by role (ordered widget IDs)
+_ADMIN_DEFAULT_TILES = [
+    "total-assets",
+    "prints-done",
+    "filament-used",
+    "success-rate",
+    "jobs-running",
+    "pending-reviews",
+    "open-issues",
+    "pending-tags",
+]
+
+_USER_DEFAULT_TILES = [
+    "total-assets",
+    "prints-done",
+    "filament-used",
+    "success-rate",
+    "jobs-running",
+]
+
+_DEFAULT_RAIL_WIDGETS = ["quick-import"]
+
+
+def _resolve_dashboard_layout(db_user: User) -> DashboardLayout:
+    """Return the effective dashboard layout, resolving to role default when unset."""
+    if db_user.dashboard_layout:
+        try:
+            raw = json.loads(db_user.dashboard_layout)
+            return DashboardLayout(
+                stats=DashboardStatsLayout(**raw.get("stats", {})),
+                rail=DashboardRailLayout(**raw.get("rail", {})),
+            )
+        except Exception:
+            pass  # malformed JSON → fall through to role default
+
+    is_admin = db_user.role.value == "admin"
+    return DashboardLayout(
+        stats=DashboardStatsLayout(
+            density="compact" if is_admin else "comfortable",
+            tiles=_ADMIN_DEFAULT_TILES if is_admin else _USER_DEFAULT_TILES,
+        ),
+        rail=DashboardRailLayout(
+            collapsed=False,
+            widgets=_DEFAULT_RAIL_WIDGETS,
+        ),
+    )
+
+
+@router.get("/api/me/dashboard", response_model=DashboardLayoutResponse)
+async def get_dashboard_layout(
+    user: Annotated[User, Depends(get_current_user)],
+) -> DashboardLayoutResponse:
+    """Get the current user's dashboard layout (resolved to role default when unset).
+
+    Admin default: compact density + admin stat tiles (pending-reviews, open-issues,
+    pending-tags) + quick-import rail.
+    User default: comfortable density + basic stat tiles + quick-import rail.
+    """
+    return DashboardLayoutResponse(dashboard_layout=_resolve_dashboard_layout(user))
+
+
+@router.put("/api/me/dashboard", response_model=DashboardLayoutResponse)
+async def update_dashboard_layout(
+    body: DashboardLayoutUpdateRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> DashboardLayoutResponse:
+    """Set the current user's dashboard layout.
+
+    Shape: { stats: { density, tiles[] }, rail: { collapsed, widgets[] } }
+    Pass the full layout object; partial updates not supported (replace-on-write).
+    """
+    from sqlalchemy import select as sa_select
+
+    # Validate density
+    if body.dashboard_layout.stats.density not in ("comfortable", "compact"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Invalid density: {body.dashboard_layout.stats.density!r}. "
+                "Must be 'comfortable' or 'compact'."
+            ),
+        )
+
+    result = await db.execute(sa_select(User).where(User.id == user.id))
+    db_user = result.scalar_one()
+    db_user.dashboard_layout = body.dashboard_layout.model_dump_json()
+    await db.flush()
+    return DashboardLayoutResponse(dashboard_layout=_resolve_dashboard_layout(db_user))

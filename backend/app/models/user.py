@@ -3,7 +3,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, String, func
+from sqlalchemy import Boolean, DateTime, Enum, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -31,6 +31,9 @@ class User(Base):
     # Per-user path prefix for path display rewrite (PRD §3.3). e.g. "C:\prints\"
     # The API returns the canonical dir_path; the UI rewrites it using this prefix.
     path_prefix: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # Per-user dashboard layout JSON (migration 0012). See routers/settings.py for shape.
+    # NULL → role-based default resolved at API time.
+    dashboard_layout: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

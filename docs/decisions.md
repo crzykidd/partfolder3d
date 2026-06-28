@@ -2,6 +2,68 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-28 — UI revamp A2: customizable widget framework
+
+### Widget registry design: typed metadata + region-keyed, single file to add
+
+All dashboard widgets are defined in `frontend/src/lib/widgets/registry.ts` — the single
+place to add a widget. The registry exports `WIDGET_REGISTRY: WidgetDef[]` (a flat array)
+plus three helpers: `getWidgets(region, isAdmin)`, `getWidgetById(id)`, and
+`resolveWidgets(ids, region, isAdmin)`. Two discriminated union types:
+
+- **`StatWidgetDef`** (region `'stat'`) — metadata + `color` (CSS var or literal) +
+  `getValue(cache: StatDataCache): string`. No React component; value derivation is
+  pure so it is unit-testable without a DOM.
+- **`PanelWidgetDef`** (region `'panel'`) — metadata + `component: React.ComponentType`.
+  Larger components live in `frontend/src/lib/widgets/panel/`.
+
+`StatDataCache` is a bag of pre-fetched data shared across all active stat tiles so
+TanStack Query's caching means shared queries (e.g. print-stats drives three tiles:
+prints-done, filament-used, success-rate) are fetched once, not per-tile.
+
+### Dashboard layout shape: JSON blob on `users.dashboard_layout`
+
+`users.dashboard_layout` (nullable `TEXT`, migration 0012) holds a JSON blob:
+```json
+{
+  "stats":  { "density": "comfortable|compact", "tiles": ["id", ...] },
+  "rail":   { "collapsed": false, "widgets": ["id", ...] }
+}
+```
+`NULL` resolved to role-based default at API time in `_resolve_dashboard_layout()`.
+Admin default: compact density + 8 admin-default tiles (including pending-reviews,
+open-issues, pending-tags). User default: comfortable density + 5 basic tiles.
+Both defaults include quick-import in the rail.
+
+### Reorder without drag-and-drop: move-up / move-down buttons
+
+No drag-and-drop library was added (prompt requirement). Reordering uses ChevronUp /
+ChevronDown icon buttons visible in edit mode, disabled at array boundaries.
+Covers the 90% use case with zero additional JS weight. HTML5 native drag is a future
+optional enhancement.
+
+### Density approach: CSS flex-wrap, compact tiles shrink via padding + font-size
+
+Both densities use `display: flex; flex-wrap: wrap`. Comfortable = `padding: 10px 14px;
+font-size: 20px`; compact = `padding: 6px 10px; font-size: 15px`. With compact + 8+
+tiles, tiles naturally wrap to 2 rows via `flex: 1 1 120px`.
+
+### `useDashboardLayout` hook: server → localStorage → role default
+
+Mirrors `useNavLayout`. Graceful fallback if GET /api/me/dashboard errors (migration
+0012 not yet applied). Optimistic update: localStorage+cache then fire-and-forget PUT.
+Collapsed rail state migrated from `useLocalStorage('aurora-rail-collapsed')` into
+`layout.rail.collapsed`.
+
+**Migration-restart note:** containers running before migration 0012 is applied need
+`docker compose up -d --force-recreate` or `alembic upgrade head`. The frontend falls
+back gracefully to role defaults until then.
+
+### Storage Used tile: graceful permanent dash (no backend endpoint)
+
+`storage-used` is registered (user-addable) but `getValue` always returns `'—'`.
+When a `/api/admin/storage` endpoint is added, only the registry entry needs updating.
+
 ## 2026-06-28 — UI revamp A1: Aurora AppShell
 
 ### Aesthetic locked: Aurora (Example3) with CSS variable tokens

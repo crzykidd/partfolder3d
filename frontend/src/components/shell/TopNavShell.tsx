@@ -29,10 +29,9 @@ import {
 import { useAuth } from '@/context/AuthContext'
 import { useTheme } from '@/components/ThemeProvider'
 import { useNavLayout } from '@/hooks/useNavLayout'
-import { useLocalStorage } from '@/hooks/useLocalStorage'
 import { getVisibleGroups, type NavGroupDef, type NavItemDef } from '@/lib/navConfig'
-import { StatStrip } from './StatStrip'
-import { QuickImportRail } from './QuickImportRail'
+import { WidgetStatStrip } from './WidgetStatStrip'
+import { WidgetRail } from './WidgetRail'
 import { AddAssetModal } from '@/components/AddAssetModal'
 import * as api from '@/lib/api'
 
@@ -231,7 +230,6 @@ export function TopNavShell() {
 
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [addAssetOpen, setAddAssetOpen] = useState(false)
-  const [railCollapsed, setRailCollapsed] = useLocalStorage('aurora-rail-collapsed', false)
 
   const visibleGroups = getVisibleGroups(role)
 
@@ -532,7 +530,7 @@ export function TopNavShell() {
       </nav>
 
       {/* Stat strip */}
-      <StatStrip />
+      <WidgetStatStrip />
 
       {/* Content row */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
@@ -546,10 +544,7 @@ export function TopNavShell() {
           <Outlet />
         </main>
 
-        <QuickImportRail
-          collapsed={railCollapsed}
-          onToggle={() => setRailCollapsed(!railCollapsed)}
-        />
+        <WidgetRail />
       </div>
 
       <AddAssetModal open={addAssetOpen} onClose={() => setAddAssetOpen(false)} />

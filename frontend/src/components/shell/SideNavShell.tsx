@@ -32,8 +32,8 @@ import { useTheme } from '@/components/ThemeProvider'
 import { useNavLayout } from '@/hooks/useNavLayout'
 import { useLocalStorage } from '@/hooks/useLocalStorage'
 import { getVisibleGroups, type NavItemDef } from '@/lib/navConfig'
-import { StatStrip } from './StatStrip'
-import { QuickImportRail } from './QuickImportRail'
+import { WidgetStatStrip } from './WidgetStatStrip'
+import { WidgetRail } from './WidgetRail'
 import { AddAssetModal } from '@/components/AddAssetModal'
 import * as api from '@/lib/api'
 
@@ -181,7 +181,6 @@ export function SideNavShell() {
 
   const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorage('aurora-sidebar-collapsed', false)
   const [collapsedGroups, setCollapsedGroups] = useLocalStorage<string[]>('aurora-sidebar-groups', [])
-  const [railCollapsed, setRailCollapsed] = useLocalStorage('aurora-rail-collapsed', false)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [addAssetOpen, setAddAssetOpen] = useState(false)
 
@@ -587,7 +586,7 @@ export function SideNavShell() {
         </header>
 
         {/* Stat strip */}
-        <StatStrip />
+        <WidgetStatStrip />
 
         {/* Content row (main + right rail) */}
         <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
@@ -603,10 +602,7 @@ export function SideNavShell() {
             <Outlet />
           </main>
 
-          <QuickImportRail
-            collapsed={railCollapsed}
-            onToggle={() => setRailCollapsed(!railCollapsed)}
-          />
+          <WidgetRail />
         </div>
       </div>
 
