@@ -8,7 +8,7 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-06-27 (Phase 6 complete; Phase 7 in flight)
+**Last updated:** 2026-06-27 (Phase 7a committed; 7b frontend in flight)
 
 ---
 
@@ -31,9 +31,15 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 
 ## Current status
 
-- **Phase:** 6 **complete** (6a `7bc344a` + 6b `0797fbf` on `dev`). **Phase 7 in flight**
-  (`prompts/2026-06-27-phase-7-print-history-sharing.md`, model: sonnet — print history +
-  sharing; expected to split, likely 7a backend then 7b frontend, possibly further).
+- **Phase:** 7a (backend) **done** (committed `2171f31` on `dev`); **7b frontend in flight**
+  (`prompts/2026-06-27-phase-7b-frontend.md`, model: sonnet). After 7b, **Phase 7 is the last
+  feature phase before AI** — next is **Phase 8 (AI tagging, optional)** then **Phase 9 (admin/
+  backup/export/API)** + **Phase 10 (hardening & v1)**.
+- **⚠️ Frontend stack gotcha (caught in 7b):** the UI is **Tailwind + CSS-variable (shadcn-style)
+  theme + minimal Radix (dropdown/slot) + lucide-react + TanStack Query**, and uses the
+  `apiFetch`/`apiFetchForm` CSRF wrapper. **There is NO Mantine and NO toast library** — a 7a-
+  written handoff wrongly said "Mantine"; corrected before dispatch. Tell future frontend
+  prompts this explicitly.
 - **Branch:** `dev` (work here). `main` is protected. Nothing pushed/PR'd yet (no dev→main
   until a working product exists).
 - **Done so far:** Phases 0–6a committed on `dev`:
@@ -47,7 +53,12 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
     `apply_review_item`), issues/changes/reviews routers; `rescan_item` refactored onto the engine.
     All checks green (214 pytest on real PG, alembic 0007 round-trip, ruff);
     **6b** reconcile **frontend** — `/admin/issues`, `/admin/changes`, `/admin/reviews`
-    (approve/reject) + Reconcile-Modes Auto/Review toggles (96 vitest, tsc clean).
+    (approve/reject) + Reconcile-Modes Auto/Review toggles (96 vitest, tsc clean);
+    **7a** print-history + sharing **backend** — PrintRecord + gcode parser (Prusa/Orca/Cura/
+    Bambu) + print-stats; ShareLink (256-bit token, per-design + full-site) + ShareAuditEvent +
+    public token-gated read-only endpoints; ZIP include-print-history; instance-import (completes
+    Phase 5 stub). Migration 0008. **271 pytest on real PG incl. 7 private-data-leak security
+    tests; alembic 0008 round-trip; ruff clean.**
 
 ## Phase 5 follow-ups (small; fold into a later phase)
 
