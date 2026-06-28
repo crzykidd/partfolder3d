@@ -6,11 +6,21 @@
  * created, revoked, expired).  Admin can revoke any active link.
  *
  * Route: /admin/shares  (admin only)
+ * Styling: Aurora aesthetic (B3a restyle — visual pass, all behavior preserved).
  */
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Plus, Copy, Check } from 'lucide-react'
 import * as api from '@/lib/api'
+import {
+  AdminPage, PageHeader,
+  Card,
+  Badge,
+  Button,
+  DataTable, TableRow, Td,
+  Field, AuroraInput,
+} from '@/components/ui'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -34,6 +44,8 @@ function formatExpiry(iso: string | null): string {
 // Audit event table for a single link
 // ---------------------------------------------------------------------------
 
+const AUDIT_COLS = ['Event', 'IP', 'User-Agent', 'Timestamp']
+
 function AuditTable({ shareId }: { shareId: number }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['share-audit', shareId],
@@ -41,39 +53,43 @@ function AuditTable({ shareId }: { shareId: number }) {
     staleTime: 30_000,
   })
 
-  if (isLoading) return <p className="text-xs text-muted-foreground p-3">Loading…</p>
-  if (isError) return <p className="text-xs text-destructive p-3">Failed to load audit events.</p>
-  if (!data || data.length === 0) {
-    return <p className="text-xs text-muted-foreground p-3 italic">No audit events yet.</p>
-  }
-
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs">
-        <thead className="bg-muted/30">
-          <tr>
-            <th className="py-1.5 px-3 text-left font-medium text-muted-foreground">Event</th>
-            <th className="py-1.5 px-3 text-left font-medium text-muted-foreground">IP</th>
-            <th className="py-1.5 px-3 text-left font-medium text-muted-foreground">User-Agent</th>
-            <th className="py-1.5 px-3 text-left font-medium text-muted-foreground">Timestamp</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((evt) => (
-            <tr key={evt.id} className="border-t border-border">
-              <td className="py-1.5 px-3 font-mono">{evt.event_type}</td>
-              <td className="py-1.5 px-3 text-muted-foreground">{evt.ip_address ?? '—'}</td>
-              <td className="py-1.5 px-3 text-muted-foreground max-w-xs truncate" title={evt.user_agent ?? undefined}>
-                {evt.user_agent ? `${evt.user_agent.slice(0, 60)}${evt.user_agent.length > 60 ? '…' : ''}` : '—'}
-              </td>
-              <td className="py-1.5 px-3 whitespace-nowrap text-muted-foreground">
-                {formatTs(evt.created_at)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      columns={AUDIT_COLS}
+      isLoading={isLoading}
+      isEmpty={!isLoading && !isError && (!data || data.length === 0)}
+      emptyMessage="No audit events yet."
+      style={{ borderRadius: 0, border: 'none', borderTop: '1px solid var(--aurora-divider)' }}
+    >
+      {isError ? (
+        <tr>
+          <td
+            colSpan={4}
+            style={{ padding: '10px 14px', fontSize: 11, color: 'var(--aurora-danger)' }}
+          >
+            Failed to load audit events.
+          </td>
+        </tr>
+      ) : (
+        data?.map((evt) => (
+          <TableRow key={evt.id}>
+            <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{evt.event_type}</Td>
+            <Td style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>{evt.ip_address ?? '—'}</Td>
+            <Td
+              style={{ fontSize: 11, color: 'var(--aurora-muted)', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              title={evt.user_agent ?? undefined}
+            >
+              {evt.user_agent
+                ? `${evt.user_agent.slice(0, 60)}${evt.user_agent.length > 60 ? '…' : ''}`
+                : '—'}
+            </Td>
+            <Td style={{ fontSize: 11, color: 'var(--aurora-muted)', whiteSpace: 'nowrap' }}>
+              {formatTs(evt.created_at)}
+            </Td>
+          </TableRow>
+        ))
+      )}
+    </DataTable>
   )
 }
 
@@ -108,74 +124,70 @@ function ShareLinkRow({ link }: { link: api.ShareLink }) {
 
   return (
     <>
-      <tr
-        className="border-b border-border hover:bg-muted/40 cursor-pointer"
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <td className="py-2 px-3 font-mono text-xs text-muted-foreground">
+      <TableRow onClick={() => setExpanded((v) => !v)}>
+        <Td style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--aurora-muted)' }}>
           {link.token.slice(0, 8)}…
-        </td>
-        <td className="py-2 px-3 text-xs">
-          {link.label ?? <em className="text-muted-foreground">No label</em>}
-        </td>
-        <td className="py-2 px-3 text-xs">
+        </Td>
+        <Td style={{ fontSize: 12 }}>
+          {link.label ?? <em style={{ color: 'var(--aurora-muted)' }}>No label</em>}
+        </Td>
+        <Td>
           {link.revoked ? (
-            <span className="inline-flex items-center rounded-full bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 px-2 py-0.5 text-xs font-medium">
-              Revoked
-            </span>
+            <Badge variant="danger">Revoked</Badge>
           ) : (
-            <span className="inline-flex items-center rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 px-2 py-0.5 text-xs font-medium">
-              Active
-            </span>
+            <Badge variant="success">Active</Badge>
           )}
-        </td>
-        <td className="py-2 px-3 text-xs text-muted-foreground whitespace-nowrap">
+        </Td>
+        <Td style={{ fontSize: 11, color: 'var(--aurora-muted)', whiteSpace: 'nowrap' }}>
           {formatExpiry(link.expires_at)}
-        </td>
-        <td className="py-2 px-3 text-xs text-muted-foreground whitespace-nowrap">
+        </Td>
+        <Td style={{ fontSize: 11, color: 'var(--aurora-muted)', whiteSpace: 'nowrap' }}>
           {formatTs(link.created_at)}
-        </td>
-        <td className="py-2 px-3" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center gap-1">
+        </Td>
+        <Td onClick={(e) => e.stopPropagation()}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             {!link.revoked && (
-              <button
-                onClick={handleCopy}
-                className="rounded px-2 py-1 text-xs border border-border hover:bg-accent transition-colors"
-              >
-                {copiedToken ? '✓ Copied' : 'Copy'}
-              </button>
+              <Button variant="ghost" size="sm" onClick={handleCopy}>
+                {copiedToken ? <Check size={11} /> : <Copy size={11} />}
+                {copiedToken ? 'Copied' : 'Copy'}
+              </Button>
             )}
             {!link.revoked && !confirmRevoke && (
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setConfirmRevoke(true)}
-                className="rounded px-2 py-1 text-xs text-muted-foreground hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950 transition-colors"
+                extraStyle={{ color: 'var(--aurora-danger)', borderColor: 'rgba(239,68,68,0.3)' }}
               >
                 Revoke
-              </button>
+              </Button>
             )}
             {confirmRevoke && (
-              <div className="flex gap-1">
-                <button
-                  onClick={() => revokeMutation.mutate()}
+              <div style={{ display: 'flex', gap: 4 }}>
+                <Button
+                  variant="danger"
+                  size="sm"
                   disabled={revokeMutation.isPending}
-                  className="rounded px-2 py-1 text-xs bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                  onClick={() => revokeMutation.mutate()}
                 >
                   {revokeMutation.isPending ? '…' : 'Confirm'}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => setConfirmRevoke(false)}
-                  className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors"
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
             )}
           </div>
-        </td>
-      </tr>
+        </Td>
+      </TableRow>
+
       {expanded && (
-        <tr className="border-b border-border bg-muted/10">
-          <td colSpan={6} className="py-1 px-0">
+        <tr style={{ borderTop: '1px solid var(--aurora-divider)' }}>
+          <td colSpan={6} style={{ padding: 0 }}>
             <AuditTable shareId={link.id} />
           </td>
         </tr>
@@ -216,70 +228,63 @@ function MintSiteShareForm({ onClose }: { onClose: () => void }) {
 
   if (mintMutation.isSuccess) {
     return (
-      <div className="rounded-lg border border-border bg-muted/20 p-4 flex flex-col gap-3">
-        <p className="text-sm font-medium text-green-700 dark:text-green-400">
+      <Card>
+        <p style={{ fontSize: 13, fontWeight: 600, color: '#16A34A', margin: '0 0 12px' }}>
           Share link created!{' '}
           {copiedToken ? 'Copied to clipboard.' : 'Copy the URL from the table.'}
         </p>
-        <button
-          onClick={onClose}
-          className="self-start rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent transition-colors"
-        >
-          Done
-        </button>
-      </div>
+        <Button variant="ghost" size="sm" onClick={onClose}>Done</Button>
+      </Card>
     )
   }
 
   return (
-    <div className="rounded-lg border border-border bg-muted/20 p-4 flex flex-col gap-3">
-      <h3 className="text-sm font-semibold">New full-site share link</h3>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-muted-foreground">Label (optional)</label>
-          <input
+    <Card>
+      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--aurora-text)', marginBottom: 16 }}>
+        New full-site share link
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Label (optional)">
+          <AuroraInput
             type="text"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             placeholder="e.g. Partner preview"
-            className="input-base py-1.5 text-sm"
           />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-muted-foreground">Expires in (days)</label>
-          <input
+        </Field>
+        <Field label="Expires in (days)">
+          <AuroraInput
             type="number"
             min="0"
             value={expiry}
             onChange={(e) => setExpiry(e.target.value)}
             placeholder="30 (blank = instance default)"
-            className="input-base py-1.5 text-sm"
           />
-        </div>
+        </Field>
       </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
-      <div className="flex gap-2">
-        <button
-          onClick={() => mintMutation.mutate()}
+      {error && (
+        <p style={{ fontSize: 12, color: 'var(--aurora-danger)', margin: '10px 0 0' }}>{error}</p>
+      )}
+      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+        <Button
+          variant="primary"
+          size="md"
           disabled={mintMutation.isPending}
-          className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          onClick={() => mintMutation.mutate()}
         >
           {mintMutation.isPending ? 'Creating…' : 'Create'}
-        </button>
-        <button
-          onClick={onClose}
-          className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent transition-colors"
-        >
-          Cancel
-        </button>
+        </Button>
+        <Button variant="ghost" size="md" onClick={onClose}>Cancel</Button>
       </div>
-    </div>
+    </Card>
   )
 }
 
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
+
+const COLUMNS = ['Token', 'Label', 'Status', 'Expiry', 'Created', 'Actions']
 
 export function ShareAuditPage() {
   const [mintOpen, setMintOpen] = useState(false)
@@ -291,56 +296,40 @@ export function ShareAuditPage() {
   })
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Site Shares</h1>
-        <button
-          onClick={() => setMintOpen(true)}
-          className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-        >
-          + New site share
-        </button>
-      </div>
-
-      <p className="text-sm text-muted-foreground">
-        Full-site share links give unauthenticated visitors read-only access to the
-        entire catalog. Click a row to expand audit events.
-      </p>
+    <AdminPage>
+      <PageHeader
+        title="Site Shares"
+        description="Full-site share links give unauthenticated visitors read-only access to the entire catalog. Click a row to expand audit events."
+        actions={
+          <Button
+            variant="primary"
+            size="md"
+            onClick={() => setMintOpen(true)}
+          >
+            <Plus size={14} />
+            New site share
+          </Button>
+        }
+      />
 
       {mintOpen && <MintSiteShareForm onClose={() => setMintOpen(false)} />}
 
-      {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
       {isError && (
-        <p className="text-sm text-destructive">
+        <p style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>
           {error instanceof Error ? error.message : 'Failed to load site shares.'}
         </p>
       )}
 
-      {!isLoading && links.length === 0 && (
-        <p className="text-sm text-muted-foreground italic">No site share links yet.</p>
-      )}
-
-      {links.length > 0 && (
-        <div className="rounded-lg border border-border overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">Token</th>
-                <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">Label</th>
-                <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">Status</th>
-                <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">Expiry</th>
-                <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">Created</th>
-                <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {links.map((link) => (
-                <ShareLinkRow key={link.id} link={link} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+      <DataTable
+        columns={COLUMNS}
+        isLoading={isLoading}
+        isEmpty={!isLoading && links.length === 0}
+        emptyMessage="No site share links yet."
+      >
+        {links.map((link) => (
+          <ShareLinkRow key={link.id} link={link} />
+        ))}
+      </DataTable>
+    </AdminPage>
   )
 }

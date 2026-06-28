@@ -6,47 +6,23 @@
  * to show detail, suggested action, and resolution timestamp.
  *
  * Route: /admin/issues
+ * Styling: Aurora aesthetic (B3a restyle — visual pass, all behavior preserved).
  */
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import * as api from '@/lib/api'
+import {
+  AdminPage, PageHeader,
+  Badge, severityVariant, issueStatusVariant,
+  Button, FilterPill,
+  DataTable, TableRow, Td, Pagination,
+  AuroraSelect,
+} from '@/components/ui'
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function severityBadge(severity: string) {
-  const cls =
-    severity === 'critical'
-      ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-      : severity === 'warning'
-        ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
-        : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}
-    >
-      {severity}
-    </span>
-  )
-}
-
-function statusBadge(status: string) {
-  const cls =
-    status === 'open'
-      ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-      : status === 'resolved'
-        ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-        : 'bg-muted text-muted-foreground'
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}
-    >
-      {status}
-    </span>
-  )
-}
 
 function formatTs(ts: string | null): string {
   if (!ts) return '—'
@@ -63,100 +39,102 @@ function IssueRow({ issue }: { issue: api.IssueOut }) {
 
   const resolveMutation = useMutation({
     mutationFn: () => api.resolveIssue(issue.id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['issues'] })
-    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['issues'] }),
   })
 
   const ignoreMutation = useMutation({
     mutationFn: () => api.ignoreIssue(issue.id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['issues'] })
-    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['issues'] }),
   })
 
   const busy = resolveMutation.isPending || ignoreMutation.isPending
 
   return (
     <>
-      <tr
-        className="border-b border-border hover:bg-muted/40 cursor-pointer"
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <td className="py-2 px-3">{severityBadge(issue.severity)}</td>
-        <td className="py-2 px-3 font-mono text-xs">{issue.issue_type}</td>
-        <td className="py-2 px-3">{statusBadge(issue.status)}</td>
-        <td className="py-2 px-3 text-xs">
+      <TableRow onClick={() => setExpanded((v) => !v)}>
+        <Td><Badge variant={severityVariant(issue.severity)}>{issue.severity}</Badge></Td>
+        <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{issue.issue_type}</Td>
+        <Td><Badge variant={issueStatusVariant(issue.status)}>{issue.status}</Badge></Td>
+        <Td style={{ fontSize: 12 }}>
           {issue.item_id != null ? (
             <a
               href={`/items/${issue.item_id}`}
-              className="text-primary hover:underline"
+              style={{ color: 'var(--aurora-accent)', textDecoration: 'none' }}
               onClick={(e) => e.stopPropagation()}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline')}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none')}
             >
               #{issue.item_id}
             </a>
           ) : (
-            '—'
+            <span style={{ color: 'var(--aurora-muted)' }}>—</span>
           )}
-        </td>
-        <td className="py-2 px-3 text-xs text-muted-foreground max-w-xs">
+        </Td>
+        <Td style={{ maxWidth: 280, color: 'var(--aurora-text-dim)' }} title={issue.detail}>
           <span
-            className="truncate block"
-            title={issue.detail}
+            style={{
+              display: 'block',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              fontSize: 12,
+            }}
           >
-            {issue.detail.length > 80
-              ? `${issue.detail.slice(0, 80)}…`
-              : issue.detail}
+            {issue.detail.length > 80 ? `${issue.detail.slice(0, 80)}…` : issue.detail}
           </span>
-        </td>
-        <td className="py-2 px-3 text-xs text-muted-foreground whitespace-nowrap">
+        </Td>
+        <Td style={{ fontSize: 11, color: 'var(--aurora-muted)', whiteSpace: 'nowrap' }}>
           {formatTs(issue.created_at)}
-        </td>
-        <td className="py-2 px-3" onClick={(e) => e.stopPropagation()}>
+        </Td>
+        <Td onClick={(e) => e.stopPropagation()}>
           {issue.status === 'open' && (
-            <div className="flex gap-1">
-              <button
-                onClick={() => resolveMutation.mutate()}
+            <div style={{ display: 'flex', gap: 6 }}>
+              <Button
+                variant="ghost"
+                size="sm"
                 disabled={busy}
-                className="px-2 py-1 rounded text-xs font-medium bg-green-600 text-white
-                           hover:bg-green-700 disabled:opacity-50 transition-colors"
+                onClick={() => resolveMutation.mutate()}
+                extraStyle={{ background: 'rgba(22,163,74,0.1)', border: '1px solid rgba(22,163,74,0.3)', color: '#16A34A' }}
               >
                 {resolveMutation.isPending ? '…' : 'Resolve'}
-              </button>
-              <button
-                onClick={() => ignoreMutation.mutate()}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
                 disabled={busy}
-                className="px-2 py-1 rounded text-xs font-medium bg-muted text-muted-foreground
-                           hover:bg-muted/70 disabled:opacity-50 transition-colors"
+                onClick={() => ignoreMutation.mutate()}
               >
                 {ignoreMutation.isPending ? '…' : 'Ignore'}
-              </button>
+              </Button>
             </div>
           )}
           {(resolveMutation.isError || ignoreMutation.isError) && (
-            <p className="text-xs text-red-500 mt-1">Action failed</p>
+            <span style={{ fontSize: 11, color: 'var(--aurora-danger)', display: 'block', marginTop: 4 }}>Action failed</span>
           )}
-        </td>
-      </tr>
+        </Td>
+      </TableRow>
+
       {expanded && (
-        <tr className="border-b border-border bg-muted/20">
-          <td colSpan={7} className="px-3 py-2 text-xs space-y-1">
-            <div>
-              <span className="font-medium">Detail: </span>
-              <span className="text-muted-foreground">{issue.detail}</span>
+        <tr style={{ borderTop: '1px solid var(--aurora-divider)', background: 'rgba(15,164,171,0.02)' }}>
+          <td colSpan={7} style={{ padding: '10px 14px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
+              <div>
+                <span style={{ fontWeight: 600, color: 'var(--aurora-text-dim)' }}>Detail: </span>
+                <span style={{ color: 'var(--aurora-muted)' }}>{issue.detail}</span>
+              </div>
+              {issue.suggested_action && (
+                <div>
+                  <span style={{ fontWeight: 600, color: 'var(--aurora-text-dim)' }}>Suggested action: </span>
+                  <span style={{ color: 'var(--aurora-muted)' }}>{issue.suggested_action}</span>
+                </div>
+              )}
+              {issue.resolved_at && (
+                <div>
+                  <span style={{ fontWeight: 600, color: 'var(--aurora-text-dim)' }}>Resolved at: </span>
+                  <span style={{ color: 'var(--aurora-muted)' }}>{formatTs(issue.resolved_at)}</span>
+                </div>
+              )}
             </div>
-            {issue.suggested_action && (
-              <div>
-                <span className="font-medium">Suggested action: </span>
-                <span className="text-muted-foreground">{issue.suggested_action}</span>
-              </div>
-            )}
-            {issue.resolved_at && (
-              <div>
-                <span className="font-medium">Resolved at: </span>
-                <span className="text-muted-foreground">{formatTs(issue.resolved_at)}</span>
-              </div>
-            )}
           </td>
         </tr>
       )}
@@ -175,7 +153,6 @@ const STATUS_FILTERS = [
   { value: 'ignored', label: 'Ignored' },
 ]
 
-// Values from IssueType enum in backend/app/models/issue.py
 const ISSUE_TYPES = [
   { value: '', label: 'all types' },
   { value: 'conflict', label: 'conflict' },
@@ -193,6 +170,7 @@ const ISSUE_TYPES = [
 // ---------------------------------------------------------------------------
 
 const PER_PAGE = 50
+const COLUMNS = ['Severity', 'Type', 'Status', 'Item', 'Detail', 'Created', 'Actions']
 
 export function IssuesPage() {
   const [statusFilter, setStatusFilter] = useState('open')
@@ -213,135 +191,68 @@ export function IssuesPage() {
   const totalPages = data ? Math.ceil(data.total / PER_PAGE) : 1
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Issues</h1>
-        <span className="text-sm text-muted-foreground">
-          {data ? `${data.total} issue(s)` : ''}
-        </span>
-      </div>
+    <AdminPage>
+      <PageHeader
+        title="Issues"
+        meta={data ? `${data.total} issue${data.total === 1 ? '' : 's'}` : undefined}
+      />
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2">
-          <label className="text-sm font-medium">Status:</label>
-          <div className="flex gap-1">
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            Status
+          </span>
+          <div className="flex gap-1.5">
             {STATUS_FILTERS.map((s) => (
-              <button
+              <FilterPill
                 key={s.value || 'all'}
-                onClick={() => {
-                  setStatusFilter(s.value)
-                  setPage(1)
-                }}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                  statusFilter === s.value
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                }`}
+                active={statusFilter === s.value}
+                onClick={() => { setStatusFilter(s.value); setPage(1) }}
               >
                 {s.label}
-              </button>
+              </FilterPill>
             ))}
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="text-sm font-medium">Type:</label>
-          <select
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            Type
+          </span>
+          <AuroraSelect
             value={typeFilter}
-            onChange={(e) => {
-              setTypeFilter(e.target.value)
-              setPage(1)
-            }}
-            className="input-base py-1 text-xs"
+            onChange={(e) => { setTypeFilter(e.target.value); setPage(1) }}
+            style={{ padding: '5px 10px', fontSize: 12, width: 'auto' }}
           >
             {ISSUE_TYPES.map((t) => (
-              <option key={t.value || 'all'} value={t.value}>
-                {t.label}
-              </option>
+              <option key={t.value || 'all'} value={t.value}>{t.label}</option>
             ))}
-          </select>
+          </AuroraSelect>
         </div>
       </div>
 
-      {isLoading && <p className="text-muted-foreground text-sm">Loading…</p>}
       {isError && (
-        <p className="text-red-600 text-sm">
+        <div style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>
           Error: {error instanceof Error ? error.message : 'Failed to load issues'}
-        </p>
+        </div>
       )}
 
-      {data && (
-        <>
-          <div className="rounded-lg border border-border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">
-                    Severity
-                  </th>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">
-                    Type
-                  </th>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">
-                    Status
-                  </th>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">
-                    Item
-                  </th>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">
-                    Detail
-                  </th>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">
-                    Created
-                  </th>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={7}
-                      className="py-8 text-center text-muted-foreground text-sm"
-                    >
-                      No issues found.
-                    </td>
-                  </tr>
-                ) : (
-                  data.items.map((issue) => (
-                    <IssueRow key={issue.id} issue={issue} />
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+      <DataTable
+        columns={COLUMNS}
+        isLoading={isLoading}
+        isEmpty={data ? data.items.length === 0 : false}
+        emptyMessage="No issues found."
+      >
+        {data?.items.map((issue) => <IssueRow key={issue.id} issue={issue} />)}
+      </DataTable>
 
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between text-sm">
-              <button
-                disabled={page === 1}
-                onClick={() => setPage((p) => p - 1)}
-                className="px-3 py-1 rounded-md bg-muted disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <span className="text-muted-foreground">
-                Page {page} of {totalPages}
-              </span>
-              <button
-                disabled={page === totalPages}
-                onClick={() => setPage((p) => p + 1)}
-                className="px-3 py-1 rounded-md bg-muted disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-          )}
-        </>
-      )}
-    </div>
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        onPrev={() => setPage((p) => p - 1)}
+        onNext={() => setPage((p) => p + 1)}
+      />
+    </AdminPage>
   )
 }

@@ -5,39 +5,22 @@
  * No actions — purely informational.
  *
  * Route: /admin/changes
+ * Styling: Aurora aesthetic (B3a restyle — visual pass, all behavior preserved).
  */
 
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import * as api from '@/lib/api'
+import {
+  AdminPage, PageHeader,
+  Badge, behaviorVariant,
+  DataTable, TableRow, Td, Pagination,
+  AuroraSelect,
+} from '@/components/ui'
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-// Behavior values match backend ChangeLog.behavior field.
-// Colors chosen to be consistent with ReviewsPage behavior badges.
-function behaviorBadge(behavior: string) {
-  const cls =
-    behavior === 'sidecar_sync'
-      ? 'bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200'
-      : behavior === 'file_changes'
-        ? 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200'
-        : behavior === 're_render'
-          ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-          : behavior === 'integrity'
-            ? 'bg-muted text-muted-foreground'
-            : behavior === 'orphan'
-              ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-              : 'bg-muted text-muted-foreground'
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}
-    >
-      {behavior}
-    </span>
-  )
-}
 
 function formatTs(ts: string | null): string {
   if (!ts) return '—'
@@ -63,33 +46,45 @@ const BEHAVIOR_FILTERS = [
 
 function ChangeRow({ entry }: { entry: api.ChangeLogOut }) {
   return (
-    <tr className="border-b border-border hover:bg-muted/40">
-      <td className="py-2 px-3">{behaviorBadge(entry.behavior)}</td>
-      <td className="py-2 px-3 font-mono text-xs">{entry.change_type}</td>
-      <td className="py-2 px-3 text-xs">
+    <TableRow>
+      <Td>
+        <Badge variant={behaviorVariant(entry.behavior)}>{entry.behavior}</Badge>
+      </Td>
+      <Td style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--aurora-text-dim)' }}>
+        {entry.change_type}
+      </Td>
+      <Td style={{ fontSize: 12 }}>
         {entry.item_id != null ? (
           <a
             href={`/items/${entry.item_id}`}
-            className="text-primary hover:underline"
+            style={{ color: 'var(--aurora-accent)', textDecoration: 'none' }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline')}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none')}
           >
             #{entry.item_id}
           </a>
         ) : (
-          '—'
+          <span style={{ color: 'var(--aurora-muted)' }}>—</span>
         )}
-      </td>
-      <td className="py-2 px-3 text-xs text-muted-foreground max-w-sm">
-        <span className="truncate block" title={entry.summary}>
-          {entry.summary.length > 100
-            ? `${entry.summary.slice(0, 100)}…`
-            : entry.summary}
+      </Td>
+      <Td style={{ maxWidth: 320, color: 'var(--aurora-text-dim)' }} title={entry.summary}>
+        <span
+          style={{
+            display: 'block',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            fontSize: 12,
+          }}
+        >
+          {entry.summary.length > 100 ? `${entry.summary.slice(0, 100)}…` : entry.summary}
         </span>
-      </td>
-      <td className="py-2 px-3 text-xs text-muted-foreground">{entry.source}</td>
-      <td className="py-2 px-3 text-xs text-muted-foreground whitespace-nowrap">
+      </Td>
+      <Td style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>{entry.source}</Td>
+      <Td style={{ fontSize: 11, color: 'var(--aurora-muted)', whiteSpace: 'nowrap' }}>
         {formatTs(entry.created_at)}
-      </td>
-    </tr>
+      </Td>
+    </TableRow>
   )
 }
 
@@ -98,6 +93,7 @@ function ChangeRow({ entry }: { entry: api.ChangeLogOut }) {
 // ---------------------------------------------------------------------------
 
 const PER_PAGE = 50
+const COLUMNS = ['Behavior', 'Change type', 'Item', 'Summary', 'Source', 'Created']
 
 export function ChangesPage() {
   const [behaviorFilter, setBehaviorFilter] = useState('')
@@ -116,114 +112,50 @@ export function ChangesPage() {
   const totalPages = data ? Math.ceil(data.total / PER_PAGE) : 1
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Change Log</h1>
-        <span className="text-sm text-muted-foreground">
-          {data ? `${data.total} entry(s)` : ''}
-        </span>
-      </div>
-
-      <p className="text-sm text-muted-foreground">
-        Audit log of every automated or approved change made by the reconcile
-        engine. Read-only.
-      </p>
+    <AdminPage>
+      <PageHeader
+        title="Change Log"
+        description="Audit log of every automated or approved change made by the reconcile engine. Read-only."
+        meta={data ? `${data.total} entr${data.total === 1 ? 'y' : 'ies'}` : undefined}
+      />
 
       {/* Behavior filter */}
-      <div className="flex items-center gap-2">
-        <label className="text-sm font-medium">Behavior:</label>
-        <select
+      <div className="flex items-center gap-3">
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          Behavior
+        </span>
+        <AuroraSelect
           value={behaviorFilter}
-          onChange={(e) => {
-            setBehaviorFilter(e.target.value)
-            setPage(1)
-          }}
-          className="input-base py-1 text-xs"
+          onChange={(e) => { setBehaviorFilter(e.target.value); setPage(1) }}
+          style={{ padding: '5px 10px', fontSize: 12, width: 'auto' }}
         >
           {BEHAVIOR_FILTERS.map((b) => (
-            <option key={b.value || 'all'} value={b.value}>
-              {b.label}
-            </option>
+            <option key={b.value || 'all'} value={b.value}>{b.label}</option>
           ))}
-        </select>
+        </AuroraSelect>
       </div>
 
-      {isLoading && <p className="text-muted-foreground text-sm">Loading…</p>}
       {isError && (
-        <p className="text-red-600 text-sm">
-          Error:{' '}
-          {error instanceof Error ? error.message : 'Failed to load change log'}
-        </p>
+        <div style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>
+          Error: {error instanceof Error ? error.message : 'Failed to load change log'}
+        </div>
       )}
 
-      {data && (
-        <>
-          <div className="rounded-lg border border-border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">
-                    Behavior
-                  </th>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">
-                    Change type
-                  </th>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">
-                    Item
-                  </th>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">
-                    Summary
-                  </th>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">
-                    Source
-                  </th>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">
-                    Created
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={6}
-                      className="py-8 text-center text-muted-foreground text-sm"
-                    >
-                      No change log entries found.
-                    </td>
-                  </tr>
-                ) : (
-                  data.items.map((entry) => (
-                    <ChangeRow key={entry.id} entry={entry} />
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+      <DataTable
+        columns={COLUMNS}
+        isLoading={isLoading}
+        isEmpty={data ? data.items.length === 0 : false}
+        emptyMessage="No change log entries found."
+      >
+        {data?.items.map((entry) => <ChangeRow key={entry.id} entry={entry} />)}
+      </DataTable>
 
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between text-sm">
-              <button
-                disabled={page === 1}
-                onClick={() => setPage((p) => p - 1)}
-                className="px-3 py-1 rounded-md bg-muted disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <span className="text-muted-foreground">
-                Page {page} of {totalPages}
-              </span>
-              <button
-                disabled={page === totalPages}
-                onClick={() => setPage((p) => p + 1)}
-                className="px-3 py-1 rounded-md bg-muted disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-          )}
-        </>
-      )}
-    </div>
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        onPrev={() => setPage((p) => p - 1)}
+        onNext={() => setPage((p) => p + 1)}
+      />
+    </AdminPage>
   )
 }

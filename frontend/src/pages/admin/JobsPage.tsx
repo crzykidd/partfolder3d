@@ -6,42 +6,22 @@
  * in progress.
  *
  * Route: /admin/jobs
+ * Styling: Aurora aesthetic (B3a restyle — visual pass, all behavior preserved).
  */
 
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import * as api from '@/lib/api'
+import {
+  AdminPage, PageHeader,
+  Badge, jobStatusVariant,
+  FilterPill,
+  DataTable, TableRow, Td, Pagination,
+} from '@/components/ui'
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function statusBadge(status: string) {
-  const cls =
-    status === 'running'
-      ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-      : status === 'succeeded'
-        ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-        : status === 'failed'
-          ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-          : 'bg-muted text-muted-foreground'
-  return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>
-      {status}
-    </span>
-  )
-}
-
-function ProgressBar({ value }: { value: number }) {
-  return (
-    <div className="w-20 h-2 bg-muted rounded-full overflow-hidden">
-      <div
-        className="h-full bg-primary transition-all"
-        style={{ width: `${value}%` }}
-      />
-    </div>
-  )
-}
 
 function formatTs(ts: string | null): string {
   if (!ts) return '—'
@@ -59,7 +39,35 @@ function elapsed(start: string | null, end: string | null): string {
 }
 
 // ---------------------------------------------------------------------------
-// Job row detail (expandable)
+// Progress bar
+// ---------------------------------------------------------------------------
+
+function ProgressBar({ value }: { value: number }) {
+  return (
+    <div
+      style={{
+        width: 80,
+        height: 6,
+        borderRadius: 3,
+        background: 'var(--aurora-glass)',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          height: '100%',
+          width: `${value}%`,
+          background: 'var(--aurora-accent)',
+          borderRadius: 3,
+          transition: 'width 0.3s',
+        }}
+      />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Job row (expandable)
 // ---------------------------------------------------------------------------
 
 function JobRow({ job }: { job: api.JobOut }) {
@@ -67,39 +75,84 @@ function JobRow({ job }: { job: api.JobOut }) {
 
   return (
     <>
-      <tr
-        className="border-b border-border hover:bg-muted/40 cursor-pointer"
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <td className="py-2 px-3 font-mono text-xs text-muted-foreground">{job.id.slice(0, 8)}…</td>
-        <td className="py-2 px-3 text-sm font-medium">{job.type}</td>
-        <td className="py-2 px-3">{statusBadge(job.status)}</td>
-        <td className="py-2 px-3">
+      <TableRow onClick={() => setExpanded((v) => !v)}>
+        <Td style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--aurora-muted)' }}>
+          {job.id.slice(0, 8)}…
+        </Td>
+        <Td style={{ fontWeight: 600 }}>{job.type}</Td>
+        <Td>
+          <Badge variant={jobStatusVariant(job.status)}>{job.status}</Badge>
+        </Td>
+        <Td>
           <div className="flex items-center gap-2">
             <ProgressBar value={job.progress} />
-            <span className="text-xs text-muted-foreground">{job.progress}%</span>
+            <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>{job.progress}%</span>
           </div>
-        </td>
-        <td className="py-2 px-3 text-xs text-muted-foreground">{formatTs(job.created_at)}</td>
-        <td className="py-2 px-3 text-xs text-muted-foreground">{elapsed(job.started_at, job.finished_at)}</td>
-        <td className="py-2 px-3 text-xs">
+        </Td>
+        <Td style={{ fontSize: 11, color: 'var(--aurora-muted)', whiteSpace: 'nowrap' }}>
+          {formatTs(job.created_at)}
+        </Td>
+        <Td style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>
+          {elapsed(job.started_at, job.finished_at)}
+        </Td>
+        <Td>
           {job.error ? (
-            <span className="text-red-600 dark:text-red-400 truncate max-w-[200px] block" title={job.error}>
+            <span
+              style={{
+                fontSize: 11,
+                color: 'var(--aurora-danger)',
+                display: 'block',
+                maxWidth: 200,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={job.error}
+            >
               {job.error.slice(0, 60)}{job.error.length > 60 ? '…' : ''}
             </span>
-          ) : '—'}
-        </td>
-      </tr>
+          ) : (
+            <span style={{ color: 'var(--aurora-muted)', fontSize: 11 }}>—</span>
+          )}
+        </Td>
+      </TableRow>
+
       {expanded && (job.log || job.error) && (
-        <tr className="border-b border-border bg-muted/20">
-          <td colSpan={7} className="px-3 py-2">
+        <tr style={{ borderTop: '1px solid var(--aurora-divider)', background: 'rgba(15,164,171,0.02)' }}>
+          <td colSpan={7} style={{ padding: '10px 14px' }}>
             {job.log && (
-              <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono mb-1">
+              <pre
+                style={{
+                  fontSize: 11,
+                  color: 'var(--aurora-text-dim)',
+                  whiteSpace: 'pre-wrap',
+                  fontFamily: 'monospace',
+                  margin: '0 0 6px',
+                  background: 'var(--aurora-glass)',
+                  border: '1px solid var(--aurora-glass-border)',
+                  borderRadius: 6,
+                  padding: '8px 10px',
+                  maxHeight: 200,
+                  overflow: 'auto',
+                }}
+              >
                 {job.log}
               </pre>
             )}
             {job.error && (
-              <pre className="text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap font-mono">
+              <pre
+                style={{
+                  fontSize: 11,
+                  color: 'var(--aurora-danger)',
+                  whiteSpace: 'pre-wrap',
+                  fontFamily: 'monospace',
+                  margin: 0,
+                  background: 'rgba(239,68,68,0.06)',
+                  border: '1px solid rgba(239,68,68,0.2)',
+                  borderRadius: 6,
+                  padding: '8px 10px',
+                }}
+              >
                 Error: {job.error}
               </pre>
             )}
@@ -115,6 +168,15 @@ function JobRow({ job }: { job: api.JobOut }) {
 // ---------------------------------------------------------------------------
 
 const STATUS_FILTERS = ['', 'running', 'queued', 'failed', 'succeeded']
+const STATUS_LABELS: Record<string, string> = {
+  '': 'all',
+  running: 'running',
+  queued: 'queued',
+  failed: 'failed',
+  succeeded: 'succeeded',
+}
+
+const COLUMNS = ['ID', 'Type', 'Status', 'Progress', 'Created', 'Elapsed', 'Error']
 
 export function JobsPage() {
   const [statusFilter, setStatusFilter] = useState('')
@@ -135,96 +197,56 @@ export function JobsPage() {
   const totalPages = data ? Math.ceil(data.total / perPage) : 1
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Job Monitor</h1>
-        <span className="text-sm text-muted-foreground">
-          {data ? `${data.total} job(s)` : ''}
-          {' · '}
-          <span className="text-primary">auto-refreshes every 5 s</span>
+    <AdminPage>
+      <PageHeader
+        title="Job Monitor"
+        meta={
+          data
+            ? `${data.total} job${data.total === 1 ? '' : 's'} · auto-refreshes every 5 s`
+            : undefined
+        }
+        actions={
+          isError ? (
+            <span style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>
+              {error instanceof Error ? error.message : 'Failed to load jobs'}
+            </span>
+          ) : undefined
+        }
+      />
+
+      {/* Status filter pills */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          Status
         </span>
+        {STATUS_FILTERS.map((s) => (
+          <FilterPill
+            key={s || 'all'}
+            active={statusFilter === s}
+            onClick={() => { setStatusFilter(s); setPage(1) }}
+          >
+            {STATUS_LABELS[s]}
+          </FilterPill>
+        ))}
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-3">
-        <label className="text-sm font-medium">Status:</label>
-        <div className="flex gap-1">
-          {STATUS_FILTERS.map((s) => (
-            <button
-              key={s || 'all'}
-              onClick={() => { setStatusFilter(s); setPage(1) }}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                statusFilter === s
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-muted-foreground hover:bg-muted/80'
-              }`}
-            >
-              {s || 'all'}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* Table */}
+      <DataTable
+        columns={COLUMNS}
+        isLoading={isLoading}
+        isEmpty={data ? data.jobs.length === 0 : false}
+        emptyMessage="No jobs found."
+      >
+        {data?.jobs.map((job) => <JobRow key={job.id} job={job} />)}
+      </DataTable>
 
-      {isLoading && <p className="text-muted-foreground text-sm">Loading…</p>}
-      {isError && (
-        <p className="text-red-600 text-sm">
-          Error: {error instanceof Error ? error.message : 'Failed to load jobs'}
-        </p>
-      )}
-
-      {data && (
-        <>
-          <div className="rounded-lg border border-border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">ID</th>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">Type</th>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">Status</th>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">Progress</th>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">Created</th>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">Elapsed</th>
-                  <th className="py-2 px-3 text-left font-medium text-muted-foreground text-xs">Error</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.jobs.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="py-8 text-center text-muted-foreground text-sm">
-                      No jobs found.
-                    </td>
-                  </tr>
-                ) : (
-                  data.jobs.map((job) => <JobRow key={job.id} job={job} />)
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between text-sm">
-              <button
-                disabled={page === 1}
-                onClick={() => setPage((p) => p - 1)}
-                className="px-3 py-1 rounded-md bg-muted disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <span className="text-muted-foreground">
-                Page {page} of {totalPages}
-              </span>
-              <button
-                disabled={page === totalPages}
-                onClick={() => setPage((p) => p + 1)}
-                className="px-3 py-1 rounded-md bg-muted disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-          )}
-        </>
-      )}
-    </div>
+      {/* Pagination */}
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        onPrev={() => setPage((p) => p - 1)}
+        onNext={() => setPage((p) => p + 1)}
+      />
+    </AdminPage>
   )
 }

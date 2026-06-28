@@ -5,23 +5,63 @@
  * and a "most printed" items table linking back to ItemPage.
  *
  * Route: /admin/print-stats  (admin only)
+ * Styling: Aurora aesthetic (B3a restyle — visual pass, all behavior preserved).
  */
 
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import * as api from '@/lib/api'
 import { formatPrintTime, formatFilamentLength, formatFilamentWeight } from '@/lib/print-utils'
+import {
+  AdminPage, PageHeader,
+  DataTable, TableRow, Td,
+} from '@/components/ui'
 
 // ---------------------------------------------------------------------------
-// Stat card
+// Stat card — Aurora glass style
 // ---------------------------------------------------------------------------
 
 function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-5 flex flex-col gap-1">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="text-3xl font-bold">{value}</p>
-      {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+    <div
+      style={{
+        background: 'var(--aurora-card)',
+        border: '1px solid var(--aurora-card-border)',
+        borderRadius: 12,
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
+        padding: '18px 20px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+      }}
+    >
+      <p
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          color: 'var(--aurora-muted)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+          margin: 0,
+        }}
+      >
+        {label}
+      </p>
+      <p
+        style={{
+          fontSize: 28,
+          fontWeight: 800,
+          color: 'var(--aurora-text)',
+          letterSpacing: '-0.02em',
+          margin: 0,
+        }}
+      >
+        {value}
+      </p>
+      {sub && (
+        <p style={{ fontSize: 11, color: 'var(--aurora-muted)', margin: 0 }}>{sub}</p>
+      )}
     </div>
   )
 }
@@ -29,6 +69,8 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
+
+const MOST_PRINTED_COLS = ['#', 'Title', 'Key', 'Prints']
 
 export function PrintStatsPage() {
   const { data, isLoading, isError, error } = useQuery({
@@ -38,19 +80,22 @@ export function PrintStatsPage() {
   })
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Print Statistics</h1>
+    <AdminPage>
+      <PageHeader title="Print Statistics" />
 
-      {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {isLoading && (
+        <p style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>Loading…</p>
+      )}
+
       {isError && (
-        <p className="text-sm text-destructive">
+        <p style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>
           {error instanceof Error ? error.message : 'Failed to load print stats.'}
         </p>
       )}
 
       {data && (
         <>
-          {/* Stat cards */}
+          {/* Stat cards grid */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard
               label="Total Prints"
@@ -64,7 +109,11 @@ export function PrintStatsPage() {
                   ? `${(data.success_rate * 100).toFixed(1)}%`
                   : '—'
               }
-              sub={data.success_rate != null ? `${data.success_count + data.fail_count} with outcome recorded` : 'No outcome data'}
+              sub={
+                data.success_rate != null
+                  ? `${data.success_count + data.fail_count} with outcome recorded`
+                  : 'No outcome data'
+              }
             />
             <StatCard
               label="Total Filament"
@@ -81,7 +130,11 @@ export function PrintStatsPage() {
             />
             <StatCard
               label="Avg Print Time"
-              value={data.avg_print_time_s != null ? formatPrintTime(Math.round(data.avg_print_time_s)) : '—'}
+              value={
+                data.avg_print_time_s != null
+                  ? formatPrintTime(Math.round(data.avg_print_time_s))
+                  : '—'
+              }
               sub={
                 data.total_print_time_s > 0
                   ? `Total: ${formatPrintTime(data.total_print_time_s)}`
@@ -90,67 +143,64 @@ export function PrintStatsPage() {
             />
           </div>
 
-          {/* Most printed table */}
+          {/* Most Printed table */}
           {data.most_printed_items.length > 0 && (
-            <section>
-              <h2 className="text-lg font-semibold mb-3">Most Printed</h2>
-              <div className="rounded-lg border border-border overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50">
-                    <tr>
-                      <th className="py-2 px-4 text-left font-medium text-muted-foreground text-xs">
-                        #
-                      </th>
-                      <th className="py-2 px-4 text-left font-medium text-muted-foreground text-xs">
-                        Title
-                      </th>
-                      <th className="py-2 px-4 text-left font-medium text-muted-foreground text-xs">
-                        Key
-                      </th>
-                      <th className="py-2 px-4 text-right font-medium text-muted-foreground text-xs">
-                        Prints
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.most_printed_items.map((item, idx) => (
-                      <tr key={item.item_id} className="border-t border-border hover:bg-muted/30">
-                        <td className="py-2 px-4 text-xs text-muted-foreground">{idx + 1}</td>
-                        <td className="py-2 px-4">
-                          {item.item_key ? (
-                            <Link
-                              to={`/items/${item.item_key}`}
-                              className="text-primary hover:underline text-sm font-medium"
-                            >
-                              {item.title ?? item.item_key}
-                            </Link>
-                          ) : (
-                            <span className="text-sm text-muted-foreground italic">
-                              {item.title ?? '(deleted item)'}
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2 px-4 font-mono text-xs text-muted-foreground">
-                          {item.item_key ?? '—'}
-                        </td>
-                        <td className="py-2 px-4 text-right font-medium text-sm">
-                          {item.count}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div
+                style={{
+                  fontSize: 16,
+                  fontWeight: 700,
+                  color: 'var(--aurora-text)',
+                }}
+              >
+                Most Printed
               </div>
+              <DataTable columns={MOST_PRINTED_COLS}>
+                {data.most_printed_items.map((item, idx) => (
+                  <TableRow key={item.item_id}>
+                    <Td style={{ fontSize: 11, color: 'var(--aurora-muted)', width: 36 }}>
+                      {idx + 1}
+                    </Td>
+                    <Td>
+                      {item.item_key ? (
+                        <Link
+                          to={`/items/${item.item_key}`}
+                          style={{
+                            color: 'var(--aurora-accent)',
+                            textDecoration: 'none',
+                            fontWeight: 600,
+                            fontSize: 13,
+                          }}
+                          onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline')}
+                          onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none')}
+                        >
+                          {item.title ?? item.item_key}
+                        </Link>
+                      ) : (
+                        <span style={{ fontSize: 13, color: 'var(--aurora-muted)', fontStyle: 'italic' }}>
+                          {item.title ?? '(deleted item)'}
+                        </span>
+                      )}
+                    </Td>
+                    <Td style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--aurora-muted)' }}>
+                      {item.item_key ?? '—'}
+                    </Td>
+                    <Td style={{ textAlign: 'right', fontWeight: 700, fontSize: 14 }}>
+                      {item.count}
+                    </Td>
+                  </TableRow>
+                ))}
+              </DataTable>
             </section>
           )}
 
           {data.most_printed_items.length === 0 && data.total_prints === 0 && (
-            <p className="text-sm text-muted-foreground italic">
+            <p style={{ fontSize: 13, color: 'var(--aurora-muted)', fontStyle: 'italic' }}>
               No print records yet.
             </p>
           )}
         </>
       )}
-    </div>
+    </AdminPage>
   )
 }

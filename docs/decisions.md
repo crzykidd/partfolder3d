@@ -2,6 +2,57 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-28 — UI B3a: Operations admin pages Aurora restyle + shared primitives
+
+### Shared Aurora admin primitives introduced (reuse in B3b)
+
+Seven files created under `frontend/src/components/ui/` and exported from `index.ts`:
+
+| Export(s) | File | Purpose |
+|---|---|---|
+| `AdminPage`, `PageHeader` | `AdminPage.tsx` | Page wrapper (flex-col) + header (title, description, meta, actions slot) |
+| `Card`, `SectionHeader`, `CARD_STYLE`, `CARD_ACCENT_STYLE` | `Card.tsx` | Aurora glass card/panel; `accent=true` for teal-tinted callouts |
+| `Badge`, `BadgeVariant` + 5 variant helpers | `Badge.tsx` | Status/severity/behavior badge; semantic colors via Tailwind `dark:` variants; `muted`/`accent` via inline aurora vars |
+| `Button`, `FilterPill` | `Button.tsx` | `primary`/`ghost`/`danger` buttons; `FilterPill` for toggleable filter pills (active = aurora accent) |
+| `DataTable`, `TableRow`, `Td`, `Pagination` | `DataTable.tsx` | Aurora card table wrapper with thead/loading/empty; hover rows; `Pagination` component |
+| `EmptyState` | `EmptyState.tsx` | Icon + title + description empty state |
+| `Field`, `AuroraInput`, `AuroraSelect` | `Field.tsx` | Form field with uppercase label; aurora-styled input/select with onFocus/onBlur focus ring |
+
+B3b should `import { … } from '@/components/ui'` for all the above.
+
+### Style approach: mixed Tailwind layout + inline aurora vars
+
+B3a uses Tailwind classes for layout/spacing (`flex`, `gap-*`, `grid`, etc.) and
+inline `style={{ ... }}` with `var(--aurora-*)` CSS vars for theming (color,
+background, border, shadow). This matches the shell pattern and is slightly more
+class-based than B1/B2's pure-inline approach, improving maintainability for the
+table and form primitives repeated across many pages. The `Badge` component uses
+Tailwind `dark:` variants for semantic colors (green/red/amber/blue/violet/orange)
+— the cleanest approach for a fixed variant set.
+
+### DataTable: zero deps, composable children
+
+`DataTable` accepts `columns: string[]` for `<thead>` and `children` for `<tbody>`.
+Loading and empty states render as colspan rows; `TableRow`/`Td` helpers add hover
+states and consistent padding. `Pagination` is a separate component so pages can
+place it independently. No virtual scrolling added — all pages use server-side
+pagination at ≤ 50 rows per page.
+
+### Pages restyled (feature parity, no backend changes)
+
+`JobsPage`, `ScheduledJobsPage`, `IssuesPage`, `ChangesPage`, `ReviewsPage`,
+`PrintStatsPage`, `ShareAuditPage` — all behavior, endpoints, routes, query keys,
+and polling intervals preserved. `ReconcileModesCard` in ReviewsPage uses `Card`
+and `FilterPill` for the Auto/Review toggles (same UX, aurora-styled).
+
+### Untouched
+
+Shell, B1 (Catalog/Item), B2 (Import), auth/public pages, examples, and all B3b
+admin pages (Users, Invites, PasswordReset, AiProviders, SiteCapabilities, Backups,
+Export, TagAdmin, PendingTags, Settings) are untouched.
+
+---
+
 ## 2026-06-28 — UI B2: import flow Aurora restyle
 
 ### Inline-style-first approach (matching B1 pattern)
