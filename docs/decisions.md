@@ -2,6 +2,32 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Phase 5b import wizard frontend decisions
+
+### No @radix-ui/react-dialog: custom Tailwind overlay modal
+`@radix-ui/react-dialog` is not in `package.json` (only `react-dropdown-menu` and `react-slot` are).  Rather than adding a new dependency, `AddAssetModal` uses a plain `div` with `fixed inset-0 z-50 bg-black/60` backdrop and a centered panel.  Escape-key and backdrop-click close it via `useEffect` + event listener.  This matches the existing pattern in the codebase where shadcn/ui component packages are not installed — only the Tailwind + CSS variable theme is used.
+
+### Wizard step state in local React state (not URL)
+Step navigation in `ImportWizardPage` is stored in `useState<WizardStep>` rather than a URL param.  The session ID is the durable param (`/import/:sessionId`); step position is transient UI state.  If the user refreshes on step 3, they restart at step 1 — this is acceptable because PATCH calls on each step persist the data, so no work is lost.  URL-based steps would require back/forward browser nav to be handled, adding complexity with no material benefit for a linear wizard.
+
+### Polling strategy: refetchInterval as a function of session status
+TanStack Query's `refetchInterval` is passed a function (`(query) => ...`) rather than a static value.  While `status === 'processing'`, the function returns 3000 (ms); otherwise it returns `false` (no polling).  This eliminates a separate `useInterval` and keeps the polling lifecycle tied to the query data state.  The ImportsPage uses 5s polling when any session on the page is processing.
+
+### Local staged images: no preview until committed
+`ImportSessionImage.is_url` is `true` for scraped/URL images (the `path` field is the full remote URL).  For uploaded local files, `is_url` is `false` and `path` is an absolute staging filesystem path.  There is no public API endpoint to serve staged files (by design — they're in `/data/staging/`, outside the item tree).  The wizard shows a placeholder for local images ("preview after commit") rather than constructing a broken URL.  After commit, images are moved into the item directory and served via `/api/items/{key}/files/{path}`.
+
+### PendingTagsPage shows all-tags from active_only=false (no status filter in TagSummary)
+`GET /api/tags?active_only=false` returns all tags (active + pending) but the backend's `TagSummary` Pydantic schema does not include a `status` field.  This means the client cannot distinguish pending from active tags in the list response.  The PendingTagsPage therefore shows ALL tags and the Approve button is safe to call on already-active tags (the backend is idempotent: `POST /api/tags/{id}/approve` on an already-active tag returns 200 with no change).  Adding `status` to `TagSummary` would require a backend change; deferred to a future cleanup.
+
+### AddAssetModal: library selector queries /api/libraries
+A `useQuery(['libraries'])` fetches `GET /api/libraries` (all-users endpoint, no auth restriction in that router) to populate the library dropdown in both upload and URL tabs.  The query is enabled only when the modal is open (`enabled: open`) so it does not load on every page render.  `staleTime: 60_000` avoids refetching on repeated modal open/close within a minute.
+
+### Custom tab bar without @radix-ui/react-tabs
+The two-tab "Upload / From URL" switcher in `AddAssetModal` uses `useState<TabId>` + bottom-border `border-b-2 border-primary` styling on the active tab.  No Radix Tabs, no WAI-ARIA `role="tabpanel"` — simple enough for a 2-tab modal that doesn't need keyboard tab-panel navigation.
+
+### Commit redirect uses item_key from CommitResponse
+`POST /api/import-sessions/{id}/commit` returns `{ item_key, item_id, session_id }`.  The wizard `onSuccess` navigates to `/items/{item_key}` (the human-readable key used by `ItemPage`), not the integer `item_id`.  If a user navigates directly to a committed session URL, the wizard shows a "already committed" message with a link to `/catalog` (since there's no `GET /api/items/by-id/{id}` endpoint to look up the key from the integer ID).
+
 ## 2026-06-27 — Phase 5a verification fixes (orchestrator, post-agent)
 
 Two bugs were caught by the orchestrator running the migration round-trip + full test

@@ -32,6 +32,10 @@ import { InvitesPage } from '@/pages/admin/InvitesPage'
 import { PasswordResetPage } from '@/pages/admin/PasswordResetPage'
 import { JobsPage } from '@/pages/admin/JobsPage'
 import { ScheduledJobsPage } from '@/pages/admin/ScheduledJobsPage'
+import { PendingTagsPage } from '@/pages/admin/PendingTagsPage'
+
+import { ImportsPage } from '@/pages/ImportsPage'
+import { ImportWizardPage } from '@/pages/ImportWizardPage'
 
 import { SettingsPage } from '@/pages/settings/SettingsPage'
 import { ApiKeysPage } from '@/pages/settings/ApiKeysPage'
@@ -68,6 +72,10 @@ function App() {
                   <Route path="/items/:key" element={<ItemPage />} />
                   <Route path="/creators/:creatorId" element={<CreatorPage />} />
                   <Route path="/me/creations" element={<MyCreationsPage />} />
+
+                  {/* Phase 5 — Import wizard */}
+                  <Route path="/imports" element={<ImportsPage />} />
+                  <Route path="/import/:sessionId" element={<ImportWizardPage />} />
 
                   {/* Settings */}
                   <Route path="/settings" element={<SettingsPage />} />
@@ -111,6 +119,14 @@ function App() {
                     element={
                       <AdminGuard>
                         <ScheduledJobsPage />
+                      </AdminGuard>
+                    }
+                  />
+                  <Route
+                    path="/admin/pending-tags"
+                    element={
+                      <AdminGuard>
+                        <PendingTagsPage />
                       </AdminGuard>
                     }
                   />

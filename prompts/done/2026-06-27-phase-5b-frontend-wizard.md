@@ -1,10 +1,17 @@
 ---
 name: 2026-06-27-phase-5b-frontend-wizard
-status: pending
+status: done
 created: 2026-06-27
 model: sonnet
-completed:
-result:
+completed: 2026-06-27
+result: >
+  All Phase 5b frontend pieces built: API client types+functions (Phase 5 import sessions,
+  site capabilities, tag approval, libraries), AddAssetModal (upload + URL tabs, custom
+  Tailwind overlay), ImportWizardPage (5-step wizard with polling, site-setup banner,
+  tag reconciliation), ImportsPage (session list with status badges), PendingTagsPage
+  (admin pending-tag approval). AppShell gains Add Asset button + Imports + Pending Tags
+  nav links. App.tsx updated with new routes. 32 new import-wizard vitest tests.
+  npx tsc --noEmit: clean. vitest: 82/82 passed.
 ---
 
 # Task: Phase 5b — Import wizard frontend

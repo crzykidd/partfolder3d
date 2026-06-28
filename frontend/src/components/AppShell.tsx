@@ -2,10 +2,11 @@
  * AppShell — main layout: header (logo + nav + theme toggle + user menu) + page outlet.
  */
 
-import React from 'react'
+import React, { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { ThemeToggle } from './ThemeToggle'
 import { useAuth } from '@/context/AuthContext'
+import { AddAssetModal } from './AddAssetModal'
 
 /**
  * Logo using <picture> for theme-aware swap.
@@ -92,6 +93,7 @@ function UserMenu() {
 export function AppShell() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
+  const [addAssetOpen, setAddAssetOpen] = useState(false)
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -105,6 +107,7 @@ export function AppShell() {
             <NavItem to="/catalog">Catalog</NavItem>
             <NavItem to="/catalog?favorited=true">My Favorites</NavItem>
             <NavItem to="/me/creations">My Creations</NavItem>
+            <NavItem to="/imports">Imports</NavItem>
             <NavItem to="/settings">Settings</NavItem>
             <NavItem to="/settings/api-keys">API keys</NavItem>
             {isAdmin && (
@@ -114,12 +117,20 @@ export function AppShell() {
                 <NavItem to="/admin/password-reset">Reset</NavItem>
                 <NavItem to="/admin/jobs">Jobs</NavItem>
                 <NavItem to="/admin/scheduled-jobs">Schedules</NavItem>
+                <NavItem to="/admin/pending-tags">Pending Tags</NavItem>
               </>
             )}
           </nav>
 
-          {/* Right side: theme toggle + user menu */}
+          {/* Right side: Add Asset + theme toggle + user menu */}
           <div className="ml-auto flex items-center gap-4">
+            <button
+              onClick={() => setAddAssetOpen(true)}
+              className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 transition-colors"
+              aria-label="Add Asset"
+            >
+              + Add Asset
+            </button>
             <ThemeToggle />
             <UserMenu />
           </div>
@@ -130,6 +141,12 @@ export function AppShell() {
       <main className="container mx-auto px-4 py-6">
         <Outlet />
       </main>
+
+      {/* ── Add Asset Modal ── */}
+      <AddAssetModal
+        open={addAssetOpen}
+        onClose={() => setAddAssetOpen(false)}
+      />
     </div>
   )
 }
