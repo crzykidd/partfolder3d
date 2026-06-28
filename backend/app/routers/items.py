@@ -39,7 +39,7 @@ from ..auth.deps import csrf_protect, get_current_user, get_db, get_optional_use
 from ..config import settings
 from ..models.creator import Creator
 from ..models.favorite import Favorite
-from ..models.file import File, FileRole
+from ..models.file import File
 from ..models.image import Image
 from ..models.item import Item
 from ..models.library import Library
@@ -50,7 +50,6 @@ from ..storage.journal import MoveError, atomic_rename, move_to_trash
 from ..storage.keys import generate_unique_key
 from ..storage.paths import item_dir_path, item_slug, sidecar_name
 from ..storage.sidecar import SidecarFile, SidecarImage, build_sidecar, write_sidecar
-from ..worker.render_mesh import MESH_EXTENSIONS
 
 log = logging.getLogger(__name__)
 
@@ -865,7 +864,13 @@ async def rescan_item(
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, Any]:
-    """Per-item rescan (PRD §8.6): re-inventory files + resync sidecar."""
+    """Per-item rescan (PRD §8.6): re-inventory + sidecar resync via the reconcile engine.
+
+    Drives the same engine as the scheduled library scan so the per-item Rescan button
+    produces identical Issues / ChangeLog / ReviewItem outcomes.
+    """
+    from ..worker.reconcile import load_mode_settings, reconcile_one_item  # noqa: PLC0415
+
     result = await db.execute(
         select(Item)
         .options(selectinload(Item.creator))
@@ -875,56 +880,39 @@ async def rescan_item(
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found.")
 
-    item_dir = Path(item.dir_path)
-    sc_name = sidecar_name(item.title, key)
+    # Per-item user-triggered rescan uses "auto" for file_changes and sidecar_sync
+    # so changes apply immediately; the nightly library scan uses the (more
+    # conservative) DB-stored defaults.
+    mode_settings = await load_mode_settings(db)
+    mode_settings = {**mode_settings, "file_changes": "auto", "sidecar_sync": "auto"}
+    await reconcile_one_item(
+        db,
+        item,
+        mode_settings=mode_settings,
+        url_validator=None,  # URL validation requires explicit opt-in
+        source="per_item_rescan",
+    )
 
-    # Load existing File rows for cheap-first drift check
-    file_result = await db.execute(select(File).where(File.item_id == item.id))
-    db_files = list(file_result.scalars().all())
-    existing = {
-        f.path: (f.last_seen_size, f.last_seen_mtime or f.mtime, f.sha256)
-        for f in db_files
-    }
-
-    # Re-inventory
-    records = inventory_item(item_dir, sc_name, existing=existing)
-
-    to_upsert, to_delete = _apply_file_records(item, records, db_files)
-
-    for f in to_delete:
-        await db.delete(f)
-    for f in to_upsert:
-        db.add(f)
-
-    item.updated_at = datetime.now(UTC)
-    await db.flush()
-
-    # Resync sidecar
-    await _write_item_sidecar(db, item)
-
-    # Load response data
+    # Load updated response data
     tag_result = await db.execute(
         select(Tag).join(ItemTag, Tag.id == ItemTag.tag_id)
         .where(ItemTag.item_id == item.id)
     )
     tags = list(tag_result.scalars().all())
 
-    file_result2 = await db.execute(select(File).where(File.item_id == item.id))
-    files = list(file_result2.scalars().all())
+    file_result = await db.execute(select(File).where(File.item_id == item.id))
+    files = list(file_result.scalars().all())
 
     img_result = await db.execute(
         select(Image).where(Image.item_id == item.id).order_by(Image.order)
     )
     images = list(img_result.scalars().all())
 
-    # Phase 4: enqueue render job if any mesh files exist (fire-and-forget)
-    mesh_files = [
-        f for f in files
-        if f.role == FileRole.model
-        and Path(f.path).suffix.lower() in MESH_EXTENSIONS
-    ]
-    if mesh_files:
-        await _enqueue_render(item.id)
+    # Reload creator (may have changed)
+    if item.creator_id and not item.creator:
+        from ..models.creator import Creator  # noqa: PLC0415
+        creator_result = await db.execute(select(Creator).where(Creator.id == item.creator_id))
+        item.creator = creator_result.scalar_one_or_none()
 
     return _build_item_detail(item, tags, files, images)
 

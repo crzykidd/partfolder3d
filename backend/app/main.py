@@ -8,6 +8,7 @@ Phase 3: catalog UI backend — search, favorites, tag browse, creator browse,
 Phase 4: job monitor + scheduled-jobs API.
 Phase 5: import wizard — import sessions, site capabilities, inbox scanner,
          URL scraping, tag reconciliation + pending-tag approval.
+Phase 6: reconciliation / scan engine — issues, change log, review items.
 """
 
 import logging
@@ -73,15 +74,18 @@ app.add_middleware(
 from .routers import (  # noqa: E402  # noqa: E402
     api_keys,
     auth,
+    changes,
     creators,
     downloads,
     import_sessions,
     invites,
+    issues,
     items,
     jobs,
     libraries,
     me,
     password_reset,
+    reviews,
     setup,
     tags,
     users,
@@ -108,6 +112,10 @@ app.include_router(jobs.router)
 app.include_router(scheduled_jobs_router.router)
 # Phase 5
 app.include_router(import_sessions.router)
+# Phase 6
+app.include_router(issues.router)
+app.include_router(changes.router)
+app.include_router(reviews.router)
 
 
 # ---------------------------------------------------------------------------

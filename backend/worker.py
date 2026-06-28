@@ -6,6 +6,8 @@ Phase 4: render_item — renders mesh thumbnails; scheduled-job framework;
          cleanup_expired_bundles (cron) + exec_scheduled_job (run-now).
 Phase 5: process_import_session — scrape/sidecar-read/tag-reconcile for import wizard.
          inbox_scan — daily scheduled job to detect new inbox subfolders.
+Phase 6: library_reconcile_scan — daily scheduled reconciliation scan;
+         apply_review_item — apply an approved ReviewItem's proposed_action.
 """
 
 import asyncio
@@ -38,13 +40,14 @@ SCHEDULED_JOB_REGISTRY: dict[str, tuple[str, str]] = {
         "Delete ZIP bundles that have passed their expiry time (~24 h).",
         "daily at 00:00 UTC",
     ),
-    "placeholder_reindex": (
-        "Placeholder for future full-library reindex (no-op until Phase 6).",
-        "daily at 01:00 UTC",
-    ),
     "inbox_scan": (
         "Scan the inbox directory for new asset folders and enqueue import sessions.",
         "daily at 02:00 UTC",
+    ),
+    "library_reconcile_scan": (
+        "Daily library reconciliation scan — detects out-of-band edits, new/removed files, "
+        "sidecar drift, orphans, and integrity issues.",
+        "daily at 03:00 UTC",
     ),
 }
 
@@ -402,9 +405,17 @@ async def _cleanup_expired_bundles_core(ctx: dict) -> None:
     log.info("cleanup_expired_bundles: deleted %d expired bundle(s)", deleted)
 
 
-async def _placeholder_reindex_core(_ctx: dict) -> None:
-    """Placeholder for the full library reindex (Phase 6).  Currently a no-op."""
-    log.info("placeholder_reindex: no-op (Phase 6 not yet implemented)")
+async def _library_reconcile_scan_core(_ctx: dict) -> None:
+    """Daily library reconciliation scan (Phase 6).
+
+    Calls the reconcile engine for every item in every enabled library:
+    sidecar⇄DB sync, re-render on file change, new/removed file detection,
+    orphan / dead-link / integrity checks.
+    """
+    from app.worker.reconcile import reconcile_library_scan  # noqa: PLC0415
+
+    stats = await reconcile_library_scan(url_validator=None)
+    log.info("library_reconcile_scan: %s", stats)
 
 
 # ---------------------------------------------------------------------------
@@ -868,8 +879,8 @@ async def _inbox_scan_core(ctx: dict) -> None:
 
 _SCHED_FUNCS = {
     "expired_zip_cleanup": _cleanup_expired_bundles_core,
-    "placeholder_reindex": _placeholder_reindex_core,
     "inbox_scan": _inbox_scan_core,
+    "library_reconcile_scan": _library_reconcile_scan_core,
 }
 
 
@@ -891,8 +902,13 @@ async def exec_scheduled_job(ctx: dict, name: str) -> None:
         error = str(exc)
         log.exception("exec_scheduled_job: %r failed", name)
     finally:
-        # Determine next_run hour based on job
-        hour = 0 if name == "expired_zip_cleanup" else 1
+        # Determine next_run hour based on job name
+        _hour_map = {
+            "expired_zip_cleanup": 0,
+            "inbox_scan": 2,
+            "library_reconcile_scan": 3,
+        }
+        hour = _hour_map.get(name, 1)
         await _sj_finish(name, error=error, hour=hour, minute=0)
 
 
@@ -905,12 +921,12 @@ async def cron_expired_zip_cleanup(ctx: dict) -> None:
     await exec_scheduled_job(ctx, "expired_zip_cleanup")
 
 
-async def cron_placeholder_reindex(ctx: dict) -> None:
-    await exec_scheduled_job(ctx, "placeholder_reindex")
-
-
 async def cron_inbox_scan(ctx: dict) -> None:
     await exec_scheduled_job(ctx, "inbox_scan")
+
+
+async def cron_library_reconcile_scan(ctx: dict) -> None:
+    await exec_scheduled_job(ctx, "library_reconcile_scan")
 
 
 # ---------------------------------------------------------------------------
@@ -947,6 +963,32 @@ async def startup(ctx: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+async def apply_review_item(ctx: dict, review_item_id: int) -> None:
+    """Apply an approved ReviewItem's proposed_action.
+
+    Called by POST /api/reviews/{id}/approve.  Reads the ReviewItem, applies its
+    proposed_action via the reconcile engine, writes a ChangeLog entry, and marks
+    the ReviewItem as approved.
+    """
+    import sqlalchemy as sa  # noqa: PLC0415
+
+    from app.db import SessionLocal  # noqa: PLC0415
+    from app.models.review_item import ReviewItem  # noqa: PLC0415
+    from app.worker.reconcile import apply_review_item_action  # noqa: PLC0415
+
+    async with SessionLocal() as db:
+        result = await db.execute(
+            sa.select(ReviewItem).where(ReviewItem.id == review_item_id)
+        )
+        rv = result.scalar_one_or_none()
+        if rv is None:
+            log.warning("apply_review_item: review_item %s not found", review_item_id)
+            return
+        await apply_review_item_action(db, rv)
+        await db.commit()
+    log.info("apply_review_item: review_item %s applied and approved", review_item_id)
+
+
 class WorkerSettings:
     """arq worker configuration."""
 
@@ -956,12 +998,14 @@ class WorkerSettings:
         exec_scheduled_job,
         # Phase 5
         process_import_session,
+        # Phase 6
+        apply_review_item,
     ]
 
     cron_jobs = [
         cron(cron_expired_zip_cleanup, hour=0, minute=0, run_at_startup=False),
-        cron(cron_placeholder_reindex, hour=1, minute=0, run_at_startup=False),
         cron(cron_inbox_scan, hour=2, minute=0, run_at_startup=False),
+        cron(cron_library_reconcile_scan, hour=3, minute=0, run_at_startup=False),
     ]
 
     on_startup = startup

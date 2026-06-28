@@ -6,6 +6,7 @@ All models import from this package.  Alembic env.py imports Base.metadata here.
 from .ai_provider import AiProvider, AiProviderType
 from .api_key import ApiKey
 from .base import Base
+from .change_log import ChangeLog, ChangeSource
 from .creator import Creator
 from .download_bundle import DownloadBundle
 from .favorite import Favorite
@@ -19,10 +20,12 @@ from .import_session import (
     ImportSourceType,
 )
 from .invite import Invite, InviteStatus
+from .issue import Issue, IssueSeverity, IssueStatus, IssueType
 from .item import Item
 from .job import Job
 from .library import Library
 from .password_reset import PasswordResetToken
+from .review_item import ReviewItem, ReviewStatus
 from .scheduled_job import ScheduledJob
 from .session import UserSession
 from .setting import Setting
@@ -68,4 +71,13 @@ __all__ = [
     "ImportSourceType",
     "SiteCapability",
     "SiteToken",
+    # Phase 6
+    "Issue",
+    "IssueType",
+    "IssueSeverity",
+    "IssueStatus",
+    "ChangeLog",
+    "ChangeSource",
+    "ReviewItem",
+    "ReviewStatus",
 ]

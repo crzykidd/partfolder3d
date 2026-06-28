@@ -2,6 +2,58 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Phase 6a reconcile engine decisions
+
+### Issue / ChangeLog / ReviewItem shapes
+
+Three new models represent distinct concerns: `Issue` is a durably-recorded problem
+(survives until resolved/ignored, FK to item nullable for library-level orphans).
+`ChangeLog` is an append-only audit trail (no update path, only created_at).
+`ReviewItem` is a pending decision record (status: pending → approved/rejected,
+resolved_by_id for actor tracking).  A single combined table was rejected because the
+three have incompatible lifecycles.
+
+### Sidecar sync direction: three-way mtime comparison
+
+Three timestamps are compared to determine sync direction: `sidecar_written_at`
+(from `sidecar.updated_at` field — when the app last wrote the file),
+`sidecar_file_mtime` (OS mtime), and `item.updated_at` (DB last-modified).
+`sidecar_externally_edited` = sidecar_file_mtime moved >5 s past sidecar_written_at.
+`db_changed_since_sync` = item.updated_at moved >5 s past sidecar_written_at.
+Both true → conflict Issue.  Only DB newer → push DB to sidecar (always auto).
+Only sidecar newer → pull to DB or ReviewItem (per mode).  The 5 s tolerance
+(`SIDECAR_SYNC_TOLERANCE_SECONDS`) guards against filesystem timestamp resolution.
+
+### Default reconcile modes are conservative
+
+`sidecar_sync="review"` and `file_changes="review"` by default: the nightly library
+scan creates ReviewItems rather than auto-applying changes, protecting against
+unexpected sidecar edits or stray files silently mutating the catalog.  Only
+`re_render="auto"` because a re-render has no data-loss risk.  Modes are stored as
+`settings` table entries (`scan.*`) and can be changed per-installation.
+
+### Per-item rescan uses "auto" modes regardless of DB settings
+
+`POST /api/items/{key}/rescan` overrides `file_changes` and `sidecar_sync` to "auto"
+after loading DB settings.  The user explicitly requested a rescan of that item, so
+changes should apply immediately — matching pre-Phase-6 behavior.  The conservative
+DB defaults apply only to the unattended nightly library scan.
+
+### Reconcile engine isolated from routers (circular import prevention)
+
+`backend/app/worker/reconcile.py` cannot import from `app.routers.items` (routers are
+at a higher layer).  The sidecar-write helper `_write_sidecar_for_item` is duplicated
+in `reconcile.py` using the same `build_sidecar` + `write_sidecar` primitives.  This
+is intentional duplication to preserve layer boundaries; the sidecar write logic is
+stable and small.
+
+### §8.5 isolated-per-item transactions in library scan
+
+`reconcile_library_scan` opens a fresh `SessionLocal()` for every item.  If one item's
+reconcile transaction fails, the exception is caught, a best-effort Issue is recorded
+in a second transaction, and the scan continues.  This matches the §8.5 PRD contract:
+"one bad item → Issue, never blocks rest."
+
 ## 2026-06-27 — Phase 5b import wizard frontend decisions
 
 ### No @radix-ui/react-dialog: custom Tailwind overlay modal
