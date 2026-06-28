@@ -45,5 +45,17 @@ class Settings(BaseSettings):
     # Override with "egl", "osmesa", or "vtk" to force a specific backend.
     RENDER_BACKEND: str = "auto"
 
+    # ---- Import / Inbox (Phase 5) ----
+    # Directory the inbox scanner watches for incoming asset folders.
+    # Each direct subdirectory is treated as one pending import.
+    INBOX_DIR: str = "/data/inbox"
+    # Minimum seconds since a folder's last modification before it is picked up
+    # by the scanner (prevents ingesting folders that are still being written).
+    INBOX_MTIME_SETTLE_SECONDS: int = 30
+    # HTTP timeout (seconds) for URL scrape requests.
+    SCRAPE_TIMEOUT: int = 15
+    # Maximum number of images to collect per scrape.
+    SCRAPE_MAX_IMAGES: int = 20
+
 
 settings = Settings()

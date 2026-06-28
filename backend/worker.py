@@ -4,6 +4,8 @@ Phase 0: empty task set. Connects to Redis and idles.
 Phase 3: build_zip_bundle — builds a ZIP of an item directory for download.
 Phase 4: render_item — renders mesh thumbnails; scheduled-job framework;
          cleanup_expired_bundles (cron) + exec_scheduled_job (run-now).
+Phase 5: process_import_session — scrape/sidecar-read/tag-reconcile for import wizard.
+         inbox_scan — daily scheduled job to detect new inbox subfolders.
 """
 
 import asyncio
@@ -39,6 +41,10 @@ SCHEDULED_JOB_REGISTRY: dict[str, tuple[str, str]] = {
     "placeholder_reindex": (
         "Placeholder for future full-library reindex (no-op until Phase 6).",
         "daily at 01:00 UTC",
+    ),
+    "inbox_scan": (
+        "Scan the inbox directory for new asset folders and enqueue import sessions.",
+        "daily at 02:00 UTC",
     ),
 }
 
@@ -402,12 +408,468 @@ async def _placeholder_reindex_core(_ctx: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase 5 tasks
+# ---------------------------------------------------------------------------
+
+
+async def process_import_session(ctx: dict, session_id: str) -> None:
+    """Pre-fill an ImportSession: scrape URL, read sidecar, reconcile tags.
+
+    Flow:
+      1. Load the session.
+      2. If source_url: scrape metadata/images/tags/creator.
+      3. If inbox_folder: walk for model files; read sidecar if present.
+      4. Reconcile raw tags (alias map → confirmed; unknown → pending suggestions).
+      5. Set session status to 'pending_wizard' (or 'failed' on error).
+
+    The wizard does NOT auto-finalize — the user must confirm and call /commit.
+    A failure marks the session 'failed' with an error message; the wizard can
+    still be used manually (manual path always works).
+    """
+    import asyncio  # noqa: PLC0415
+    import uuid as _uuid  # noqa: PLC0415
+
+    import sqlalchemy as sa  # noqa: PLC0415
+
+    from app.db import SessionLocal  # noqa: PLC0415
+    from app.models.import_session import (  # noqa: PLC0415
+        ImportSession,
+        ImportSessionImage,
+        ImportSessionStatus,
+        ImportSourceType,
+    )
+    from app.models.site_capability import SiteCapability  # noqa: PLC0415
+    from app.storage.scraper import extract_domain, scrape_url  # noqa: PLC0415
+
+    try:
+        sid = _uuid.UUID(session_id)
+    except ValueError:
+        log.error("process_import_session: invalid session_id %r", session_id)
+        return
+
+    # Reload session
+    async with SessionLocal() as db:
+        result = await db.execute(
+            sa.select(ImportSession).where(ImportSession.id == sid)
+        )
+        session = result.scalar_one_or_none()
+        if session is None:
+            log.warning("process_import_session: session %s not found", session_id)
+            return
+        if session.status not in (
+            ImportSessionStatus.processing, ImportSessionStatus.draft
+        ):
+            log.info(
+                "process_import_session: session %s is %s, skipping",
+                session_id, session.status,
+            )
+            return
+
+    raw_tags: list[str] = []
+    scraped_title: str | None = None
+    scraped_description: str | None = None
+    scraped_creator: str | None = None
+    scraped_creator_url: str | None = None
+    scraped_license: str | None = None
+    scraped_source_site: str | None = None
+    image_urls: list[str] = []
+    error: str | None = None
+
+    try:
+        async with SessionLocal() as db:
+            session_result = await db.execute(
+                sa.select(ImportSession).where(ImportSession.id == sid)
+            )
+            session = session_result.scalar_one()
+
+            # ---- URL scrape ----
+            if session.source_url:
+                from app.config import settings as _settings  # noqa: PLC0415
+
+                domain = extract_domain(session.source_url)
+
+                # Check site capability
+                cap_result = await db.execute(
+                    sa.select(SiteCapability).where(SiteCapability.domain == domain)
+                )
+                cap = cap_result.scalar_one_or_none()
+
+                should_scrape = True
+                if cap and cap.is_manual_only:
+                    should_scrape = False
+                    log.info(
+                        "process_import_session: %s is manual-only, skip scrape",
+                        domain,
+                    )
+
+                if should_scrape:
+                    # Run blocking scrape in a thread
+                    sr = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: scrape_url(
+                            session.source_url,
+                            timeout=_settings.SCRAPE_TIMEOUT,
+                            max_images=_settings.SCRAPE_MAX_IMAGES,
+                        ),
+                    )
+
+                    # Record/update site capability
+                    if cap is None:
+                        cap = SiteCapability(
+                            domain=domain,
+                            can_scrape_metadata=not sr.blocked,
+                            can_scrape_images=bool(sr.image_urls),
+                            requires_token=False,
+                            is_manual_only=False,
+                        )
+                        db.add(cap)
+                    else:
+                        if not sr.blocked:
+                            cap.can_scrape_metadata = True
+                        if sr.image_urls:
+                            cap.can_scrape_images = True
+                    cap.last_probed_at = datetime.now(UTC)
+                    await db.flush()
+
+                    if not sr.blocked:
+                        scraped_title = sr.title
+                        scraped_description = sr.description
+                        scraped_creator = sr.creator_name
+                        scraped_creator_url = sr.creator_profile_url
+                        scraped_license = sr.license
+                        scraped_source_site = sr.source_site
+                        raw_tags = sr.raw_tags
+                        image_urls = sr.image_urls
+
+            # ---- Inbox folder sidecar read ----
+            if session.source_type == ImportSourceType.inbox and session.inbox_folder:
+                from pathlib import Path  # noqa: PLC0415
+
+                from app.storage.sidecar import read_sidecar  # noqa: PLC0415
+
+                inbox_path = Path(session.inbox_folder)
+                # Try to find a sidecar in the folder
+                # Look for .yml files that match the sidecar pattern
+                yml_files = list(inbox_path.glob("*.yml"))
+                for yf in yml_files:
+                    sc = read_sidecar(inbox_path, yf.stem, yf.stem)
+                    if sc is None:
+                        # Try the generic sidecar reader with the file directly
+                        try:
+                            import yaml  # noqa: PLC0415
+                            raw = yaml.safe_load(yf.read_text(encoding="utf-8"))
+                            if isinstance(raw, dict) and "schema_version" in raw:
+                                # It's a sidecar; extract fields
+                                if not scraped_title and raw.get("title"):
+                                    scraped_title = str(raw["title"])
+                                if not scraped_description and raw.get("description"):
+                                    scraped_description = str(raw["description"])
+                                src = raw.get("source") or {}
+                                if isinstance(src, dict):
+                                    if not session.source_url and src.get("url"):
+                                        # Update session source URL
+                                        session.source_url = str(src["url"])
+                                    if not scraped_license and src.get("license"):
+                                        scraped_license = str(src["license"])
+                                    if not scraped_source_site and src.get("site"):
+                                        scraped_source_site = str(src["site"])
+                                creator_d = raw.get("creator")
+                                if isinstance(creator_d, dict) and not scraped_creator:
+                                    scraped_creator = creator_d.get("name")
+                                    scraped_creator_url = creator_d.get("profile_url")
+                                sidecar_tags = [
+                                    str(t) for t in (raw.get("tags") or [])
+                                ]
+                                if sidecar_tags:
+                                    raw_tags = sidecar_tags + raw_tags
+                        except Exception:
+                            log.debug("process_import_session: sidecar parse failed for %s", yf)
+                    else:
+                        # read_sidecar succeeded
+                        if not scraped_title:
+                            scraped_title = sc.title
+                        if not scraped_description:
+                            scraped_description = sc.description
+                        if not scraped_license:
+                            scraped_license = sc.license
+                        if not scraped_source_site:
+                            scraped_source_site = sc.source_site
+                        if sc.creator:
+                            scraped_creator = sc.creator.name
+                            scraped_creator_url = sc.creator.profile_url
+                        raw_tags = list(sc.tags) + raw_tags
+                    break  # Use first sidecar found
+
+            # ---- Tag reconciliation ----
+            from app.routers.import_sessions import reconcile_tags  # noqa: PLC0415
+
+            tag_state = (
+                await reconcile_tags(db, raw_tags)
+                if raw_tags
+                else {"confirmed": [], "pending": []}
+            )
+
+            # ---- Update session ----
+            if not session.suggested_title:
+                session.suggested_title = scraped_title
+            if not session.confirmed_title:
+                session.confirmed_title = scraped_title
+            if not session.description:
+                session.description = scraped_description
+            if not session.license:
+                session.license = scraped_license
+            if not session.source_site:
+                session.source_site = scraped_source_site
+            if not session.creator_name:
+                session.creator_name = scraped_creator
+            if not session.creator_profile_url:
+                session.creator_profile_url = scraped_creator_url
+            if not session.creator_source_site and scraped_source_site:
+                session.creator_source_site = scraped_source_site
+
+            session.tag_state = tag_state
+            session.status = ImportSessionStatus.pending_wizard
+            session.updated_at = datetime.now(UTC)
+
+            # Add scraped image URLs to session images
+            existing_orders = {img.order for img in await _load_session_images(db, sid)}
+            for i, img_url in enumerate(image_urls):
+                order = i + len(existing_orders)
+                img = ImportSessionImage(
+                    session_id=session.id,
+                    path=img_url,
+                    is_url=True,
+                    source="scrape",
+                    order=order,
+                    is_default=(order == 0 and not existing_orders),
+                )
+                db.add(img)
+
+            await db.commit()
+            log.info(
+                "process_import_session: session %s → pending_wizard "
+                "(tags confirmed=%d pending=%d images=%d)",
+                session_id,
+                len(tag_state.get("confirmed", [])),
+                len(tag_state.get("pending", [])),
+                len(image_urls),
+            )
+
+    except Exception as exc:
+        error = str(exc)
+        log.exception("process_import_session: failed for session %s", session_id)
+        async with SessionLocal() as db:
+            try:
+                res = await db.execute(
+                    sa.select(ImportSession).where(ImportSession.id == sid)
+                )
+                session = res.scalar_one_or_none()
+                if session:
+                    session.status = ImportSessionStatus.failed
+                    session.error = error
+                    session.updated_at = datetime.now(UTC)
+                    await db.commit()
+            except Exception:
+                log.exception(
+                    "process_import_session: could not mark session %s failed",
+                    session_id,
+                )
+
+
+async def _load_session_images(db: object, sid: object) -> list:
+    """Helper: load existing ImportSessionImage rows for a session."""
+    import sqlalchemy as sa  # noqa: PLC0415
+
+    from app.models.import_session import ImportSessionImage  # noqa: PLC0415
+
+    result = await db.execute(  # type: ignore[union-attr]
+        sa.select(ImportSessionImage).where(ImportSessionImage.session_id == sid)
+    )
+    return list(result.scalars().all())
+
+
+async def _inbox_scan_core(ctx: dict) -> None:
+    """Scan the inbox directory for new asset folders.
+
+    Each direct subdirectory of INBOX_DIR is treated as one pending import.
+    Safety: a folder is only ingested if its mtime is older than
+    INBOX_MTIME_SETTLE_SECONDS (prevents picking up folders that are still
+    being written — e.g. from a large network transfer).
+
+    Detects model files + optional URL/link file + optional sidecar.
+    Creates an ImportSession per new folder and enqueues process_import_session.
+
+    Already-tracked folders (those that already have a session with the same
+    inbox_folder path) are skipped.
+    """
+    import time  # noqa: PLC0415
+
+    import sqlalchemy as sa  # noqa: PLC0415
+
+    from app.config import settings as _settings  # noqa: PLC0415
+    from app.db import SessionLocal  # noqa: PLC0415
+    from app.models.import_session import (  # noqa: PLC0415
+        ImportSession,
+        ImportSessionFile,
+        ImportSessionStatus,
+        ImportSourceType,
+    )
+    from app.storage.inventory import MODEL_EXTENSIONS  # noqa: PLC0415
+
+    inbox_dir = Path(_settings.INBOX_DIR)
+    if not inbox_dir.is_dir():
+        log.info("inbox_scan: inbox dir %s does not exist, skipping", inbox_dir)
+        return
+
+    settle = _settings.INBOX_MTIME_SETTLE_SECONDS
+    now_ts = time.time()
+
+    enqueued = 0
+    skipped_settle = 0
+    skipped_tracked = 0
+
+    async with SessionLocal() as db:
+        # Load all known inbox_folder paths to skip already-tracked ones
+        tracked_result = await db.execute(
+            sa.select(ImportSession.inbox_folder).where(
+                ImportSession.inbox_folder.is_not(None),
+                ImportSession.status.not_in([
+                    ImportSessionStatus.cancelled,
+                    ImportSessionStatus.failed,
+                ]),
+            )
+        )
+        tracked_folders: set[str] = {row[0] for row in tracked_result.all() if row[0]}
+
+        for entry in sorted(inbox_dir.iterdir()):
+            if not entry.is_dir():
+                continue
+
+            folder_str = str(entry)
+
+            # Skip already-tracked
+            if folder_str in tracked_folders:
+                skipped_tracked += 1
+                continue
+
+            # mtime settle check
+            try:
+                stat = entry.stat()
+                age_seconds = now_ts - stat.st_mtime
+                if age_seconds < settle:
+                    skipped_settle += 1
+                    log.debug(
+                        "inbox_scan: skipping %s (mtime too recent: %.1fs < %ds)",
+                        entry.name, age_seconds, settle,
+                    )
+                    continue
+            except OSError:
+                continue
+
+            # Look for model files and optional URL/link file
+            model_files: list[Path] = []
+            url_from_link: str | None = None
+
+            for child in entry.rglob("*"):
+                if child.is_file():
+                    ext = child.suffix.lower()
+                    if ext in MODEL_EXTENSIONS:
+                        model_files.append(child)
+                    elif ext in (".url", ".webloc", ".desktop") or child.name.lower() in (
+                        "url.txt", "source.txt", "link.txt"
+                    ):
+                        # Try to extract a URL from the file
+                        try:
+                            content = child.read_text(encoding="utf-8", errors="ignore")
+                            for line in content.splitlines():
+                                line = line.strip()
+                                if line.startswith("http"):
+                                    url_from_link = line
+                                    break
+                                # .url file format: URL=https://...
+                                if "=" in line:
+                                    k, _, v = line.partition("=")
+                                    if k.strip().upper() == "URL" and v.strip().startswith("http"):
+                                        url_from_link = v.strip()
+                                        break
+                        except Exception:
+                            pass
+
+            if not model_files and not url_from_link:
+                log.debug("inbox_scan: %s has no model files or URL, skipping", entry.name)
+                continue
+
+            # Find the first admin user to assign ownership
+            # (inbox scan is a system operation; use admin user)
+            from app.models.user import User, UserRole  # noqa: PLC0415
+
+            admin_result = await db.execute(
+                sa.select(User).where(User.role == UserRole.admin).limit(1)
+            )
+            admin = admin_result.scalar_one_or_none()
+            if admin is None:
+                log.warning("inbox_scan: no admin user found; cannot create sessions")
+                break
+
+            # Create an ImportSession for this inbox folder
+            session = ImportSession(
+                status=ImportSessionStatus.draft,
+                source_type=ImportSourceType.inbox,
+                source_url=url_from_link,
+                inbox_folder=folder_str,
+                suggested_title=entry.name,
+                confirmed_title=entry.name,
+                created_by_id=admin.id,
+            )
+            db.add(session)
+            await db.flush()
+            await db.refresh(session)
+
+            # Record model files as session files
+            for mf in model_files:
+                sf = ImportSessionFile(
+                    session_id=session.id,
+                    staged_path=str(mf),
+                    original_name=mf.name,
+                    role="model",
+                    size=mf.stat().st_size,
+                )
+                db.add(sf)
+
+            session.status = ImportSessionStatus.processing
+            await db.commit()
+
+            # Enqueue the processing job
+            try:
+                from arq import create_pool  # noqa: PLC0415
+                from arq.connections import RedisSettings  # noqa: PLC0415
+
+                redis = await create_pool(
+                    RedisSettings.from_dsn(_settings.REDIS_URL)
+                )
+                await redis.enqueue_job("process_import_session", str(session.id))
+                await redis.aclose()
+                enqueued += 1
+            except Exception:
+                log.exception(
+                    "inbox_scan: failed to enqueue process job for session %s",
+                    session.id,
+                )
+
+    log.info(
+        "inbox_scan: found %d new import(s) (skipped settle=%d, tracked=%d)",
+        enqueued, skipped_settle, skipped_tracked,
+    )
+
+
+# ---------------------------------------------------------------------------
 # exec_scheduled_job — dispatches named job; used for "run-now" from the API
 # ---------------------------------------------------------------------------
 
 _SCHED_FUNCS = {
     "expired_zip_cleanup": _cleanup_expired_bundles_core,
     "placeholder_reindex": _placeholder_reindex_core,
+    "inbox_scan": _inbox_scan_core,
 }
 
 
@@ -445,6 +907,10 @@ async def cron_expired_zip_cleanup(ctx: dict) -> None:
 
 async def cron_placeholder_reindex(ctx: dict) -> None:
     await exec_scheduled_job(ctx, "placeholder_reindex")
+
+
+async def cron_inbox_scan(ctx: dict) -> None:
+    await exec_scheduled_job(ctx, "inbox_scan")
 
 
 # ---------------------------------------------------------------------------
@@ -488,11 +954,14 @@ class WorkerSettings:
         build_zip_bundle,
         render_item,
         exec_scheduled_job,
+        # Phase 5
+        process_import_session,
     ]
 
     cron_jobs = [
         cron(cron_expired_zip_cleanup, hour=0, minute=0, run_at_startup=False),
         cron(cron_placeholder_reindex, hour=1, minute=0, run_at_startup=False),
+        cron(cron_inbox_scan, hour=2, minute=0, run_at_startup=False),
     ]
 
     on_startup = startup

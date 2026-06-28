@@ -6,6 +6,8 @@ Phase 2: libraries, storage, sidecar, item core added.
 Phase 3: catalog UI backend — search, favorites, tag browse, creator browse,
          downloads (single file + queued ZIP), set-default-image, path-prefix.
 Phase 4: job monitor + scheduled-jobs API.
+Phase 5: import wizard — import sessions, site capabilities, inbox scanner,
+         URL scraping, tag reconciliation + pending-tag approval.
 """
 
 import logging
@@ -73,6 +75,7 @@ from .routers import (  # noqa: E402  # noqa: E402
     auth,
     creators,
     downloads,
+    import_sessions,
     invites,
     items,
     jobs,
@@ -103,6 +106,8 @@ app.include_router(downloads.router)
 # Phase 4
 app.include_router(jobs.router)
 app.include_router(scheduled_jobs_router.router)
+# Phase 5
+app.include_router(import_sessions.router)
 
 
 # ---------------------------------------------------------------------------

@@ -44,6 +44,13 @@ PyOpenGL>=3.1.0
 vtk==9.3.1
 numpy>=1.24.0,<3.0
 
+# Import wizard / URL scraping (Phase 5)
+# httpx is already listed under Dev/testing (used in tests); keep it there.
+# selectolax: fast CSS-based HTML parser for scraping Open Graph / meta tags.
+selectolax==0.4.10
+# python-multipart: required by FastAPI for the Add Asset multipart file upload.
+python-multipart==0.0.20
+
 # Dev / testing
 ruff==0.8.4
 pytest==8.3.4

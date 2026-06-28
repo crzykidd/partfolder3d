@@ -2,6 +2,110 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Phase 5a verification fixes (orchestrator, post-agent)
+
+Two bugs were caught by the orchestrator running the migration round-trip + full test
+suite against an ephemeral Postgres (the executing agent had no DB and could only run the
+6 pure-unit tests):
+
+- **`CREATE TYPE IF NOT EXISTS` is not valid Postgres** — Postgres has no `IF NOT EXISTS`
+  for `CREATE TYPE`. Migration `0006` now guards each enum type in a
+  `DO $$ BEGIN ... EXCEPTION WHEN duplicate_object THEN null; END $$;` block, which keeps it
+  re-runnable and matches the `DROP TYPE IF EXISTS` already in `downgrade()`. Verified
+  upgrade→downgrade→upgrade ends at `0006 (head)`.
+- **`python-multipart` was missing from `requirements.txt`** — FastAPI raises at import
+  time when an endpoint uses `Form`/`File` (the Add Asset multipart upload) without it, so
+  the app would not boot. Added `python-multipart==0.0.20`. With it installed, the full
+  suite is **189 passed** (167 prior + 22 new Phase 5).
+
+## 2026-06-27 — Phase 5 import wizard decisions
+
+### Import-session model shape: staging entity, not job-payload JSON
+
+An `ImportSession` table (not a JSON blob inside a `jobs.payload`) was chosen as the
+staging entity.  Rationale: sessions need to be efficiently listed, paginated, filtered by
+status, and patched independently of the background job that processes them.  A job-payload
+approach would require loading the full jobs table and deserializing JSON for every list
+query.  The ImportSession has a nullable `job_id FK → jobs.id` to track the async processing
+step, and a nullable `item_id FK → items.id` to record the committed result.  The Job row is
+created by the `process_import_session` arq task; the ImportSession is the durable,
+user-facing record.
+
+### Item directory is NOT created until commit
+
+The staging entity holds a `staging_dir` (uploaded files) or `inbox_folder` (inbox files)
+reference.  The actual item directory (named from the confirmed title) is created only at
+commit time by the commit endpoint.  This means a corrected title always yields the right
+path the first time, and there are no half-named dirs to clean up on cancel/failure.
+
+### Commit reuses the create_item helper path
+
+The `POST /api/import-sessions/{id}/commit` endpoint calls the same module-level helpers
+used by `create_item` — `_attach_tags`, `_write_item_sidecar`, `_update_search_vector`,
+`_enqueue_render` — imported from `routers/items.py`.  Files are moved (via `Path.replace()`,
+falling back to `shutil.copy2 + unlink` on cross-device) into the item dir, then
+`inventory_item()` walks the result to create File rows.  A committed import is
+indistinguishable from a normal item.
+
+### Inbox scan safety: mtime-settle check
+
+The inbox scanner skips any subfolder whose `mtime` is newer than
+`INBOX_MTIME_SETTLE_SECONDS` (default 30 s).  This prevents ingesting a folder that is
+still being written (e.g. a large network copy).  inotify was considered for real-time
+detection but deferred: a periodic scan (daily by default, run-now-able) is sufficient for
+Phase 5 and avoids the complexity of inotify kernel subscription lifecycle.
+
+### Scrape library: httpx + selectolax
+
+`httpx` (already in `requirements.txt`) handles HTTP.  `selectolax` (added at 0.4.10)
+handles HTML parsing via a fast CSS-selector API.  `beautifulsoup4` was considered but
+`selectolax` is significantly lighter and faster for the Open-Graph / meta-tag extraction
+pattern used here.  The scraper extracts `og:title`, `og:description`, `og:image`,
+`og:site_name`, `meta[name=keywords]`, and JSON-LD `keywords`.
+
+### Robots.txt stance: check before every scrape, cache per session
+
+`urllib.robotparser.RobotFileParser` is used (stdlib, no extra dep).  The result is cached
+in-process for the duration of a worker invocation (not persisted to DB — a per-deploy
+memory cache is sufficient given the low scrape frequency).  The scraper uses the
+user-agent string `PartFolder3D/1 (+https://github.com/crzykidd/partfolder3d)`.  Scrape
+failures (timeout, non-200, robots block) degrade gracefully: the session remains in
+`pending_wizard` but with empty scraped fields; the user fills them manually.
+
+### Site-capabilities table: probed on first hit, stored per domain
+
+A `site_capabilities` row is created or updated the first time a domain is scraped.
+`can_scrape_metadata` and `can_scrape_images` are set from the observed scrape result.
+`requires_token` and `is_manual_only` are user-settable overrides.  Tokens are stored in
+a separate `site_tokens` table, encrypted with the instance Fernet key (same as API-key
+encryption from Phase 1).  Plaintext tokens are never persisted to the DB.
+
+### Tag reconciliation / pending-tag approval flow
+
+Phase 5 wires the existing `TagAlias` schema (already in DB from Phase 2) into the import
+wizard:
+  1. Exact name match → confirmed (active or pending tag both OK).
+  2. Alias lookup → map to canonical name → confirmed.
+  3. Unknown → goes to `pending` list in `tag_state JSONB`.
+At commit time, pending tags are created with `TagStatus.pending` (not yet canonical) and
+attached to the item.  Admins promote them via `POST /api/tags/{id}/approve`.  The manual
+path (user types/selects tags directly via PATCH on the session) always works; tag
+reconciliation is best-effort pre-fill.
+
+### Share-link import: stub only (Phase 7)
+
+`POST /api/import-sessions/from-share-link` returns HTTP 501 with a clear message.  The
+full instance-to-instance import flow is deferred to Phase 7.
+
+### Phase 5 split: backend (5a) complete; frontend (5b) deferred
+
+The backend (models, migration 0006, scraper, reconciliation, import sessions + site
+capabilities endpoints, inbox scan + process_import_session worker tasks, tag approval
+endpoint) is complete.  The frontend wizard UI (Add Asset modal, import wizard step
+component, inbox/pending list, site-setup prompt) is deferred to the
+`prompts/2026-06-27-phase-5b-frontend-wizard.md` handoff so each agent gets a clean,
+focused scope.
+
 ## 2026-06-27 — Phase 4 worker + rendering decisions
 
 ### Render backend that actually works: pyrender + OSMesa (not VTK)
