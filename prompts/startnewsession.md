@@ -8,7 +8,7 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-06-27
+**Last updated:** 2026-06-27 (Phase 4 committed)
 
 ---
 
@@ -31,14 +31,27 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 
 ## Current status
 
-- **Phase:** 0 (not started). Next action = dispatch
-  `prompts/2026-06-27-phase-0-scaffolding.md` (model: sonnet).
-- **Branch:** `dev` (work here). `main` is protected.
-- **Done so far:** PRD complete; brand assets in `docs/images/`; GH README; 3 standards
-  adopted (code-checkin-and-pr 1.2.0, handoff-prompt-workflow 2.0.0, release-prep-and-cut
-  1.1.0); CI workflows live (tolerant bootstrap) and green; `main` requires the 6 CI checks;
-  build plan written.
-- **No application code yet** — Phase 0 creates it.
+- **Phase:** 4 **done** (committed `82e5f0a` on `dev`). Next action = plan + dispatch
+  **Phase 5 — Import / inbox wizard** (write `prompts/2026-06-27-phase-5-*.md`, model: sonnet).
+- **Branch:** `dev` (work here). `main` is protected. Nothing pushed/PR'd yet (no dev→main
+  until a working product exists).
+- **Done so far:** Phases 0–4 committed on `dev`:
+  - **0** scaffolding/dev loop; **1** identity/first-run/settings; **2** libraries/storage/
+    sidecar/item core (atomic rename); **3** catalog UI (FTS, tag cloud, browse, item page,
+    file/ZIP downloads); **4** worker jobs + mesh rendering + job/scheduled-jobs monitor UI.
+- **Phase 4 recovery note (this session):** the Phase 4 Sonnet agent hard-crashed at ~16:36
+  *before* its verify/commit step. No git loss (Phase 3b was the clean HEAD). Resumed via a
+  fresh agent that verified the intact tree, fixed 3 real `render_mesh.py` bugs, and
+  closed out. All checks green: ruff, pytest (167), alembic up/down/up, tsc, vitest (50),
+  `docker compose config`. Render spike **go**: pyrender+OSMesa confirmed CPU-only on host.
+
+## Phase 4 follow-ups to confirm later (need Docker/CI, not verifiable here)
+
+- pyrender+EGL path (Dockerfile installs `libegl1`/`libgbm1`) and OSMesa **inside** the image.
+- End-to-end render wiring (item create → render job → `renders/<sha256>.png`) needs the full
+  compose stack (arq worker + Redis).
+- VTK offscreen does **not** work on a stock CPU host (Xlib SIGABRT); kept in the detect chain
+  only for EGL/OSMesa-built VTK. See `docs/decisions.md` Phase 4 entries.
 
 ## Repo & remotes
 
