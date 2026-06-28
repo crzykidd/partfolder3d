@@ -67,6 +67,11 @@ services:
       DATA_DIR: /data
       DEBUG: "true"
       RUN_MIGRATIONS: "true"
+      # Dev runs over plain HTTP, so session/CSRF cookies must NOT be Secure
+      # (browsers drop Secure cookies on http:// → you can never stay logged in).
+      # Forced here so the dev stack works with no .env file. Prod defaults to
+      # COOKIE_SECURE=true (https) — set it in .env for production.
+      COOKIE_SECURE: "false"
     volumes:
       - ./backend:/app                       # source bind-mount for live reload
       - ./private_data/data/app:/data        # app data (config, thumbnails, inbox, renders…)
