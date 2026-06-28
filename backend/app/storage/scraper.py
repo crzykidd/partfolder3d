@@ -33,6 +33,8 @@ from urllib.robotparser import RobotFileParser
 
 import httpx
 
+from .ssrf_guard import SSRFBlockedError, assert_safe_url
+
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -223,6 +225,15 @@ def scrape_url(
         domain = domain[4:]
 
     result = ScrapeResult(url=url, domain=domain)
+
+    # SSRF guard — reject URLs resolving to internal/link-local/cloud-metadata IPs
+    try:
+        assert_safe_url(url)
+    except SSRFBlockedError as exc:
+        result.blocked = True
+        result.note = str(exc)
+        log.warning("scrape_url: SSRF guard blocked %s: %s", url, exc)
+        return result
 
     # robots.txt check
     if not _robots_allows(domain, parsed.path or "/"):

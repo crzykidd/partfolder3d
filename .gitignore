@@ -36,3 +36,7 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# Python coverage artifacts
+.coverage
+htmlcov/

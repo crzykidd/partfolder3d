@@ -550,20 +550,31 @@ async def test_instance_import_never_transfers_private_records(
     original = import_sessions_mod._share_link_fetcher
     import_sessions_mod._share_link_fetcher = mock_fetcher
 
+    # Also patch socket.getaddrinfo so the SSRF guard sees a public IP for
+    # 'remote.example.com' (in CI there is no DNS for this test domain, and the
+    # guard runs before the mock fetcher is called).
+    import socket
+    from unittest.mock import patch
+
+    def _fake_getaddrinfo(host: str, port: object, *a: object, **kw: object) -> list:
+        # Return a single public IP so the SSRF pre-flight check passes.
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.2.3.4", 0))]
+
     try:
         fake_token = "a" * 64  # 64-char hex-like string
-        resp = await client.post(
-            "/api/import-sessions/from-share-link",
-            json={
-                "share_url": f"https://remote.example.com/share/{fake_token}",
-                "library_id": lib_id,
-                "include_public_notes": True,
-                "include_gcode": False,
-                "include_photos": True,
-                "include_settings": True,
-            },
-            headers={"X-CSRF-Token": csrf},
-        )
+        with patch("socket.getaddrinfo", side_effect=_fake_getaddrinfo):
+            resp = await client.post(
+                "/api/import-sessions/from-share-link",
+                json={
+                    "share_url": f"https://remote.example.com/share/{fake_token}",
+                    "library_id": lib_id,
+                    "include_public_notes": True,
+                    "include_gcode": False,
+                    "include_photos": True,
+                    "include_settings": True,
+                },
+                headers={"X-CSRF-Token": csrf},
+            )
         assert resp.status_code == 201, resp.text
         session_data = resp.json()
 

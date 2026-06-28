@@ -2,6 +2,68 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-28 — Phase 10a hardening decisions
+
+### SSRF guard: DNS pre-flight block (new module `app/storage/ssrf_guard.py`)
+
+**Problem:** The URL scraper (`scraper.py`) and instance share-link importer
+(`routers/import_sessions.py`) fetched arbitrary user-supplied URLs without
+checking whether the destination resolved to an internal/private address. This
+allowed SSRF attacks to reach cloud-metadata endpoints (169.254.169.254),
+RFC-1918 private networks, loopback, link-local, etc.
+
+**Fix:** New module `app/storage/ssrf_guard.py` provides `assert_safe_url(url)`
+which resolves the hostname via `socket.getaddrinfo` and rejects any address in
+the blocked ranges before a connection is opened. The guard is applied in:
+- `scraper.scrape_url()` — returns `ScrapeResult(blocked=True)` for internal URLs.
+- `import_sessions.create_import_session()` — raises HTTP 422 for internal targets.
+- `import_sessions.import_from_share_link()` — raises HTTP 422 for internal targets.
+
+**Deferred:** DNS rebinding (where DNS returns a public IP on lookup but routes
+to a private IP at connection time) is not mitigated. Full mitigation requires
+binding to the resolved IP explicitly (httpx supports this via custom transports)
+— deferred as a Phase 10b hardening item since it requires more invasive httpx
+plumbing and is a lower-likelihood threat model for a self-hosted app.
+
+### Performance indexes: migration 0010
+
+Added 8 missing indexes identified by static query path analysis:
+1. `item_tags(tag_id)` — tag browse queries filter by tag_id; the PK (item_id, tag_id) index doesn't cover this.
+2. `items(creator_id)` — creator-filter browse.
+3. `items(created_at DESC)` — default catalog sort; was doing full seq-scan + sort.
+4. `items(updated_at DESC)` — `sort=updated_at_desc`.
+5. `items(title)` — `sort=title_asc/desc`.
+6. `share_links(created_by_id)` — listing/revoking per-owner links.
+7. `print_records(item_id, visibility)` — compound index for public share view.
+8. `download_bundles(item_id, status, expires_at)` — bundle reuse + expiry cleanup.
+
+### Coverage: 61% → 63% after adding 31 hardening tests
+
+The hardening test file covers SSRF guard (unit + integration through 2 fetch paths),
+path traversal on authenticated and public share file-download endpoints, admin-only
+route enforcement, per-user write scoping, AI provider key masking, share link public/
+private record separation, FTS injection resistance, and migration 0010 index existence.
+
+### 100k-scale load testing: deferred to Phase 10b
+
+A real load test (100k items, pagination, tag-filter, FTS, favorites, concurrent
+reads) requires a seeding harness (bulk-insert script + arq-driven image/sidecar
+generation) that would take 30-60 min to seed and dedicated DB server time. This
+was intentionally out of scope for 10a. The Phase 10b recommendation is:
+- Write a `scripts/seed_100k.py` that uses `COPY FROM STDIN` for fast bulk-insert.
+- Run the seeder against a staging Postgres instance (not the test container).
+- Use `pgbench` + `explain analyze` on the hot catalog queries.
+- Measure p95 latency on `/api/items?sort=created_at_desc` and tag-filter queries.
+- Pay special attention to the FTS GIN index scan cost on `search_vector`.
+
+### N+1 analysis: no critical N+1s found
+
+The catalog list endpoint batch-loads images and tags in two follow-up queries
+(not N+1). Item detail loads are single-object fetches and use `selectinload`
+for the creator. No obvious N+1 patterns found in hot paths. The one area worth
+revisiting is `tag_admin.py` merge (loads all item_tags for the source tag in a
+loop) but that endpoint is low-frequency admin-only.
+
 ## 2026-06-27 — Phase 9b admin frontend decisions
 
 ### API keys page already existed — no duplicate created

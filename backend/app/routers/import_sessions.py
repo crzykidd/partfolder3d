@@ -462,6 +462,18 @@ async def create_import_session(
             detail="source_url is required when source_type='url'",
         )
 
+    # SSRF guard — validate the scrape target URL before persisting or scraping
+    if src == "url" and body.source_url:
+        from ..storage.ssrf_guard import SSRFBlockedError, assert_safe_url  # noqa: PLC0415
+
+        try:
+            assert_safe_url(body.source_url)
+        except SSRFBlockedError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Blocked URL: {exc}",
+            ) from exc
+
     # Validate library if provided
     library_id = body.library_id
     if library_id is not None:
@@ -1189,6 +1201,17 @@ async def import_from_share_link(
     parsed = _urlparse.urlparse(share_url)
     api_base = f"{parsed.scheme}://{parsed.netloc}"
     api_url = f"{api_base}/api/public/share/{token}"
+
+    # SSRF guard — block internal/link-local/cloud-metadata IPs
+    from ..storage.ssrf_guard import SSRFBlockedError, assert_safe_url  # noqa: PLC0415
+
+    try:
+        assert_safe_url(api_url)
+    except SSRFBlockedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Blocked: {exc}",
+        ) from exc
 
     # --- Fetch remote metadata ---
     remote_data = await _fetch_remote_share(api_url, timeout=settings.INSTANCE_IMPORT_TIMEOUT)
