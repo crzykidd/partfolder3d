@@ -8,7 +8,23 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-06-28 (Phase 10a hardening done; 10b release-machinery in flight)
+**Last updated:** 2026-06-28 (all phases 0–10 done; UI revamp A1 in flight)
+
+> **UI REVAMP underway (owner-directed, autonomous run).** Owner chose **Aurora** (`/example3`)
+> as the real look. Locked spec:
+> - **Theme:** Aurora, cohesive across both layouts, dark + light. Examples KEPT (not deleted).
+> - **Nav:** per-user setting `nav_layout` (server-side, like theme pref); **default by role:
+>   admin→sidebar, others→top-bar**; user-menu toggle overrides; ONE shared `navConfig` →
+>   `TopNavShell` + `SideNavShell`.
+> - **Two customizable regions (one widget framework):** (1) **top stat strip** = customizable
+>   stat tiles, role-based defaults, user-addable, flexible sizing/rows (admin may want 2 rows of
+>   smaller tiles); (2) **right rail** = collapsible widget panel, add/remove/reorder, **default
+>   = Quick Import widget**, extensible registry. Per-user layout persisted server-side; real data.
+> - **Phasing:** A1 = Aurora shell + switchable nav + version/release-notes + default stat strip +
+>   Quick Import rail (real data, functional, not-yet-customizable). A2 = the widget framework
+>   (make both regions customizable). B = restyle real pages (catalog/item/import/admin) to Aurora.
+> - Reference screenshot the owner circled: `private_data/screenshot/` (right Quick-Import panel
+>   = the future widget rail).
 
 > **Phase 10a hardening landed** (`a2b612b`): fixed **2 HIGH SSRF holes** (scraper + instance
 > import now block internal/link-local/metadata IPs via `backend/app/storage/ssrf_guard.py`);
