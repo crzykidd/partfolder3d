@@ -72,6 +72,9 @@ class TestConnectionRequest(BaseModel):
     endpoint: str | None = None
     model: str | None = None
     api_key: str | None = None  # plaintext — NOT persisted; used for the test call only
+    # When testing an already-saved provider whose key isn't re-entered, pass its
+    # id so the test reuses the stored (encrypted) key instead of an empty one.
+    provider_id: int | None = None
 
 
 class TestConnectionResponse(BaseModel):
@@ -238,7 +241,7 @@ async def test_ai_connection(
     body: TestConnectionRequest,
     _admin: Annotated[User, Depends(require_admin)],
     _csrf: Annotated[None, Depends(csrf_protect)],
-    _db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TestConnectionResponse:
     """Test an AI provider connection without persisting credentials.
 
@@ -261,6 +264,23 @@ async def test_ai_connection(
     if body.api_key:
         # Encrypt ephemerally so _dispatch can decrypt it — never hits the DB.
         ephemeral.api_key_encrypted = encrypt(body.api_key)
+    elif body.provider_id is not None:
+        # Testing a saved provider without re-entering the key: reuse the stored
+        # (encrypted) key, and fall back to its saved endpoint/model.
+        saved = await _get_or_404(body.provider_id, db)
+        ephemeral.api_key_encrypted = saved.api_key_encrypted
+        if ephemeral.endpoint is None:
+            ephemeral.endpoint = saved.endpoint
+        if ephemeral.model is None:
+            ephemeral.model = saved.model
+
+    # Claude/OpenAI require a key; Ollama does not. Give a clear message instead of
+    # letting the SDK raise a cryptic "could not resolve authentication" error.
+    if ptype != AiProviderType.ollama and not ephemeral.api_key_encrypted:
+        return TestConnectionResponse(
+            ok=False,
+            error="No API key — enter a key, or save the provider first then test.",
+        )
 
     try:
         result = _dispatch(

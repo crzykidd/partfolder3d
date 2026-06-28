@@ -265,6 +265,8 @@ function EditPanel({ provider, onClose }: EditPanelProps) {
         endpoint: endpoint.trim() || null,
         model: model.trim() || null,
         api_key: newKey.trim() || null,
+        // No new key typed → test the saved provider using its stored key.
+        provider_id: provider.id,
       }),
     onSuccess: (result) => {
       setTestStatus(result.ok ? '✓ Connection OK' : `Error: ${result.error ?? 'Connection failed'}`)

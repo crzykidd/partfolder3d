@@ -931,3 +931,51 @@ async def test_ai_suggest_tags_ai_error_returns_200_with_error_field(
     assert data["error"] is not None
     assert data["canonical"] == []
     assert data["new_suggestions"] == []
+
+
+@pytest.mark.asyncio
+async def test_test_endpoint_uses_saved_provider_key(client: AsyncClient) -> None:
+    """POST /api/ai-providers/test with provider_id (no api_key) reuses the stored
+    key — regression for the 'Could not resolve authentication' error when testing
+    a saved provider without re-entering its write-only key."""
+    csrf = await _setup_and_login(client)
+
+    # Save a Claude provider WITH a key.
+    create = await client.post(
+        "/api/ai-providers",
+        json={"provider": "claude", "model": "claude-opus-4-8", "api_key": "sk-test"},
+        headers={"x-csrf-token": csrf},
+    )
+    assert create.status_code == 201
+    pid = create.json()["id"]
+
+    # Test it WITHOUT sending the key — must reuse the stored one (mock the SDK).
+    with patch(
+        "app.ai.client._anthropic_caller",
+        lambda _key, _model, _sys, _usr, _tok: "ok" if _key == "sk-test" else None,
+    ):
+        resp = await client.post(
+            "/api/ai-providers/test",
+            json={"provider": "claude", "provider_id": pid},
+            headers={"x-csrf-token": csrf},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_test_endpoint_no_key_returns_clear_error(client: AsyncClient) -> None:
+    """Testing claude/openai with neither a key nor a provider_id returns a clear
+    message instead of the SDK's cryptic auth error."""
+    csrf = await _setup_and_login(client)
+
+    resp = await client.post(
+        "/api/ai-providers/test",
+        json={"provider": "claude"},
+        headers={"x-csrf-token": csrf},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+    assert "api key" in (body["error"] or "").lower()

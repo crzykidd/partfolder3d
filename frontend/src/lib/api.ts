@@ -1456,6 +1456,7 @@ export interface TestAiConnectionRequest {
   endpoint?: string | null
   model?: string | null
   api_key?: string | null // plaintext — NOT persisted; used for the test call only
+  provider_id?: number | null // test a saved provider with its stored key (no re-entry)
 }
 
 export interface TestAiConnectionResponse {

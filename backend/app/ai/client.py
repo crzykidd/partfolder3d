@@ -183,6 +183,11 @@ def _call_anthropic_real(
     max_tokens: int,
 ) -> str | None:
     """Invoke the Anthropic SDK.  Returns response text or None on error."""
+    if not api_key:
+        # No key → the SDK raises a cryptic "could not resolve authentication"
+        # TypeError. Return cleanly instead (callers treat None as "no result").
+        log.warning("Anthropic call skipped: no API key configured")
+        return None
     try:
         import anthropic  # noqa: PLC0415
 
