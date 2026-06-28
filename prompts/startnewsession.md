@@ -50,14 +50,19 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 
 ## Current status
 
-- **Phase:** 8 **complete** (8a `21080ea` + 8b `a773538`). **Autonomous run to v1 in progress**
-  (user approved kicking off the rest while they sleep): **Phase 9 in flight**
-  (`prompts/2026-06-27-phase-9-admin-backup-export-api.md`), then **Phase 10 hardening** (test
-  coverage, security review, perf, UX polish, fill release-prep/cut placeholders), then a **full
-  test pass**, then a **UI rework** (user finds the UI "hideous"; dropping thoughts to fold in).
-  **DO NOT cut the release / push to main** without explicit user go (outward-facing; UI rework
-  lands after anyway). Phase 10's actual `/release-prep`→merge→`/release-cut` is deferred to a
-  confirmed go.
+- **ALL PHASES 0–10 COMPLETE** on `dev`. Full app built + hardened. **Full test pass GREEN**
+  (2026-06-28): **356 backend pytest** (real PG, alembic at `0010`), **ruff clean**, **131 vitest**,
+  **tsc clean**, both compose configs valid. Latest: Phase 9 (`930a075`/`da49b50`), Phase 10a
+  hardening (`a2b612b`), Phase 10b release-machinery (`867c460`).
+- **NEXT ACTIONS (awaiting owner):**
+  1. **Pick a UI theme** from `/examples` (`/example1` Mission Control, `/example2` Atelier,
+     `/example3` Aurora) → then **UI revamp**: restyle real pages to the chosen direction (left/
+     top nav, collapsible groups, role-based menu, version+release-notes), delete the losing
+     prototypes under `frontend/src/pages/examples/`. This is the main remaining build.
+  2. **Cut v1** when owner gives the go: `/release-prep <version>` → review/merge PR → wait for
+     main CI green + `:latest` published → `/release-cut <version>`. Machinery is filled + ready
+     (version source `backend/app/version.py`=0.1.0). **Held for explicit go** (outward-facing).
+- **Release/UI both DEFERRED to owner.** Do NOT cut the release or push to main without the go.
 - **Deploy-readiness fix (committed):** scaffolding gap (since Phase 0) — nothing ran migrations
   on startup, so a fresh stack came up on an empty DB and the wizard failed. Fixed by **bundling
   migrations into the backend's image entrypoint** (`backend/docker-entrypoint.sh`:
