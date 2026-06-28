@@ -8,6 +8,8 @@ Phase 5: process_import_session — scrape/sidecar-read/tag-reconcile for import
          inbox_scan — daily scheduled job to detect new inbox subfolders.
 Phase 6: library_reconcile_scan — daily scheduled reconciliation scan;
          apply_review_item — apply an approved ReviewItem's proposed_action.
+Phase 7: build_zip_bundle extended with include_print_history support;
+         share_link_expiry_cleanup — daily cleanup of expired/old share links.
 """
 
 import asyncio
@@ -48,6 +50,10 @@ SCHEDULED_JOB_REGISTRY: dict[str, tuple[str, str]] = {
         "Daily library reconciliation scan — detects out-of-band edits, new/removed files, "
         "sidecar drift, orphans, and integrity issues.",
         "daily at 03:00 UTC",
+    ),
+    "share_link_expiry_cleanup": (
+        "Mark expired share links and prune old audit events (Phase 7).",
+        "daily at 01:00 UTC",
     ),
 }
 
@@ -116,19 +122,25 @@ async def build_zip_bundle(ctx: dict, bundle_id: str) -> None:
 
     PRD §11: queued ZIP with ~1-day expiry.  This task:
       1. Reads the DownloadBundle row.
-      2. Walks the item's directory, zipping all files (model files, images,
-         renders — but NOT print history, which has no PrintRecord yet in
-         Phase 3).  The print-history-in-ZIP checkbox from PRD §11 is stubbed
-         off (no PrintRecord model yet).
-      3. Writes the ZIP to DATA_DIR/zips/<bundle_id>.zip.
-      4. Updates bundle.status to "ready" (or "failed" on error).
+      2. Walks the item's directory, zipping all files.
+      3. If bundle.include_print_history is True:
+           - If bundle.requester_user_id is set (authenticated): includes ALL
+             print records (public + private) as a JSON sidecar.
+           - If bundle.requester_user_id is None (public/anonymous): includes
+             ONLY public print records (visibility='public').
+         SECURITY: private records are NEVER included for anonymous/public bundles.
+      4. Writes the ZIP to DATA_DIR/zips/<bundle_id>.zip.
+      5. Updates bundle.status to "ready" (or "failed" on error).
     """
+    import json  # noqa: PLC0415
+
     import sqlalchemy as sa  # noqa: PLC0415
 
     from app.config import settings  # noqa: PLC0415
     from app.db import SessionLocal  # noqa: PLC0415
     from app.models.download_bundle import DownloadBundle  # noqa: PLC0415
     from app.models.item import Item  # noqa: PLC0415
+    from app.models.print_record import PrintRecord  # noqa: PLC0415
 
     try:
         bundle_uuid = uuid.UUID(bundle_id)
@@ -170,12 +182,66 @@ async def build_zip_bundle(ctx: dict, bundle_id: str) -> None:
             zips_dir.mkdir(parents=True, exist_ok=True)
             zip_path = zips_dir / f"{bundle_id}.zip"
 
+            # Determine print history inclusion
+            include_history = bundle.include_print_history
+            requester_user_id = bundle.requester_user_id
+            print_records: list[PrintRecord] = []
+
+            if include_history:
+                # SECURITY: only public records for anonymous/public bundles
+                pr_query = sa.select(PrintRecord).where(
+                    PrintRecord.item_id == bundle.item_id
+                )
+                if requester_user_id is None:
+                    # Public/anonymous: only public records
+                    pr_query = pr_query.where(PrintRecord.visibility == "public")
+                # Authenticated: all records (public + private)
+                pr_result = await db.execute(
+                    pr_query.order_by(PrintRecord.created_at.asc())
+                )
+                print_records = list(pr_result.scalars().all())
+
             # Build the ZIP
             with zipfile.ZipFile(str(zip_path), "w", zipfile.ZIP_DEFLATED) as zf:
                 for file_path in sorted(item_dir.rglob("*")):
                     if file_path.is_file():
                         arcname = file_path.relative_to(item_dir)
                         zf.write(str(file_path), str(arcname))
+
+                # Append print history as JSON if requested
+                if include_history and print_records:
+                    history_data = [
+                        {
+                            "id": r.id,
+                            "note": r.note,
+                            "visibility": r.visibility,
+                            "date": r.date.isoformat() if r.date else None,
+                            "printer": r.printer,
+                            "material": r.material,
+                            "filament_color": r.filament_color,
+                            "nozzle_diameter": r.nozzle_diameter,
+                            "layer_height": r.layer_height,
+                            "supports": r.supports,
+                            "success": r.success,
+                            "rating": r.rating,
+                            "filament_length_mm": r.filament_length_mm,
+                            "filament_weight_g": r.filament_weight_g,
+                            "estimated_print_time_s": r.estimated_print_time_s,
+                            "created_at": r.created_at.isoformat() if r.created_at else None,
+                        }
+                        for r in print_records
+                    ]
+                    zf.writestr(
+                        "print-history.json",
+                        json.dumps(history_data, indent=2),
+                    )
+                    log.info(
+                        "build_zip_bundle: included %d print record(s) in bundle %s "
+                        "(authenticated=%s)",
+                        len(print_records),
+                        bundle_id,
+                        requester_user_id is not None,
+                    )
 
             bundle.status = "ready"
             bundle.bundle_path = str(zip_path)
@@ -403,6 +469,57 @@ async def _cleanup_expired_bundles_core(ctx: dict) -> None:
         await db.commit()
 
     log.info("cleanup_expired_bundles: deleted %d expired bundle(s)", deleted)
+
+
+async def _share_link_expiry_cleanup_core(ctx: dict) -> None:
+    """Phase 7: Mark expired share links (no DB delete — keep for audit).
+
+    The share_audit_events rows are retained for audit purposes.
+    This job adds an 'expired' event to any link that newly crossed its
+    expires_at threshold (idempotent: skips if already has an 'expired' event).
+    """
+    import sqlalchemy as sa  # noqa: PLC0415
+
+    from app.db import SessionLocal  # noqa: PLC0415
+    from app.models.share_audit_event import ShareAuditEvent  # noqa: PLC0415
+    from app.models.share_link import ShareLink  # noqa: PLC0415
+
+    cutoff = datetime.now(UTC)
+    marked = 0
+
+    async with SessionLocal() as db:
+        # Find links that are expired but not yet revoked and not already having
+        # an 'expired' audit event
+        expired_result = await db.execute(
+            sa.select(ShareLink).where(
+                ShareLink.expires_at <= cutoff,
+                ShareLink.revoked.is_(False),
+            )
+        )
+        for link in expired_result.scalars().all():
+            # Check if we already recorded an 'expired' event
+            existing = await db.execute(
+                sa.select(ShareAuditEvent).where(
+                    ShareAuditEvent.share_link_id == link.id,
+                    ShareAuditEvent.event_type == "expired",
+                ).limit(1)
+            )
+            if existing.scalar_one_or_none() is not None:
+                continue  # already recorded
+
+            db.add(ShareAuditEvent(
+                share_link_id=link.id,
+                event_type="expired",
+                ip_address=None,
+                user_agent=None,
+            ))
+            marked += 1
+
+        await db.commit()
+
+    log.info(
+        "share_link_expiry_cleanup: marked %d link(s) as expired (audit event)", marked
+    )
 
 
 async def _library_reconcile_scan_core(_ctx: dict) -> None:
@@ -881,6 +998,7 @@ _SCHED_FUNCS = {
     "expired_zip_cleanup": _cleanup_expired_bundles_core,
     "inbox_scan": _inbox_scan_core,
     "library_reconcile_scan": _library_reconcile_scan_core,
+    "share_link_expiry_cleanup": _share_link_expiry_cleanup_core,
 }
 
 
@@ -905,6 +1023,7 @@ async def exec_scheduled_job(ctx: dict, name: str) -> None:
         # Determine next_run hour based on job name
         _hour_map = {
             "expired_zip_cleanup": 0,
+            "share_link_expiry_cleanup": 1,
             "inbox_scan": 2,
             "library_reconcile_scan": 3,
         }
@@ -919,6 +1038,10 @@ async def exec_scheduled_job(ctx: dict, name: str) -> None:
 
 async def cron_expired_zip_cleanup(ctx: dict) -> None:
     await exec_scheduled_job(ctx, "expired_zip_cleanup")
+
+
+async def cron_share_link_expiry_cleanup(ctx: dict) -> None:
+    await exec_scheduled_job(ctx, "share_link_expiry_cleanup")
 
 
 async def cron_inbox_scan(ctx: dict) -> None:
@@ -1004,6 +1127,7 @@ class WorkerSettings:
 
     cron_jobs = [
         cron(cron_expired_zip_cleanup, hour=0, minute=0, run_at_startup=False),
+        cron(cron_share_link_expiry_cleanup, hour=1, minute=0, run_at_startup=False),
         cron(cron_inbox_scan, hour=2, minute=0, run_at_startup=False),
         cron(cron_library_reconcile_scan, hour=3, minute=0, run_at_startup=False),
     ]

@@ -144,15 +144,28 @@ async def download_file(
 @router.post("/{key}/zip", response_model=BundleOut)
 async def queue_zip(
     key: str,
-    _user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_user)],
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    include_history: bool = Query(
+        default=False,
+        description=(
+            "Include print history in the ZIP (PRD §11). "
+            "OFF by default.  When ON, the ZIP includes a print-history.json. "
+            "Private records are included only for the requesting authenticated user — "
+            "they are NEVER included for public/anonymous downloads."
+        ),
+    ),
 ) -> BundleOut:
     """Request a ZIP of the entire item directory.
 
     If a valid, non-stale bundle already exists it is returned immediately.
     Otherwise, a new bundle row is created and a `build_zip_bundle` task is
     enqueued on the arq worker.
+
+    include_history=True adds a print-history.json to the ZIP.  Private records
+    are included because the caller is authenticated; public share link ZIPs
+    never include private records (handled in the shares router).
 
     Poll GET /api/items/{key}/zip/{bundle_id} for status.
     """
@@ -166,12 +179,16 @@ async def queue_zip(
     now_utc = datetime.now(UTC)
 
     # Check for existing usable bundle (pending or ready + not stale + not expired)
+    # Match on include_print_history so a no-history bundle doesn't short-circuit
+    # a with-history request.
     existing_result = await db.execute(
         select(DownloadBundle)
         .where(
             DownloadBundle.item_id == item.id,
             DownloadBundle.status.in_(["pending", "ready"]),
             DownloadBundle.expires_at > now_utc,
+            DownloadBundle.include_print_history == include_history,
+            DownloadBundle.requester_user_id == user.id,
         )
         .order_by(DownloadBundle.created_at.desc())
     )
@@ -192,6 +209,8 @@ async def queue_zip(
         status="pending",
         inventory_hash=current_hash,
         expires_at=expires_at,
+        include_print_history=include_history,
+        requester_user_id=user.id,  # authenticated user; worker may include private records
     )
     db.add(bundle)
     await db.flush()

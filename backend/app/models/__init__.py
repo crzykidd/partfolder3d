@@ -25,10 +25,13 @@ from .item import Item
 from .job import Job
 from .library import Library
 from .password_reset import PasswordResetToken
+from .print_record import PrintRecord
 from .review_item import ReviewItem, ReviewStatus
 from .scheduled_job import ScheduledJob
 from .session import UserSession
 from .setting import Setting
+from .share_audit_event import ShareAuditEvent
+from .share_link import ShareLink
 from .site_capability import SiteCapability, SiteToken
 from .tag import ItemTag, Tag, TagAlias, TagStatus
 from .user import User, UserRole
@@ -80,4 +83,8 @@ __all__ = [
     "ChangeSource",
     "ReviewItem",
     "ReviewStatus",
+    # Phase 7
+    "PrintRecord",
+    "ShareLink",
+    "ShareAuditEvent",
 ]

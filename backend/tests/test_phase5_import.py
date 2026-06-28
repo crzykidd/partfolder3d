@@ -278,14 +278,20 @@ async def test_share_link_stub(
     db_session: AsyncSession,
     tmp_path: Path,
 ) -> None:
-    """Share-link import returns 501 Not Implemented."""
+    """Share-link import endpoint is now implemented (Phase 7).
+
+    Without a body it returns 422 (Unprocessable Entity — share_url required).
+    The endpoint accepts POST with JSON body {share_url: ...} and returns 201 on
+    success.  Full tests are in test_phase7_sharing.py.
+    """
     csrf = await _setup_and_login(client, tmp_path)
 
+    # Without a body → 422 (share_url is required)
     resp = await client.post(
         "/api/import-sessions/from-share-link",
         headers={"X-CSRF-Token": csrf},
     )
-    assert resp.status_code == 501
+    assert resp.status_code == 422
 
 
 # ---------------------------------------------------------------------------

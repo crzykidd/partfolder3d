@@ -2,6 +2,67 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Phase 7 print history + sharing decisions
+
+### PrintRecord shape: normalized with structured settings fields
+
+`PrintRecord` stores both structured slicer settings (printer, material, nozzle_diameter,
+layer_height, supports) and gcode-parsed metrics (filament_length_mm, filament_weight_g,
+estimated_print_time_s) as first-class columns rather than JSONB blobs. Rationale: SQL
+aggregation for stats (`SUM(filament_length_mm)`, `AVG(rating)`, `COUNT(success=True)`)
+is far simpler on typed columns; schema evolution is explicit. The `note` field and
+`visibility` column let owners keep private remarks that never leak to public endpoints.
+
+### ShareLink token: secrets.token_hex(32) stored as-is (not hashed)
+
+Share tokens use `secrets.token_hex(32)` — 64 hex chars, 256-bit entropy. Stored in
+cleartext in the DB so public endpoints can do O(1) lookup by token. Not hashed because
+share tokens are not passwords: they are already the access credential, bearer-token
+style. Revocation + expiry are enforced server-side on every request. Rejected: UUID4
+(only 122 bits, lower collision safety for a publicly guessable surface); HMAC-signed
+tokens (adds server-secret dependency, no benefit for revocable links).
+
+### gcode parser: best-effort, pure, first-32 KB only
+
+`parse_gcode_file` / `parse_gcode_text` read only the first 32 KB of gcode. All slicer
+dialects write their summary comments at the top; parsing the full file would be O(MB)
+for no gain. The function is pure (no I/O in the text variant) so unit tests don't need
+temp files. Errors are accumulated in `parse_errors` list; the result is always
+returned (never raises). Binary `.bgcode` files are detected by magic bytes and skipped
+gracefully — returning empty metadata rather than crashing.
+
+### Public/private separation: filter at query time + never pass through
+
+Every public share endpoint explicitly filters `PrintRecord.visibility == "public"` in
+the SQL query. Private records are never fetched and then filtered in Python — the DB
+never returns them. Public ZIP bundles set `requester_user_id=None`; the worker checks
+this flag and only includes public records. This double-gate (endpoint + worker) means a
+programming mistake in one layer is caught by the other.
+
+### Audit events: written on every public access (not just first)
+
+`ShareAuditEvent` rows are inserted for every `accessed_view` and `accessed_download`
+event, not just the first access. This gives admins a full access log for abuse
+investigation. Expiry events (`expired`) are written idempotently by the daily cron job
+(skips links that already have an expired event).
+
+### include-history ZIP: flag on DownloadBundle + null requester_user_id for anonymous
+
+`DownloadBundle` gained two new columns: `include_print_history` (bool, default False)
+and `requester_user_id` (nullable int, no FK so user deletes don't cascade). Public
+share ZIP bundles set both to their anonymous defaults (`False`, `NULL`). The worker
+reads these flags to decide what to include. This design keeps the existing ZIP path
+unchanged (old bundles continue to work) and avoids passing user context into the worker.
+
+### Instance import: _share_link_fetcher module-level mock seam
+
+`import_sessions.py` exposes a module-level `_share_link_fetcher` variable. In
+production it is `None` and the code falls through to `httpx.AsyncClient`. In tests,
+`monkeypatch.setattr(import_sessions_mod, "_share_link_fetcher", ...)` replaces it with
+a sync function returning mock data. This avoids the need for a live instance, respawning
+a test server, or a complex fixture chain. Rejected: dependency injection via FastAPI
+`Depends` (makes the endpoint signature more complex without benefit in production).
+
 ## 2026-06-27 — Phase 6b reconcile engine frontend decisions
 
 ### Reconcile Modes card placed on ReviewsPage (not SettingsPage)

@@ -16,7 +16,7 @@ Phase 9.  Expired bundles are skipped by the API and left on disk until purge.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -42,6 +42,18 @@ class DownloadBundle(Base):
     # Used to detect whether the item's files have changed since the ZIP was built.
     inventory_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Phase 7: include print history in ZIP (PRD §11).
+    # When True, includes print records in the ZIP.
+    # Whether private records are included depends on requester_user_id:
+    #   - requester_user_id is set (authenticated user): all records included
+    #   - requester_user_id is None (public/anonymous): only public records
+    include_print_history: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    # The user who requested this bundle (null for public/share-link downloads).
+    requester_user_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -57,5 +57,13 @@ class Settings(BaseSettings):
     # Maximum number of images to collect per scrape.
     SCRAPE_MAX_IMAGES: int = 20
 
+    # ---- Sharing (Phase 7) ----
+    # Default expiry for new share links, in days.
+    # Can be overridden per-link.  Set to 0 for "never expires".
+    # Also stored as DB setting "share_default_expiry_days" for per-instance override.
+    SHARE_DEFAULT_EXPIRY_DAYS: int = 30
+    # HTTP timeout (seconds) for instance-to-instance import fetch.
+    INSTANCE_IMPORT_TIMEOUT: int = 30
+
 
 settings = Settings()

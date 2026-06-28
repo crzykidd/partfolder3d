@@ -9,6 +9,8 @@ Phase 4: job monitor + scheduled-jobs API.
 Phase 5: import wizard — import sessions, site capabilities, inbox scanner,
          URL scraping, tag reconciliation + pending-tag approval.
 Phase 6: reconciliation / scan engine — issues, change log, review items.
+Phase 7: print history (PrintRecord + gcode parse + stats) + sharing
+         (ShareLink + public endpoints + audit + share-link import).
 """
 
 import logging
@@ -85,8 +87,10 @@ from .routers import (  # noqa: E402  # noqa: E402
     libraries,
     me,
     password_reset,
+    print_records,
     reviews,
     setup,
+    shares,
     tags,
     users,
 )
@@ -116,6 +120,9 @@ app.include_router(import_sessions.router)
 app.include_router(issues.router)
 app.include_router(changes.router)
 app.include_router(reviews.router)
+# Phase 7
+app.include_router(print_records.router)
+app.include_router(shares.router)
 
 
 # ---------------------------------------------------------------------------
