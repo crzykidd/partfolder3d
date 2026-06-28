@@ -332,7 +332,7 @@ export function BackupsPage() {
         columns={COLUMNS}
         isLoading={backupsLoading}
         isEmpty={!backupsLoading && !backupsError && backups.length === 0}
-        emptyMessage="No backups yet. Click "Run Backup Now" or wait for the scheduled backup job to run."
+        emptyMessage={'No backups yet. Click "Run Backup Now" or wait for the scheduled backup job to run.'}
       >
         {backups.map((b) => (
           <BackupRow key={b.id} record={b} />
