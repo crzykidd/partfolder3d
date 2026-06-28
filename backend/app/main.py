@@ -11,6 +11,8 @@ Phase 5: import wizard — import sessions, site capabilities, inbox scanner,
 Phase 6: reconciliation / scan engine — issues, change log, review items.
 Phase 7: print history (PrintRecord + gcode parse + stats) + sharing
          (ShareLink + public endpoints + audit + share-link import).
+Phase 8: optional AI assist — provider CRUD, tag suggestions, description
+         cleanup, scrape summarization. Manual-only always works with zero AI.
 """
 
 import logging
@@ -74,6 +76,8 @@ app.add_middleware(
 # Routers
 # ---------------------------------------------------------------------------
 from .routers import (  # noqa: E402  # noqa: E402
+    ai_actions,
+    ai_providers,
     api_keys,
     auth,
     changes,
@@ -123,6 +127,9 @@ app.include_router(reviews.router)
 # Phase 7
 app.include_router(print_records.router)
 app.include_router(shares.router)
+# Phase 8
+app.include_router(ai_providers.router)
+app.include_router(ai_actions.router)
 
 
 # ---------------------------------------------------------------------------

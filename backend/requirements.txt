@@ -51,6 +51,13 @@ selectolax==0.4.10
 # python-multipart: required by FastAPI for the Add Asset multipart file upload.
 python-multipart==0.0.20
 
+# AI providers (Phase 8)
+# Claude: official Anthropic Python SDK.
+# OpenAI + Ollama: openai SDK; Ollama uses base_url override (OpenAI-compatible).
+# Keys are stored Fernet-encrypted in the DB, never in env vars.
+anthropic==0.112.0
+openai==1.109.1
+
 # Dev / testing
 ruff==0.8.4
 pytest==8.3.4

@@ -2,6 +2,32 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Phase 8a AI tagging backend decisions
+
+### Provider dispatch: anthropic SDK for Claude; openai SDK for OpenAI + Ollama
+
+Two SDKs are used, not one.  Claude requires `anthropic.Anthropic(api_key=...).messages.create(...)` — the official Anthropic SDK, which is the only supported path for claude-opus-4-8 and its extended context / system-prompt features.  OpenAI and Ollama both use `openai.OpenAI(api_key=..., base_url=...).chat.completions.create(...)`.  Ollama exposes an OpenAI-compatible REST API at its configured endpoint, so `base_url` is set to `AiProvider.endpoint` (e.g. `http://localhost:11434/v1`) and the key is a placeholder.  A single generic "LLM SDK" was rejected because no single open-source client covers all three provider flavors with their distinct auth and API shapes.
+
+### Default Claude model: `claude-opus-4-8` (exact string, no date suffix)
+
+When `AiProvider.model` is NULL the dispatcher falls back to `"claude-opus-4-8"`.  This is the exact model ID; the `anthropic` SDK does not accept a date suffix.  `temperature`, `top_p`, `top_k`, and `thinking={type:"enabled", budget_tokens:…}` are intentionally omitted — they return HTTP 400 on claude-opus-4-8.  Thinking is off by default; the prompt is structured (system + user message) using `messages.create`.
+
+### Tag suggestion: structured JSON schema via prompt-level enforcement (not SDK schema binding)
+
+The tag-suggestion prompt embeds the JSON schema (`_TAG_SCHEMA`) in the system message and instructs the model to output only a valid JSON object.  The dispatcher's `suggest_tags` function then JSON-parses the raw text and post-filters the result: `canonical` entries that don't appear in `existing_tags` are stripped (hallucination guard); `new_suggestions` is capped at `MAX_NEW_SUGGESTIONS` (5) regardless of what the model returns.  This approach works for all three providers (including Ollama, which does not support structured-output parameters).  SDK-level `response_format` / `output_config` was rejected: it's anthropic-SDK-only and not available on the openai SDK for all model versions.
+
+### Best-effort / degrade-gracefully contract
+
+Every public AI function (`suggest_tags`, `cleanup_description`, `summarize_scrape`) catches all exceptions and returns a sentinel result (`AiTagResult(error=...)` / `AiTextResult(error=...)`).  AI failure **never** re-raises to the HTTP handler.  All three action endpoints (`suggest-tags`, `cleanup-description`, `summarize`) return HTTP 200 in all non-authentication failure cases — including no provider configured (`provider_available=False`) and provider call failure (`error != None`).  The headline contract: with zero AI providers configured, the manual import path (item create, wizard commit, tag approval) is completely unaffected — no code path on the critical import/commit flow touches the AI layer.
+
+### Key-encryption reuse: Fernet via `crypto.encrypt` / `crypto.decrypt`
+
+`AiProvider.api_key_encrypted` is a Fernet-encrypted ciphertext using the same instance key as Phase 1 API-key and site-token encryption.  Keys are decrypted only inside `_dispatch` at call time and never logged or returned in responses.  The provider CRUD endpoint returns `has_key: bool` (not the ciphertext or plaintext).  The test-connection endpoint (`POST /api/ai-providers/test`) encrypts ephemerally, passes through `_dispatch`, and never writes to the DB.  Key rotation (a later utility) requires only replacing `api_key_encrypted` on the relevant provider row.
+
+### Phase 8 split: backend (8a) complete; frontend (8b) deferred
+
+The backend (AI client layer, provider CRUD, three action endpoints, 37 new tests) is complete.  The frontend (AI-provider settings page, wizard AI-action buttons, tag-admin AI suggestions) is deferred to `prompts/2026-06-27-phase-8b-ai-frontend.md` so each agent gets a focused scope.  The backend is fully usable without the frontend (e.g. via API or future CLI).
+
 ## 2026-06-27 — Phase 7b frontend decisions
 
 ### print-utils.ts extracted as standalone module (not inlined in pages)
