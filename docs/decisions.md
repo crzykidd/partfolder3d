@@ -2,6 +2,34 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Auto-migration via entrypoint + self-contained dev compose + host-visible dev storage (deployment readiness)
+
+A scaffolding gap carried since Phase 0: nothing ran `alembic upgrade head` on
+startup — neither the Dockerfile `CMD` (plain `uvicorn`) nor the FastAPI `lifespan`
+(which only does `ensure_key()` + journal recovery) — so a fresh stack came up
+against an empty database and the first-run wizard failed.
+
+**Migrations are bundled into service startup via the image entrypoint**
+(`backend/docker-entrypoint.sh`): when `RUN_MIGRATIONS=true` (set only on the
+`backend` service) it runs `alembic upgrade head`, then `exec "$@"`. A *one-shot
+`migrate` service was rejected* — it shows as an "exited" container in
+`docker ps`/Portainer and reads as a broken stack. To avoid a double-run race
+(backend + worker share the image), only the backend migrates; the **worker (and
+nginx) gate on `backend: condition: service_healthy`**, and the backend has a
+healthcheck hitting `GET /health`. So migrations run exactly once, before anything
+that touches the DB. `alembic/env.py` already prefers the `DATABASE_URL` env var.
+
+**`docker-compose.dev.yml` is self-contained** — all services + build in one file,
+run with a single `docker compose -f docker-compose.dev.yml up --build` (no
+base+overlay, no two `-f` flags). Rationale: a uniform one-file/one-command dev
+workflow across projects on the same machine.
+
+**Dev storage is host-visible:** the dev stack bind-mounts ALL data under
+`./private_data/data/{postgres,redis,app}` instead of named volumes, so every
+file is inspectable on the host without entering containers. `./private_data/` is
+gitignored. Production (`docker-compose.yml`) keeps managed named volumes
+(`db_data`/`redis_data`/`frontend_dist`).
+
 ## 2026-06-27 — Phase 8b AI tagging frontend decisions
 
 ### Description editing added to TitleStep (not a new wizard step)

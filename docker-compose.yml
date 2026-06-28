@@ -1,10 +1,16 @@
-# PartFolder 3D — production docker compose
+# PartFolder 3D — production docker compose (built images, static frontend).
 #
 # Bring up the full stack:
-#   docker compose up -d
+#   docker compose up -d --build
 #
-# For local development with hot reload, overlay the dev overrides:
-#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+# Migrations run automatically: the backend's image entrypoint applies
+# `alembic upgrade head` on startup (RUN_MIGRATIONS=true) before uvicorn; the
+# worker waits for the backend to be healthy. No separate one-shot container,
+# and a fresh stack is usable with no manual steps.
+#
+# For local development with hot reload, use the self-contained dev file
+# (all services + build in one file):
+#   docker compose -f docker-compose.dev.yml up --build
 #
 # Required: copy .env.example → .env and fill in secrets before first run.
 
@@ -40,6 +46,9 @@ services:
       retries: 5
 
   # ── FastAPI backend ──
+  # RUN_MIGRATIONS=true → the image entrypoint runs `alembic upgrade head`
+  # before uvicorn starts, so migrations are bundled into startup (no separate
+  # one-shot container that would show as "exited" in docker ps / Portainer).
   backend:
     build:
       context: .
@@ -53,6 +62,7 @@ services:
       DATABASE_URL: "postgresql+asyncpg://partfolder3d:${POSTGRES_PASSWORD:-changeme}@db:5432/partfolder3d"
       REDIS_URL: "redis://redis:6379"
       DATA_DIR: /data
+      RUN_MIGRATIONS: "true"
     volumes:
       - ./data:/data
     depends_on:
@@ -60,6 +70,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s     # allow time for migrations + boot
 
   # ── arq background worker ──
   worker:
@@ -83,6 +99,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      backend:
+        condition: service_healthy   # migrations run in backend startup
 
   # ── Frontend build (produces static assets into the frontend_dist volume) ──
   frontend:
@@ -110,7 +128,7 @@ services:
       frontend:
         condition: service_completed_successfully
       backend:
-        condition: service_started
+        condition: service_healthy
 
 volumes:
   db_data:

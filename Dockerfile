@@ -42,9 +42,16 @@ COPY backend/app/ ./app/
 COPY backend/worker.py ./
 COPY backend/alembic.ini ./
 COPY backend/alembic/ ./alembic/
+COPY backend/docker-entrypoint.sh ./
+RUN chmod +x ./docker-entrypoint.sh
 
 # Data directory will be mounted at runtime (./data:/data in compose)
 RUN mkdir -p /data
+
+# The entrypoint applies DB migrations when RUN_MIGRATIONS=true (set on the
+# backend service), then execs the service command — so migrations are bundled
+# into startup with no separate one-shot container.
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 
 # Default: run the FastAPI API server.
 # The `worker` compose service overrides this to: python worker.py

@@ -281,8 +281,17 @@ GPU rendering, SSO, email delivery, OctoPrint integration, federated sync).
 # (planned) clone and start the stack
 git clone https://github.com/crzykidd/partfolder3d.git
 cd partfolder3d
-docker compose up -d
+cp .env.example .env
+docker compose up -d --build          # production stack
+# or, for local dev with hot reload (one self-contained file):
+#   docker compose -f docker-compose.dev.yml up --build
 ```
+
+Database migrations run automatically on startup — the backend's image
+entrypoint runs `alembic upgrade head` before uvicorn (the worker waits for the
+backend to be healthy), so there is no manual migration step and no extra
+container. The dev stack additionally bind-mounts all storage under
+`./private_data/data/` (Postgres, Redis, app data) for easy host inspection.
 
 Then open **http://localhost:8973** and complete the **first-run wizard**:
 
