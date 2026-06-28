@@ -24,6 +24,9 @@ export function LoginPage() {
   const mutation = useMutation({
     mutationFn: () => api.login({ email, password }),
     onSuccess: () => {
+      // A successful login means the instance is initialized — assert it in the
+      // cache so AuthGuard can't bounce us to /setup on a stale `false`.
+      queryClient.setQueryData(['setupStatus'], { initialized: true })
       // Invalidate /me so AuthContext re-fetches the logged-in user.
       queryClient.invalidateQueries({ queryKey: ['me'] })
       navigate(from, { replace: true })

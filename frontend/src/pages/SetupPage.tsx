@@ -49,9 +49,12 @@ export function SetupPage() {
   const mutation = useMutation({
     mutationFn: () => api.runSetup(form),
     onSuccess: () => {
-      // Backend has auto-logged us in; invalidate auth cache and go home.
+      // The instance is now initialized and the backend auto-logged us in.
+      // Write setupStatus directly (not invalidate) so AuthGuard doesn't read a
+      // stale `initialized:false` from cache during the refetch and bounce us
+      // back to /setup. Refetch /me so AuthContext picks up the new session.
+      queryClient.setQueryData(['setupStatus'], { initialized: true })
       queryClient.invalidateQueries({ queryKey: ['me'] })
-      queryClient.invalidateQueries({ queryKey: ['setupStatus'] })
       navigate('/', { replace: true })
     },
   })
