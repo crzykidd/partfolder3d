@@ -2,6 +2,50 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Phase 6b reconcile engine frontend decisions
+
+### Reconcile Modes card placed on ReviewsPage (not SettingsPage)
+
+The "Reconcile Modes" settings UI (Deliverable 5) is rendered as a card at the top of
+`/admin/reviews` rather than in `/settings`.  Rationale: the three mode toggles
+(`sidecar_sync`, `re_render`, `file_changes`) directly control what ends up in the
+review queue — placing the controls on the same page as the queue makes the
+cause-and-effect relationship immediately visible to the admin.  The SettingsPage
+hosts instance-level operational settings (name, external URL, timezone); the reconcile
+modes are more operational than configurational.
+
+### Pending-count badge in AppShell via per-minute background query
+
+The "Review Queue" nav link shows a red badge with the count of pending review items.
+This is implemented as a `useQuery` in `AppShell` with `refetchInterval: 60_000` and
+`staleTime: 30_000`, fetching `GET /api/reviews?status=pending&per_page=1` (one-row
+page — only the `total` field is used).  Enabled only when `isAdmin`.  Rejected:
+WebSocket push (out of scope per prompt); a Context-based approach that requires
+threading query results through the tree; polling on every page vs. once at shell level.
+The 60s interval is a deliberate trade-off between freshness and request volume.
+
+### Issue type filter uses backend IssueType enum values verbatim
+
+The dropdown in IssuesPage lists all `IssueType` enum values defined in
+`backend/app/models/issue.py` (conflict, dead_link, corruption, orphan, missing_file,
+extra_file, sidecar_error, other).  The backend filter is a plain string match on the
+`issue_type` column so the list is fixed to known values.  Future issue types added to
+the backend enum would need a corresponding frontend update.
+
+### Behavior badge colors consistent across ChangesPage and ReviewsPage
+
+`sidecar_sync` → violet, `file_changes` → orange, `re_render` → blue,
+`integrity`/`orphan` → muted/red (fallbacks for log entries with non-standard
+behaviors).  Colors are chosen to be distinct at a glance without requiring a legend.
+
+### reconcile-utils extracted to lib for testability
+
+`getReconcileMode`, `reconcileSettingKey`, and `RECONCILE_DEFAULTS` are extracted
+to `frontend/src/lib/reconcile-utils.ts` as pure functions so they can be unit-tested
+without rendering a React tree.  The default-fallback logic (absent key → documented
+default) is non-trivial and must match the backend's `DEFAULT_MODES`; tests assert
+this contract explicitly.
+
 ## 2026-06-27 — Phase 6a reconcile engine decisions
 
 ### Issue / ChangeLog / ReviewItem shapes

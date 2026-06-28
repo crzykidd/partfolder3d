@@ -33,6 +33,9 @@ import { PasswordResetPage } from '@/pages/admin/PasswordResetPage'
 import { JobsPage } from '@/pages/admin/JobsPage'
 import { ScheduledJobsPage } from '@/pages/admin/ScheduledJobsPage'
 import { PendingTagsPage } from '@/pages/admin/PendingTagsPage'
+import { IssuesPage } from '@/pages/admin/IssuesPage'
+import { ChangesPage } from '@/pages/admin/ChangesPage'
+import { ReviewsPage } from '@/pages/admin/ReviewsPage'
 
 import { ImportsPage } from '@/pages/ImportsPage'
 import { ImportWizardPage } from '@/pages/ImportWizardPage'
@@ -127,6 +130,30 @@ function App() {
                     element={
                       <AdminGuard>
                         <PendingTagsPage />
+                      </AdminGuard>
+                    }
+                  />
+                  <Route
+                    path="/admin/issues"
+                    element={
+                      <AdminGuard>
+                        <IssuesPage />
+                      </AdminGuard>
+                    }
+                  />
+                  <Route
+                    path="/admin/changes"
+                    element={
+                      <AdminGuard>
+                        <ChangesPage />
+                      </AdminGuard>
+                    }
+                  />
+                  <Route
+                    path="/admin/reviews"
+                    element={
+                      <AdminGuard>
+                        <ReviewsPage />
                       </AdminGuard>
                     }
                   />

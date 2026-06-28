@@ -4,9 +4,11 @@
 
 import React, { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { ThemeToggle } from './ThemeToggle'
 import { useAuth } from '@/context/AuthContext'
 import { AddAssetModal } from './AddAssetModal'
+import * as api from '@/lib/api'
 
 /**
  * Logo using <picture> for theme-aware swap.
@@ -95,6 +97,15 @@ export function AppShell() {
   const isAdmin = user?.role === 'admin'
   const [addAssetOpen, setAddAssetOpen] = useState(false)
 
+  // Pending review count badge — polled every 60 s; only for admins.
+  const { data: pendingReviews } = useQuery({
+    queryKey: ['reviews-pending-count'],
+    queryFn: () => api.listReviews({ status: 'pending', per_page: 1 }),
+    enabled: isAdmin,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  })
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* ── Header ── */}
@@ -118,6 +129,16 @@ export function AppShell() {
                 <NavItem to="/admin/jobs">Jobs</NavItem>
                 <NavItem to="/admin/scheduled-jobs">Schedules</NavItem>
                 <NavItem to="/admin/pending-tags">Pending Tags</NavItem>
+                <NavItem to="/admin/issues">Issues</NavItem>
+                <NavItem to="/admin/changes">Change Log</NavItem>
+                <span className="relative inline-flex items-center">
+                  <NavItem to="/admin/reviews">Review Queue</NavItem>
+                  {pendingReviews && pendingReviews.total > 0 && (
+                    <span className="ml-1 inline-flex items-center justify-center rounded-full bg-red-500 px-1.5 py-0.5 text-xs font-bold text-white leading-none min-w-[1.25rem]">
+                      {pendingReviews.total > 99 ? '99+' : pendingReviews.total}
+                    </span>
+                  )}
+                </span>
               </>
             )}
           </nav>

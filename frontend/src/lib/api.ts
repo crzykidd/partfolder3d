@@ -946,3 +946,136 @@ export const runScheduledJobNow = (name: string): Promise<{ enqueued: boolean; m
   apiFetch<{ enqueued: boolean; message: string }>(`/api/scheduled-jobs/${name}/run`, {
     method: 'POST',
   })
+
+// ---------------------------------------------------------------------------
+// Phase 6 — Issues
+// ---------------------------------------------------------------------------
+
+export interface IssueOut {
+  id: number
+  issue_type: string
+  severity: string
+  status: string
+  item_id: number | null
+  detail: string
+  suggested_action: string | null
+  created_at: string
+  updated_at: string
+  resolved_at: string | null
+}
+
+export interface PaginatedIssues {
+  total: number
+  page: number
+  per_page: number
+  items: IssueOut[]
+}
+
+export const listIssues = (params: {
+  status?: string
+  issue_type?: string
+  item_id?: number
+  page?: number
+  per_page?: number
+} = {}): Promise<PaginatedIssues> => {
+  const sp = new URLSearchParams()
+  if (params.status) sp.set('status', params.status)
+  if (params.issue_type) sp.set('issue_type', params.issue_type)
+  if (params.item_id != null) sp.set('item_id', String(params.item_id))
+  if (params.page != null) sp.set('page', String(params.page))
+  if (params.per_page != null) sp.set('per_page', String(params.per_page))
+  const qs = sp.toString()
+  return apiFetch<PaginatedIssues>(`/api/issues${qs ? `?${qs}` : ''}`)
+}
+
+export const getIssue = (id: number): Promise<IssueOut> =>
+  apiFetch<IssueOut>(`/api/issues/${id}`)
+
+export const resolveIssue = (id: number): Promise<IssueOut> =>
+  apiFetch<IssueOut>(`/api/issues/${id}/resolve`, { method: 'POST' })
+
+export const ignoreIssue = (id: number): Promise<IssueOut> =>
+  apiFetch<IssueOut>(`/api/issues/${id}/ignore`, { method: 'POST' })
+
+// ---------------------------------------------------------------------------
+// Phase 6 — Change Log
+// ---------------------------------------------------------------------------
+
+export interface ChangeLogOut {
+  id: number
+  behavior: string
+  change_type: string
+  item_id: number | null
+  summary: string
+  before_state: unknown | null
+  after_state: unknown | null
+  source: string
+  actor: string
+  created_at: string
+}
+
+export interface PaginatedChanges {
+  total: number
+  page: number
+  per_page: number
+  items: ChangeLogOut[]
+}
+
+export const listChanges = (params: {
+  behavior?: string
+  item_id?: number
+  page?: number
+  per_page?: number
+} = {}): Promise<PaginatedChanges> => {
+  const sp = new URLSearchParams()
+  if (params.behavior) sp.set('behavior', params.behavior)
+  if (params.item_id != null) sp.set('item_id', String(params.item_id))
+  if (params.page != null) sp.set('page', String(params.page))
+  if (params.per_page != null) sp.set('per_page', String(params.per_page))
+  const qs = sp.toString()
+  return apiFetch<PaginatedChanges>(`/api/changes${qs ? `?${qs}` : ''}`)
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6 — Review Queue
+// ---------------------------------------------------------------------------
+
+export interface ReviewItemOut {
+  id: number
+  behavior: string
+  change_type: string
+  item_id: number | null
+  summary: string
+  proposed_action: Record<string, unknown>
+  status: string
+  created_at: string
+  updated_at: string
+  resolved_at: string | null
+  resolved_by_id: number | null
+}
+
+export interface PaginatedReviews {
+  total: number
+  page: number
+  per_page: number
+  items: ReviewItemOut[]
+}
+
+export const listReviews = (params: {
+  status?: string
+  page?: number
+  per_page?: number
+} = {}): Promise<PaginatedReviews> => {
+  const sp = new URLSearchParams()
+  if (params.status) sp.set('status', params.status)
+  if (params.page != null) sp.set('page', String(params.page))
+  if (params.per_page != null) sp.set('per_page', String(params.per_page))
+  const qs = sp.toString()
+  return apiFetch<PaginatedReviews>(`/api/reviews${qs ? `?${qs}` : ''}`)
+}
+
+export const approveReview = (id: number): Promise<ReviewItemOut> =>
+  apiFetch<ReviewItemOut>(`/api/reviews/${id}/approve`, { method: 'POST' })
+
+export const rejectReview = (id: number): Promise<ReviewItemOut> =>
+  apiFetch<ReviewItemOut>(`/api/reviews/${id}/reject`, { method: 'POST' })

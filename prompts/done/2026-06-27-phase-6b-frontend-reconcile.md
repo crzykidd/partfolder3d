@@ -1,10 +1,10 @@
 ---
 name: 2026-06-27-phase-6b-frontend-reconcile
-status: pending
+status: completed
 created: 2026-06-27
 model: sonnet
-completed:
-result:
+completed: 2026-06-27
+result: Three admin pages (Issues, Change Log, Review Queue) + Reconcile Modes settings UI wired to Phase 6a backend; all 5 deliverables complete; tsc clean, 96/96 vitest passing.
 ---
 
 # Task: Phase 6b — Reconciliation / Scan Engine Frontend
@@ -166,6 +166,24 @@ interface ReviewItemOut {
 - **No new dependencies** unless trivially installed.
 - **Admin-only**: All three pages are admin-gated. Redirect to `/` (or show 403) if not
   admin — look at how existing admin pages enforce this.
+
+### 5. Auto/Review mode settings UI (PRD §8.2)
+
+The reconcile engine reads three per-behavior mode settings (see
+`backend/app/worker/reconcile.py`): `scan.sidecar_sync.mode`, `scan.re_render.mode`,
+`scan.file_changes.mode`, each `"auto"` or `"review"` (defaults: sidecar_sync=review,
+re_render=auto, file_changes=review). These are plain settings rows — **no new backend
+endpoint is needed**; use the existing generic settings API:
+
+- `GET /api/settings` → `[{ key, value }]` (find the `scan.*.mode` keys; a key absent means
+  the engine default applies — show the default).
+- `PUT /api/settings/{key}` with `{ value: "auto" | "review" }` (CSRF-protected) to change one.
+
+Add this as a small **"Reconcile Modes"** section/card — either on a settings/admin page or as
+a panel on the Issues or Reviews page (your call; match existing settings UI patterns). For each
+of the three behaviors show a label + an Auto/Review toggle (or select) that reflects the
+current value (falling back to the documented default) and PUTs on change. Add typed
+`listSettings()` / `setSetting(key, value)` helpers to `api.ts` if not already present.
 
 ## Out of scope
 
