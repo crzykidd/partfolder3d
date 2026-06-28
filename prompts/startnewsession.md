@@ -8,7 +8,7 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-06-27 (Phase 4 committed)
+**Last updated:** 2026-06-27 (Phase 5a committed)
 
 ---
 
@@ -31,19 +31,28 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 
 ## Current status
 
-- **Phase:** 4 **done** (committed `82e5f0a` on `dev`). Next action = plan + dispatch
-  **Phase 5 — Import / inbox wizard** (write `prompts/2026-06-27-phase-5-*.md`, model: sonnet).
+- **Phase:** 5a (backend) **done** (committed `2b44ddd` on `dev`). Next action = dispatch
+  **`prompts/2026-06-27-phase-5b-frontend-wizard.md`** (model: sonnet) — the import-wizard UI.
 - **Branch:** `dev` (work here). `main` is protected. Nothing pushed/PR'd yet (no dev→main
   until a working product exists).
-- **Done so far:** Phases 0–4 committed on `dev`:
+- **Done so far:** Phases 0–5a committed on `dev`:
   - **0** scaffolding/dev loop; **1** identity/first-run/settings; **2** libraries/storage/
     sidecar/item core (atomic rename); **3** catalog UI (FTS, tag cloud, browse, item page,
-    file/ZIP downloads); **4** worker jobs + mesh rendering + job/scheduled-jobs monitor UI.
-- **Phase 4 recovery note (this session):** the Phase 4 Sonnet agent hard-crashed at ~16:36
-  *before* its verify/commit step. No git loss (Phase 3b was the clean HEAD). Resumed via a
-  fresh agent that verified the intact tree, fixed 3 real `render_mesh.py` bugs, and
-  closed out. All checks green: ruff, pytest (167), alembic up/down/up, tsc, vitest (50),
-  `docker compose config`. Render spike **go**: pyrender+OSMesa confirmed CPU-only on host.
+    file/ZIP downloads); **4** worker jobs + mesh rendering + job/scheduled-jobs monitor UI;
+    **5a** import-wizard **backend** (ImportSession staging, URL scraper, site-capabilities +
+    encrypted tokens, tag reconciliation/approval, inbox scheduled-scan, commit→`create_item`).
+- **5b remaining (frontend):** Add Asset modal, import-wizard step UI (`/import/:sessionId`),
+  pending-imports list (`/imports`), site-setup prompt, pending-tag approval admin section, nav.
+- **Verification gotcha (closed):** the 5a agent had no Postgres, so it could only run 6 pure
+  unit tests. The orchestrator spun up an ephemeral PG (docker `postgres:16-alpine` on `:5433`,
+  user/pass/db `partfolder3d`/`testpass`/`partfolder3d`) and caught **2 real bugs**: invalid
+  `CREATE TYPE IF NOT EXISTS` in migration 0006 (→ `DO`-block guard) and missing
+  `python-multipart` dep (app wouldn't boot). After fixes: **189 pytest passed**, alembic
+  up/down/up clean, ruff/tsc/vitest green. **Lesson: bring up an ephemeral PG to verify any
+  migration/DB work before committing.**
+- **Phase 4 recovery note:** the Phase 4 agent hard-crashed before its verify/commit step; no
+  git loss; resumed + verified + fixed 3 `render_mesh.py` bugs. Render spike **go**
+  (pyrender+OSMesa CPU-only).
 
 ## Phase 4 follow-ups to confirm later (need Docker/CI, not verifiable here)
 
