@@ -8,7 +8,7 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-06-27 (Phase 8 complete; deploy-readiness fix landed)
+**Last updated:** 2026-06-27 (Phase 8 done + 4 runtime fixes; Phase 9 in flight; autonomous run to v1)
 
 ---
 
@@ -31,10 +31,14 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 
 ## Current status
 
-- **Phase:** 8 **complete** (8a `21080ea` + 8b `a773538` on `dev`). Next = **Phase 9 (admin/
-  backup/export/API)** + **Phase 10 (hardening & v1 release)** — Phase 10 fills the
-  `release-prep`/`release-cut` placeholders. **Phase 9 not yet dispatched** (user is running the
-  app locally first).
+- **Phase:** 8 **complete** (8a `21080ea` + 8b `a773538`). **Autonomous run to v1 in progress**
+  (user approved kicking off the rest while they sleep): **Phase 9 in flight**
+  (`prompts/2026-06-27-phase-9-admin-backup-export-api.md`), then **Phase 10 hardening** (test
+  coverage, security review, perf, UX polish, fill release-prep/cut placeholders), then a **full
+  test pass**, then a **UI rework** (user finds the UI "hideous"; dropping thoughts to fold in).
+  **DO NOT cut the release / push to main** without explicit user go (outward-facing; UI rework
+  lands after anyway). Phase 10's actual `/release-prep`→merge→`/release-cut` is deferred to a
+  confirmed go.
 - **Deploy-readiness fix (committed):** scaffolding gap (since Phase 0) — nothing ran migrations
   on startup, so a fresh stack came up on an empty DB and the wizard failed. Fixed by **bundling
   migrations into the backend's image entrypoint** (`backend/docker-entrypoint.sh`:
