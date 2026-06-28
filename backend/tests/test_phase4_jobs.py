@@ -259,3 +259,23 @@ def test_render_mesh_backend_detection() -> None:
 
     b = get_backend()
     assert b in ("egl", "osmesa", "vtk", "none")
+
+
+def test_worker_settings_builds_a_worker() -> None:
+    """Regression: `python worker.py` crashed with "'type' object is not
+    iterable" because main() called Worker(WorkerSettings) — arq's Worker takes
+    `functions` (a list) as its first positional arg, not the settings class.
+    create_worker() reads the settings class and must build the worker, with all
+    registered task functions and cron jobs resolving."""
+    from arq.worker import create_worker  # noqa: PLC0415
+
+    import worker as worker_module  # noqa: PLC0415
+
+    w = create_worker(worker_module.WorkerSettings)  # type: ignore[arg-type]
+
+    # Every Phase 4–6 task is registered…
+    for fn in ("render_item", "build_zip_bundle", "exec_scheduled_job",
+               "process_import_session", "apply_review_item"):
+        assert fn in w.functions, f"task {fn!r} not registered on the worker"
+    # …and the recurring cron jobs are wired in.
+    assert any(name.startswith("cron:") for name in w.functions)

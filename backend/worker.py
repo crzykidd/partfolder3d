@@ -1141,9 +1141,13 @@ class WorkerSettings:
 
 async def main() -> None:
     """Run the worker (used when executing this file directly)."""
-    from arq import Worker
+    from arq.worker import create_worker
 
-    worker = Worker(WorkerSettings)  # type: ignore[arg-type]
+    # NOTE: arq's Worker(...) takes `functions` (a list) as its first positional
+    # arg — passing the settings class directly raises "'type' object is not
+    # iterable". create_worker() reads the settings-class attributes and builds
+    # the Worker correctly.
+    worker = create_worker(WorkerSettings)  # type: ignore[arg-type]
     await worker.async_run()
 
 
