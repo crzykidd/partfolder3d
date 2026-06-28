@@ -8,7 +8,7 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-06-27 (Phase 7 complete; Phase 8 in flight)
+**Last updated:** 2026-06-27 (Phase 8a committed; 8b frontend in flight)
 
 ---
 
@@ -31,11 +31,15 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 
 ## Current status
 
-- **Phase:** 7 **complete** (7a `2171f31` + 7b `a11dc83` on `dev`). **Phase 8 in flight**
-  (`prompts/2026-06-27-phase-8-ai-tagging.md`, model: sonnet — optional AI tagging; expected to
-  split 8a backend then 8b frontend). After 8: **Phase 9 (admin/backup/export/API)** +
-  **Phase 10 (hardening & v1 release)** — Phase 10 fills the `release-prep`/`release-cut`
-  placeholders.
+- **Phase:** 8a (backend) **done** (committed `21080ea` on `dev`); **8b frontend in flight**
+  (`prompts/2026-06-27-phase-8b-ai-frontend.md`, model: sonnet). After 8: **Phase 9 (admin/
+  backup/export/API)** + **Phase 10 (hardening & v1 release)** — Phase 10 fills the
+  `release-prep`/`release-cut` placeholders.
+- **Phase 8 agent died mid-run** on an internal API error (oversized tool call in its transcript)
+  after building most of 8a. Recovered via a fresh finish/verify agent (did NOT resume the dead
+  one — replaying its transcript would re-hit the 400). 299 pytest on real PG, ruff, alembic
+  0008 (no new migration — AiProvider predates Phase 8). 2nd infra-level interruption this
+  session (Phase 4 was 1st); both recovered cleanly since nothing commits until verified.
 - **⚠️ Frontend stack gotcha (caught in 7b):** the UI is **Tailwind + CSS-variable (shadcn-style)
   theme + minimal Radix (dropdown/slot) + lucide-react + TanStack Query**, and uses the
   `apiFetch`/`apiFetchForm` CSRF wrapper. **There is NO Mantine and NO toast library** — a 7a-
@@ -62,7 +66,11 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
     tests; alembic 0008 round-trip; ruff clean.**
   - **7b** print/sharing **frontend** — print-history section + share controls on ItemPage,
     public `/share/:token` page (outside auth guards), `/admin/print-stats`, `/admin/shares`
-    audit, include-history ZIP checkbox, from-share-link import panel (tsc clean, 109 vitest).
+    audit, include-history ZIP checkbox, from-share-link import panel (tsc clean, 109 vitest);
+  - **8a** AI-tagging **backend** — `app/ai/client.py` provider abstraction (anthropic SDK for
+    Claude default `claude-opus-4-8`; openai SDK for OpenAI + Ollama-via-`base_url`; test-injectable
+    callers), `ai_providers` CRUD + `ai_actions` (suggest-tags/cleanup/summarize) routers, Fernet
+    key encryption. Best-effort: no-AI manual path proven by tests; no real provider calls in tests.
 
 ## Phase 5 follow-ups (small; fold into a later phase)
 
