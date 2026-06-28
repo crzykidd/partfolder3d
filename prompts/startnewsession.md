@@ -8,7 +8,7 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-06-27 (Phase 5a committed)
+**Last updated:** 2026-06-27 (Phase 5 complete)
 
 ---
 
@@ -31,18 +31,27 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 
 ## Current status
 
-- **Phase:** 5a (backend) **done** (committed `2b44ddd` on `dev`). Next action = dispatch
-  **`prompts/2026-06-27-phase-5b-frontend-wizard.md`** (model: sonnet) — the import-wizard UI.
+- **Phase:** 5 **complete** (5a `2b44ddd` + 5b `2d032cf` on `dev`). Next action = plan +
+  dispatch **Phase 6 — Reconciliation / scan engine** (write `prompts/2026-06-27-phase-6-*.md`,
+  model: sonnet; see build-plan §"Phase 6" + PRD §8).
 - **Branch:** `dev` (work here). `main` is protected. Nothing pushed/PR'd yet (no dev→main
   until a working product exists).
-- **Done so far:** Phases 0–5a committed on `dev`:
+- **Done so far:** Phases 0–5 committed on `dev`:
   - **0** scaffolding/dev loop; **1** identity/first-run/settings; **2** libraries/storage/
     sidecar/item core (atomic rename); **3** catalog UI (FTS, tag cloud, browse, item page,
     file/ZIP downloads); **4** worker jobs + mesh rendering + job/scheduled-jobs monitor UI;
     **5a** import-wizard **backend** (ImportSession staging, URL scraper, site-capabilities +
-    encrypted tokens, tag reconciliation/approval, inbox scheduled-scan, commit→`create_item`).
-- **5b remaining (frontend):** Add Asset modal, import-wizard step UI (`/import/:sessionId`),
-  pending-imports list (`/imports`), site-setup prompt, pending-tag approval admin section, nav.
+    encrypted tokens, tag reconciliation/approval, inbox scheduled-scan, commit→`create_item`);
+    **5b** import-wizard **frontend** (Add Asset modal, `/import/:sessionId` wizard, `/imports`
+    list, site-setup prompt, `/admin/pending-tags`). All checks green (189 pytest, tsc, 82 vitest).
+
+## Phase 5 follow-ups (small; fold into a later phase)
+
+- **`TagSummary` lacks a `status` field**, so the frontend can't distinguish pending vs. active
+  tags — `/admin/pending-tags` lists ALL tags (Approve is idempotent, so it's safe but noisy).
+  Add `status` to `TagSummary` + filter the page to pending-only. Good Phase 6 cleanup.
+- **No `GET /api/items/by-id/{id}`** — committed-session deep-links fall back to `/catalog`
+  instead of the new item. Minor; add if a by-id lookup is otherwise needed.
 - **Verification gotcha (closed):** the 5a agent had no Postgres, so it could only run 6 pure
   unit tests. The orchestrator spun up an ephemeral PG (docker `postgres:16-alpine` on `:5433`,
   user/pass/db `partfolder3d`/`testpass`/`partfolder3d`) and caught **2 real bugs**: invalid
