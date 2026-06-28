@@ -2,6 +2,20 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-28 — Headless render fix in the Docker image (X11 libs + PyOpenGL override)
+
+Phase-4 render worked on the host but `get_backend()` returned `none` in the running container.
+Two image-level causes, found by probing the live container:
+- **`libXrender.so.1` (and libXi) missing** → `import pyrender` (via pyglet) and `import vtk`
+  both crashed, so no backend could even import despite libGL/EGL/OSMesa being present. Fix: add
+  `libxrender1` + `libxi6` to the Dockerfile apt set.
+- **pyrender hard-pins `PyOpenGL==3.1.0`** (lacks `OSMesaCreateContextAttribs`, needs >=3.1.7);
+  `PyOpenGL>=3.1.0` in requirements can't override the `==` pin, and `>=3.1.7` there would make
+  pip conflict with pyrender. Fix: a separate `RUN pip install "PyOpenGL>=3.1.7"` AFTER the
+  requirements install in the Dockerfile.
+After both, a clean rebuilt image renders a real PNG (backend `egl`). Lesson: verify render in
+the actual image, not a host venv.
+
 ## 2026-06-28 — UI B4 (final): Auth/public + remaining authenticated pages — Aurora revamp COMPLETE
 
 ### UI revamp complete

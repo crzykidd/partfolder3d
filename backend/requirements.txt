@@ -38,8 +38,10 @@ PyYAML==6.0.2
 trimesh==4.5.3
 pyrender==0.1.45
 Pillow==11.1.0
-# pyrender declares ==3.1.0 but functionally works with newer versions.
-# >=3.1.7 is required for OSMesaCreateContextAttribs (pyrender OSMesa platform).
+# pyrender hard-pins PyOpenGL==3.1.0, so this >= line resolves to 3.1.0 here —
+# which LACKS OSMesaCreateContextAttribs (need >=3.1.7) and is too old for the
+# EGL/OSMesa offscreen paths. The Dockerfile installs a newer PyOpenGL AFTER this
+# (a separate `pip install "PyOpenGL>=3.1.7"`) to override the pin in the image.
 PyOpenGL>=3.1.0
 vtk==9.3.1
 numpy>=1.24.0,<3.0

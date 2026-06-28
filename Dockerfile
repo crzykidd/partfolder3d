@@ -30,10 +30,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libosmesa6 \
         libglib2.0-0 \
         libfreetype6 \
+        libxrender1 \
+        libxi6 \
     && rm -rf /var/lib/apt/lists/*
+# libxrender1 + libxi6: pyrender imports pyglet at module load (and the vtk
+# wheel links libXrender), so without these X11 client libs `import pyrender`
+# and `import vtk` both fail with "libXrender.so.1: cannot open shared object
+# file" — leaving NO working render backend even though libGL/EGL/OSMesa exist.
 
 COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+# pyrender hard-pins PyOpenGL==3.1.0, which lacks OSMesaCreateContextAttribs and
+# is too old for the EGL/OSMesa offscreen paths render_mesh.py needs. Override to
+# a newer PyOpenGL after the pinned install (3.1.0 is overly strict; pyrender
+# works fine with 3.1.7+). Without this, get_backend() returns "none".
+RUN pip install --no-cache-dir "PyOpenGL>=3.1.7"
 
 # ---- runtime: copy application source ----
 FROM deps AS runtime
