@@ -2,6 +2,54 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-28 — UI B2: import flow Aurora restyle
+
+### Inline-style-first approach (matching B1 pattern)
+
+All three B2 files (`ImportWizardPage.tsx`, `ImportsPage.tsx`, `AddAssetModal.tsx`) adopt
+the same inline-style + `var(--aurora-*)` approach established in B1's
+`CatalogPage.tsx` / `ItemPage.tsx`. Tailwind utility classes are kept only for
+animation (`animate-spin`, `animate-pulse`) and accessibility (`sr-only`) — everything
+else is inline CSS using the Aurora design tokens defined in `index.css`. This matches
+B1 exactly and avoids class-name drift.
+
+### Aurora stepper with labels below circles
+
+The `StepProgress` component uses a `flex` row with alternating circle columns and
+connector lines. Connector `marginTop: 15` centres it at the midpoint of the 32 px
+circles (half-height minus 1 for border). Step labels sit below each circle inside the
+column div, keeping the connector anchored to the circle center while labels extend
+downward. Completed steps show a `Check` icon (from lucide-react — already a dep).
+
+### Focus handling on aurora inputs
+
+Each Aurora-styled `<input>`, `<textarea>`, and `<select>` element has inline `onFocus`
+/ `onBlur` handlers that set `borderColor` and `boxShadow` to aurora pill values.
+This gives a visible keyboard-focus ring without a CSS class or index.css change, and
+matches the approach used in CatalogPage's search wrapper.
+
+### AI-assist buttons use ✦ text glyph
+
+The "Clean up (AI)" and "Suggest tags (AI)" buttons use a `✦` glyph prefix instead of
+importing a Sparkles icon. The glyph keeps the aurora teal text colour from the
+ghost-button style, avoids adding a new icon to the import set, and is semantically
+neutral (no screenreader issues since the button label carries the meaning).
+
+### AddAssetModal drop-zone accessibility
+
+The drop-zone `<div>` has `role="button"`, `tabIndex={0}`, and `onKeyDown` handling for
+Enter/Space so keyboard users can open the file picker. Previously it was only
+click-accessible.
+
+### ImportsPage session table — no `<tbody>` row border on first row
+
+Aurora table rows use `borderTop` (not `borderBottom`) on each `<tr>` so the header
+bottom line is provided by the `thead` glass background's natural bottom edge.
+The first row in `<tbody>` gets a `borderTop` matching `--aurora-divider`; this avoids
+a doubled line where header meets body.
+
+---
+
 ## 2026-06-28 — Libraries management + dev library mount
 
 ### Dev library mount convention

@@ -6,17 +6,82 @@
  * Authenticated users see their own sessions.  Admin users see all sessions
  * (via the all_users=true query param toggle).
  *
- * Status badges: draft (grey), processing (animated blue), pending_wizard
- * (yellow — ready for wizard), failed (red).
+ * Status badges: draft (grey), processing (animated teal), pending_wizard
+ * (amber — ready for wizard), failed (red).
  *
- * Each row links to the wizard at /import/:sessionId.
+ * Styling: Aurora aesthetic — glass cards, teal accent (#0FA4AB), --aurora-* CSS vars.
  */
 
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { useAuth } from '@/context/AuthContext'
 import * as api from '@/lib/api'
+
+// ---------------------------------------------------------------------------
+// Aurora style constants
+// ---------------------------------------------------------------------------
+
+const AURORA_CARD: React.CSSProperties = {
+  background: 'var(--aurora-card)',
+  border: '1px solid var(--aurora-card-border)',
+  borderRadius: 14,
+  backdropFilter: 'blur(16px)',
+  WebkitBackdropFilter: 'blur(16px)',
+}
+
+const AURORA_INPUT: React.CSSProperties = {
+  background: 'var(--aurora-input-bg)',
+  border: '1px solid var(--aurora-input-border)',
+  borderRadius: 8,
+  color: 'var(--aurora-text)',
+  padding: '7px 11px',
+  fontSize: 13,
+  outline: 'none',
+  width: '100%',
+  transition: 'border-color 0.15s, box-shadow 0.15s',
+  boxSizing: 'border-box',
+  display: 'block',
+}
+
+const AURORA_BTN_PRIMARY: React.CSSProperties = {
+  background: 'var(--aurora-accent)',
+  border: 'none',
+  borderRadius: 20,
+  color: 'var(--aurora-accent-fg)',
+  fontSize: 12,
+  fontWeight: 700,
+  padding: '6px 16px',
+  cursor: 'pointer',
+  boxShadow: '0 4px 14px var(--aurora-accent-glow)',
+  transition: 'opacity 0.15s',
+  display: 'inline-flex',
+  alignItems: 'center',
+  textDecoration: 'none',
+}
+
+const AURORA_BTN_GHOST: React.CSSProperties = {
+  background: 'var(--aurora-glass)',
+  border: '1px solid var(--aurora-glass-border)',
+  borderRadius: 20,
+  color: 'var(--aurora-text-dim)',
+  fontSize: 13,
+  padding: '7px 18px',
+  cursor: 'pointer',
+  transition: 'all 0.15s',
+  display: 'inline-flex',
+  alignItems: 'center',
+}
+
+// Focus handlers
+function onAuroraFocus(e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) {
+  e.currentTarget.style.borderColor = 'var(--aurora-pill-border)'
+  e.currentTarget.style.boxShadow = '0 0 0 3px var(--aurora-pill)'
+}
+function onAuroraBlur(e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) {
+  e.currentTarget.style.borderColor = 'var(--aurora-input-border)'
+  e.currentTarget.style.boxShadow = 'none'
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -32,67 +97,100 @@ function formatDate(iso: string): string {
   })
 }
 
+// ---------------------------------------------------------------------------
+// Status badge (aurora pill style)
+// ---------------------------------------------------------------------------
+
 function StatusBadge({ status }: { status: string }) {
-  let cls: string
+  let bg: string
+  let border: string
+  let color: string
   let label: string
+  let animated = false
 
   switch (status) {
     case 'draft':
-      cls = 'bg-muted text-muted-foreground'
-      label = 'Draft'
-      break
+      bg = 'var(--aurora-glass)'; border = 'var(--aurora-glass-border)'; color = 'var(--aurora-muted)'; label = 'Draft'; break
     case 'processing':
-      cls = 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 animate-pulse'
-      label = 'Processing…'
-      break
+      bg = 'rgba(15,164,171,0.12)'; border = 'rgba(15,164,171,0.35)'; color = 'var(--aurora-accent)'; label = 'Processing…'; animated = true; break
     case 'pending_wizard':
-      cls = 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-      label = 'Ready'
-      break
+      bg = 'rgba(245,158,11,0.10)'; border = 'rgba(245,158,11,0.32)'; color = '#D97706'; label = 'Ready'; break
     case 'failed':
-      cls = 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-      label = 'Failed'
-      break
+      bg = 'rgba(220,38,38,0.10)'; border = 'rgba(220,38,38,0.28)'; color = 'var(--aurora-danger)'; label = 'Failed'; break
     case 'committed':
-      cls = 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-      label = 'Committed'
-      break
+      bg = 'rgba(22,163,74,0.10)'; border = 'rgba(22,163,74,0.28)'; color = '#16A34A'; label = 'Committed'; break
     case 'cancelled':
-      cls = 'bg-muted text-muted-foreground line-through'
-      label = 'Cancelled'
-      break
+      bg = 'var(--aurora-glass)'; border = 'var(--aurora-glass-border)'; color = 'var(--aurora-muted)'; label = 'Cancelled'; break
     default:
-      cls = 'bg-muted text-muted-foreground'
-      label = status
+      bg = 'var(--aurora-glass)'; border = 'var(--aurora-glass-border)'; color = 'var(--aurora-muted)'; label = status
   }
 
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>
-      {label}
-    </span>
-  )
-}
-
-function SourceTypeBadge({ type }: { type: string }) {
-  const label = type === 'url' ? 'URL' : type === 'upload' ? 'Upload' : type
-  const cls = type === 'url'
-    ? 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-200'
-    : 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900 dark:text-cyan-200'
-  return (
-    <span className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ${cls}`}>
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        background: bg,
+        border: `1px solid ${border}`,
+        borderRadius: 20,
+        color,
+        fontSize: 10,
+        fontWeight: 700,
+        padding: '3px 9px',
+        textTransform: 'uppercase',
+        letterSpacing: '0.06em',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {animated && (
+        <span
+          className="animate-pulse"
+          style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', flexShrink: 0 }}
+        />
+      )}
       {label}
     </span>
   )
 }
 
 // ---------------------------------------------------------------------------
-// Session row
+// Source type badge
+// ---------------------------------------------------------------------------
+
+function SourceTypeBadge({ type }: { type: string }) {
+  const label = type === 'url' ? 'URL' : type === 'upload' ? 'Upload' : type
+  const isUrl = type === 'url'
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        background: isUrl ? 'var(--aurora-pill)' : 'var(--aurora-glass)',
+        border: `1px solid ${isUrl ? 'var(--aurora-pill-border)' : 'var(--aurora-glass-border)'}`,
+        borderRadius: 8,
+        color: isUrl ? 'var(--aurora-accent)' : 'var(--aurora-muted)',
+        fontSize: 10,
+        fontWeight: 600,
+        padding: '3px 8px',
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {label}
+    </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Session row (aurora table row)
 // ---------------------------------------------------------------------------
 
 function SessionRow({ session }: { session: api.ImportSession }) {
   const displayTitle =
     session.confirmed_title ?? session.suggested_title ?? (
-      <em className="text-muted-foreground">Untitled</em>
+      <em style={{ color: 'var(--aurora-muted)' }}>Untitled</em>
     )
 
   const canOpenWizard = ['draft', 'processing', 'pending_wizard', 'failed'].includes(
@@ -100,55 +198,75 @@ function SessionRow({ session }: { session: api.ImportSession }) {
   )
 
   return (
-    <tr className="border-b border-border hover:bg-muted/30 transition-colors">
-      <td className="px-4 py-3">
+    <tr
+      style={{ transition: 'background 0.1s' }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = 'var(--aurora-glass-hover)' }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = 'transparent' }}
+    >
+      <td style={{ padding: '10px 14px', borderTop: '1px solid var(--aurora-divider)' }}>
         <StatusBadge status={session.status} />
       </td>
-      <td className="px-4 py-3">
+      <td style={{ padding: '10px 14px', borderTop: '1px solid var(--aurora-divider)' }}>
         <SourceTypeBadge type={session.source_type} />
       </td>
-      <td className="px-4 py-3 max-w-xs">
-        <p className="font-medium text-sm truncate">{displayTitle}</p>
+      <td style={{ padding: '10px 14px', borderTop: '1px solid var(--aurora-divider)', maxWidth: 280, overflow: 'hidden' }}>
+        <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--aurora-text)', margin: '0 0 2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {displayTitle}
+        </p>
         {session.source_url && (
           <a
             href={session.source_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-0.5 block truncate text-xs text-muted-foreground hover:text-primary"
+            style={{
+              fontSize: 11,
+              color: 'var(--aurora-muted)',
+              textDecoration: 'none',
+              display: 'block',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              transition: 'color 0.15s',
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--aurora-accent)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--aurora-muted)' }}
           >
             {session.source_url}
           </a>
         )}
         {session.status === 'failed' && session.error && (
           <p
-            className="mt-0.5 truncate text-xs text-red-600 dark:text-red-400"
+            style={{ fontSize: 11, color: 'var(--aurora-danger)', margin: '2px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
             title={session.error}
           >
-            {session.error.slice(0, 80)}
-            {session.error.length > 80 ? '…' : ''}
+            {session.error.slice(0, 80)}{session.error.length > 80 ? '…' : ''}
           </p>
         )}
       </td>
-      <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+      <td style={{ padding: '10px 14px', borderTop: '1px solid var(--aurora-divider)', fontSize: 11, color: 'var(--aurora-muted)', whiteSpace: 'nowrap' }}>
         {formatDate(session.created_at)}
       </td>
-      <td className="px-4 py-3">
+      <td style={{ padding: '10px 14px', borderTop: '1px solid var(--aurora-divider)' }}>
         {canOpenWizard ? (
           <Link
             to={`/import/${session.id}`}
-            className="rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground hover:opacity-90 transition-colors"
+            style={AURORA_BTN_PRIMARY}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = '0.85' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = '1' }}
           >
             Open Wizard →
           </Link>
         ) : session.status === 'committed' && session.item_id ? (
           <a
             href={`/items/${session.item_id}`}
-            className="text-xs text-primary hover:underline"
+            style={{ fontSize: 12, color: 'var(--aurora-accent)', textDecoration: 'none', transition: 'opacity 0.15s' }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = '0.8' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = '1' }}
           >
             View item →
           </a>
         ) : (
-          <span className="text-xs text-muted-foreground">—</span>
+          <span style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>—</span>
         )}
       </td>
     </tr>
@@ -156,7 +274,7 @@ function SessionRow({ session }: { session: api.ImportSession }) {
 }
 
 // ---------------------------------------------------------------------------
-// From-share-link import panel (Phase 7b)
+// From-share-link import panel
 // ---------------------------------------------------------------------------
 
 function FromShareLinkPanel() {
@@ -198,7 +316,9 @@ function FromShareLinkPanel() {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-accent transition-colors"
+        style={AURORA_BTN_GHOST}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
       >
         Import from share link
       </button>
@@ -206,40 +326,80 @@ function FromShareLinkPanel() {
   }
 
   return (
-    <div className="rounded-lg border border-border bg-muted/20 p-5 flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold">Import from share link</h2>
+    <div
+      style={{
+        background: 'var(--aurora-glass)',
+        border: '1px solid var(--aurora-glass-border)',
+        borderRadius: 12,
+        padding: '20px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 16,
+        minWidth: 320,
+      }}
+    >
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <h2 style={{ fontSize: 14, fontWeight: 700, color: 'var(--aurora-text)', margin: 0 }}>
+          Import from share link
+        </h2>
         <button
           onClick={() => { setOpen(false); setSubmitError(null) }}
-          className="text-sm text-muted-foreground hover:text-foreground"
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            color: 'var(--aurora-muted)',
+            fontSize: 16,
+            lineHeight: 1,
+            padding: 4,
+            display: 'flex',
+            transition: 'color 0.15s',
+          }}
+          aria-label="Close"
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--aurora-text)' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--aurora-muted)' }}
         >
           ✕
         </button>
       </div>
 
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-muted-foreground">Share URL</label>
+      {/* Share URL */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <label
+          style={{ fontSize: 10, fontWeight: 700, color: 'var(--aurora-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}
+        >
+          Share URL
+        </label>
         <input
           type="url"
           value={shareUrl}
           onChange={(e) => setShareUrl(e.target.value)}
           placeholder="https://otherinstance.example.com/share/<token>"
-          className="input-base py-2 text-sm"
+          style={AURORA_INPUT}
+          onFocus={onAuroraFocus}
+          onBlur={onAuroraBlur}
         />
-        <p className="text-xs text-muted-foreground">
+        <p style={{ fontSize: 11, color: 'var(--aurora-muted)', margin: 0 }}>
           Paste a share link from another PartFolder 3D instance.
         </p>
       </div>
 
+      {/* Destination library */}
       {libraries.length > 0 && (
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-muted-foreground">
-            Destination library (optional)
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <label
+            style={{ fontSize: 10, fontWeight: 700, color: 'var(--aurora-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}
+          >
+            Destination library
+            <span style={{ fontWeight: 400, marginLeft: 4 }}>(optional)</span>
           </label>
           <select
             value={libraryId ?? ''}
             onChange={(e) => setLibraryId(e.target.value === '' ? null : Number(e.target.value))}
-            className="input-base py-1.5 text-sm"
+            style={AURORA_INPUT}
+            onFocus={onAuroraFocus}
+            onBlur={onAuroraBlur}
           >
             <option value="">Auto-select (first enabled)</option>
             {libraries.map((lib) => (
@@ -251,62 +411,69 @@ function FromShareLinkPanel() {
         </div>
       )}
 
-      <div className="flex flex-col gap-2">
-        <p className="text-xs font-medium text-muted-foreground">Include from public print history:</p>
-        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={includePublicNotes}
-            onChange={(e) => setIncludePublicNotes(e.target.checked)}
-            className="h-4 w-4 rounded border-border accent-primary"
-          />
-          Notes &amp; ratings
-        </label>
-        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={includeSettings}
-            onChange={(e) => setIncludeSettings(e.target.checked)}
-            className="h-4 w-4 rounded border-border accent-primary"
-          />
-          Structured settings (printer, material, nozzle, etc.)
-        </label>
-        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={includePhotos}
-            onChange={(e) => setIncludePhotos(e.target.checked)}
-            className="h-4 w-4 rounded border-border accent-primary"
-          />
-          Print photos
-        </label>
-        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+      {/* Include options */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--aurora-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', margin: 0 }}>
+          Include from public print history:
+        </p>
+        {(
+          [
+            [includePublicNotes, setIncludePublicNotes, 'Notes & ratings'] as const,
+            [includeSettings, setIncludeSettings, 'Structured settings (printer, material, nozzle, etc.)'] as const,
+            [includePhotos, setIncludePhotos, 'Print photos'] as const,
+          ] as [boolean, React.Dispatch<React.SetStateAction<boolean>>, string][]
+        ).map(([checked, setter, label]) => (
+          <label
+            key={label}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', userSelect: 'none', color: 'var(--aurora-text-dim)' }}
+          >
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={(e) => setter(e.target.checked)}
+              style={{ accentColor: 'var(--aurora-accent)', width: 14, height: 14, cursor: 'pointer' }}
+            />
+            {label}
+          </label>
+        ))}
+        <label
+          style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', userSelect: 'none', color: 'var(--aurora-text-dim)' }}
+        >
           <input
             type="checkbox"
             checked={includeGcode}
             onChange={(e) => setIncludeGcode(e.target.checked)}
-            className="h-4 w-4 rounded border-border accent-primary"
+            style={{ accentColor: 'var(--aurora-accent)', width: 14, height: 14, cursor: 'pointer' }}
           />
-          Gcode files{' '}
-          <span className="text-xs text-muted-foreground">(can be large)</span>
+          Gcode files
+          <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>(can be large)</span>
         </label>
       </div>
 
       {submitError && (
-        <p className="text-sm text-destructive">{submitError}</p>
+        <p style={{ fontSize: 12, color: 'var(--aurora-danger)', margin: 0 }}>{submitError}</p>
       )}
 
-      <div className="flex gap-2">
+      {/* Actions */}
+      <div style={{ display: 'flex', gap: 8, paddingTop: 2 }}>
         <button
           onClick={() => importMutation.mutate()}
           disabled={!shareUrl.trim() || importMutation.isPending}
-          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          style={{
+            ...AURORA_BTN_PRIMARY,
+            opacity: !shareUrl.trim() || importMutation.isPending ? 0.5 : 1,
+            cursor: !shareUrl.trim() || importMutation.isPending ? 'not-allowed' : 'pointer',
+          }}
+          onMouseEnter={(e) => { if (shareUrl.trim() && !importMutation.isPending) (e.currentTarget as HTMLButtonElement).style.opacity = '0.85' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = !shareUrl.trim() || importMutation.isPending ? '0.5' : '1' }}
         >
           {importMutation.isPending ? 'Importing…' : 'Import'}
         </button>
         <button
           onClick={() => { setOpen(false); setSubmitError(null) }}
-          className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent transition-colors"
+          style={AURORA_BTN_GHOST}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
         >
           Cancel
         </button>
@@ -335,7 +502,6 @@ export function ImportsPage() {
         page,
         per_page: PER_PAGE,
       }),
-    // Refresh automatically while any session is processing
     refetchInterval: (query) => {
       const sessions = query.state.data?.sessions ?? []
       const hasProcessing = sessions.some((s) => s.status === 'processing')
@@ -346,23 +512,44 @@ export function ImportsPage() {
   const totalPages = data ? Math.ceil(data.total / PER_PAGE) : 1
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18, color: 'var(--aurora-text)' }}>
+      {/* Page header */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h1 className="text-2xl font-bold">Imports</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <h1
+            style={{
+              fontSize: 22,
+              fontWeight: 800,
+              color: 'var(--aurora-text)',
+              letterSpacing: '-0.02em',
+              margin: '0 0 4px',
+            }}
+          >
+            Imports
+          </h1>
+          <p style={{ fontSize: 12, color: 'var(--aurora-muted)', margin: 0 }}>
             {data ? `${data.total} session(s)` : 'Your pending import sessions.'}
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           {isAdmin && (
-            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                fontSize: 13,
+                cursor: 'pointer',
+                userSelect: 'none',
+                color: 'var(--aurora-text-dim)',
+              }}
+            >
               <input
                 type="checkbox"
                 checked={allUsers}
                 onChange={(e) => { setAllUsers(e.target.checked); setPage(1) }}
-                className="h-4 w-4 rounded border-border accent-primary"
+                style={{ accentColor: 'var(--aurora-accent)', width: 14, height: 14, cursor: 'pointer' }}
               />
               Show all users' sessions
             </label>
@@ -371,74 +558,136 @@ export function ImportsPage() {
         </div>
       </div>
 
+      {/* Loading */}
       {isLoading && (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <div style={{ padding: '40px 0', textAlign: 'center', fontSize: 13, color: 'var(--aurora-muted)' }}>
+          Loading…
+        </div>
       )}
 
+      {/* Error */}
       {isError && (
-        <p className="text-sm text-red-600">
-          {error instanceof Error ? error.message : 'Failed to load sessions.'}
-        </p>
-      )}
-
-      {data && data.sessions.length === 0 && (
-        <div className="py-16 text-center">
-          <p className="text-muted-foreground">No import sessions found.</p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Use the <strong>Add Asset</strong> button in the navigation bar to start an import.
+        <div
+          style={{
+            background: 'rgba(220,38,38,0.08)',
+            border: '1px solid rgba(220,38,38,0.25)',
+            borderRadius: 10,
+            padding: '12px 16px',
+          }}
+        >
+          <p style={{ fontSize: 13, color: 'var(--aurora-danger)', margin: 0 }}>
+            {error instanceof Error ? error.message : 'Failed to load sessions.'}
           </p>
         </div>
       )}
 
+      {/* Empty state */}
+      {data && data.sessions.length === 0 && (
+        <div
+          style={{
+            ...AURORA_CARD,
+            padding: '56px 24px',
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 12,
+              background: 'var(--aurora-pill)',
+              border: '1px solid var(--aurora-pill-border)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 20,
+            }}
+          >
+            📥
+          </div>
+          <div>
+            <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--aurora-text)', margin: '0 0 6px' }}>
+              No import sessions
+            </p>
+            <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: 0 }}>
+              Use the <strong>Add Asset</strong> button in the navigation bar to start an import.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Sessions table */}
       {data && data.sessions.length > 0 && (
         <>
-          <div className="overflow-x-auto rounded-lg border border-border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Status
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Source
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Title
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Created
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Action
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.sessions.map((s) => (
-                  <SessionRow key={s.id} session={s} />
-                ))}
-              </tbody>
-            </table>
+          <div style={{ ...AURORA_CARD, overflow: 'hidden' }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    {(['Status', 'Source', 'Title', 'Created', 'Action'] as const).map((col) => (
+                      <th
+                        key={col}
+                        style={{
+                          padding: '10px 14px',
+                          textAlign: 'left',
+                          fontSize: 10,
+                          fontWeight: 700,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.08em',
+                          color: 'var(--aurora-muted)',
+                          background: 'var(--aurora-glass)',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {col}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.sessions.map((s) => (
+                    <SessionRow key={s.id} session={s} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
+          {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between text-sm">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
               <button
                 disabled={page === 1}
                 onClick={() => setPage((p) => p - 1)}
-                className="rounded-md border border-border px-3 py-1 hover:bg-accent disabled:opacity-40"
+                style={{
+                  ...AURORA_BTN_GHOST,
+                  opacity: page === 1 ? 0.4 : 1,
+                  cursor: page === 1 ? 'default' : 'pointer',
+                }}
+                onMouseEnter={(e) => { if (page > 1) (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
               >
-                Previous
+                ← Prev
               </button>
-              <span className="text-muted-foreground">
+              <span style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>
                 Page {page} of {totalPages}
               </span>
               <button
                 disabled={page === totalPages}
                 onClick={() => setPage((p) => p + 1)}
-                className="rounded-md border border-border px-3 py-1 hover:bg-accent disabled:opacity-40"
+                style={{
+                  ...AURORA_BTN_GHOST,
+                  opacity: page === totalPages ? 0.4 : 1,
+                  cursor: page === totalPages ? 'default' : 'pointer',
+                }}
+                onMouseEnter={(e) => { if (page < totalPages) (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
               >
-                Next
+                Next →
               </button>
             </div>
           )}

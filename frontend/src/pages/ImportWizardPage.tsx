@@ -11,11 +11,14 @@
  *   5. Summary    — read-only review; Commit or Cancel.
  *
  * Polls GET /api/import-sessions/{id} every 3 s while status=processing.
+ *
+ * Styling: Aurora aesthetic — glass cards, teal accent (#0FA4AB), --aurora-* CSS vars.
  */
 
 import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Check } from 'lucide-react'
 import * as api from '@/lib/api'
 import {
   WIZARD_STEPS,
@@ -34,39 +37,158 @@ import {
 } from '@/lib/import-utils'
 
 // ---------------------------------------------------------------------------
-// Progress indicator
+// Aurora style constants
 // ---------------------------------------------------------------------------
 
-function StepProgress({
-  current,
-}: {
-  current: WizardStep
-}) {
+const AURORA_CARD: React.CSSProperties = {
+  background: 'var(--aurora-card)',
+  border: '1px solid var(--aurora-card-border)',
+  borderRadius: 14,
+  backdropFilter: 'blur(16px)',
+  WebkitBackdropFilter: 'blur(16px)',
+}
+
+const AURORA_INPUT: React.CSSProperties = {
+  background: 'var(--aurora-input-bg)',
+  border: '1px solid var(--aurora-input-border)',
+  borderRadius: 8,
+  color: 'var(--aurora-text)',
+  padding: '7px 11px',
+  fontSize: 13,
+  outline: 'none',
+  width: '100%',
+  transition: 'border-color 0.15s, box-shadow 0.15s',
+  boxSizing: 'border-box',
+  display: 'block',
+}
+
+const AURORA_BTN_PRIMARY: React.CSSProperties = {
+  background: 'var(--aurora-accent)',
+  border: 'none',
+  borderRadius: 20,
+  color: 'var(--aurora-accent-fg)',
+  fontSize: 13,
+  fontWeight: 700,
+  padding: '8px 22px',
+  cursor: 'pointer',
+  boxShadow: '0 4px 14px var(--aurora-accent-glow)',
+  transition: 'opacity 0.15s',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+}
+
+const AURORA_BTN_GHOST: React.CSSProperties = {
+  background: 'var(--aurora-glass)',
+  border: '1px solid var(--aurora-glass-border)',
+  borderRadius: 20,
+  color: 'var(--aurora-text-dim)',
+  fontSize: 13,
+  padding: '7px 18px',
+  cursor: 'pointer',
+  transition: 'all 0.15s',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+}
+
+const AURORA_BTN_GHOST_SM: React.CSSProperties = {
+  background: 'var(--aurora-glass)',
+  border: '1px solid var(--aurora-glass-border)',
+  borderRadius: 20,
+  color: 'var(--aurora-text-dim)',
+  fontSize: 11,
+  padding: '4px 12px',
+  cursor: 'pointer',
+  transition: 'all 0.15s',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+}
+
+const SECTION_LABEL: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  color: 'var(--aurora-muted)',
+  letterSpacing: '0.1em',
+  textTransform: 'uppercase',
+  display: 'block',
+  marginBottom: 6,
+}
+
+// Focus/blur handlers for aurora inputs
+function onAuroraFocus(e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) {
+  e.currentTarget.style.borderColor = 'var(--aurora-pill-border)'
+  e.currentTarget.style.boxShadow = '0 0 0 3px var(--aurora-pill)'
+}
+function onAuroraBlur(e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) {
+  e.currentTarget.style.borderColor = 'var(--aurora-input-border)'
+  e.currentTarget.style.boxShadow = 'none'
+}
+
+// ---------------------------------------------------------------------------
+// Progress indicator (Aurora stepper)
+// ---------------------------------------------------------------------------
+
+function StepProgress({ current }: { current: WizardStep }) {
   const idx = stepIndex(current)
   return (
-    <div className="flex items-center gap-1">
+    <div style={{ display: 'flex', alignItems: 'flex-start', width: '100%' }}>
       {WIZARD_STEPS.map((step, i) => (
         <React.Fragment key={step}>
-          <div
-            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors ${
-              i < idx
-                ? 'bg-primary text-primary-foreground'
-                : i === idx
-                  ? 'bg-primary text-primary-foreground ring-2 ring-primary/30'
-                  : 'bg-muted text-muted-foreground'
-            }`}
-          >
-            {i < idx ? (
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
-                <path fillRule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clipRule="evenodd" />
-              </svg>
-            ) : (
-              i + 1
-            )}
+          {/* Step column */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+            {/* Circle */}
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 13,
+                fontWeight: 700,
+                transition: 'all 0.25s',
+                background: i <= idx ? 'var(--aurora-accent)' : 'var(--aurora-glass)',
+                border: i <= idx ? 'none' : '1px solid var(--aurora-glass-border)',
+                color: i <= idx ? 'var(--aurora-accent-fg)' : 'var(--aurora-muted)',
+                boxShadow: i === idx
+                  ? '0 0 0 4px var(--aurora-pill), 0 0 16px var(--aurora-accent-glow)'
+                  : 'none',
+              }}
+            >
+              {i < idx ? <Check size={14} /> : i + 1}
+            </div>
+            {/* Label */}
+            <span
+              style={{
+                marginTop: 6,
+                fontSize: 10,
+                fontWeight: i === idx ? 700 : 400,
+                color: i === idx
+                  ? 'var(--aurora-accent)'
+                  : i < idx
+                  ? 'var(--aurora-text-dim)'
+                  : 'var(--aurora-muted)',
+                whiteSpace: 'nowrap',
+                textAlign: 'center',
+              }}
+            >
+              {STEP_LABELS[step]}
+            </span>
           </div>
+
+          {/* Connector */}
           {i < WIZARD_STEPS.length - 1 && (
             <div
-              className={`h-0.5 flex-1 transition-colors ${i < idx ? 'bg-primary' : 'bg-muted'}`}
+              style={{
+                flex: 1,
+                height: 2,
+                marginTop: 15,
+                background: i < idx ? 'var(--aurora-accent)' : 'var(--aurora-glass-border)',
+                transition: 'background 0.3s',
+              }}
             />
           )}
         </React.Fragment>
@@ -76,7 +198,7 @@ function StepProgress({
 }
 
 // ---------------------------------------------------------------------------
-// Site-setup banner (shown on Title step when site needs a token)
+// Site-setup banner
 // ---------------------------------------------------------------------------
 
 interface SiteSetupBannerProps {
@@ -92,8 +214,7 @@ function SiteSetupBanner({ domain, cap, sessionId }: SiteSetupBannerProps) {
   const queryClient = useQueryClient()
 
   const patchMutation = useMutation({
-    mutationFn: () =>
-      api.patchSiteCapability(domain, { token: token.trim() }),
+    mutationFn: () => api.patchSiteCapability(domain, { token: token.trim() }),
     onSuccess: () => {
       setSaved(true)
       setToken('')
@@ -106,47 +227,71 @@ function SiteSetupBanner({ domain, cap, sessionId }: SiteSetupBannerProps) {
   if (!cap.requires_token && !cap.is_manual_only) return null
 
   return (
-    <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-600/40 dark:bg-amber-900/20">
+    <div
+      style={{
+        background: 'rgba(245,158,11,0.08)',
+        border: '1px solid rgba(245,158,11,0.3)',
+        borderRadius: 10,
+        padding: '14px 16px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+      }}
+    >
       {cap.is_manual_only && (
-        <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+        <p style={{ fontSize: 13, fontWeight: 600, color: '#D97706', margin: 0 }}>
           This site requires manual file upload — automatic downloading is not supported.
           Please upload the files yourself in the previous step.
         </p>
       )}
       {cap.requires_token && !cap.has_token && (
-        <div className="mt-2 space-y-2">
-          <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+        <>
+          <p style={{ fontSize: 13, fontWeight: 600, color: '#D97706', margin: 0 }}>
             This site requires an API token to import files automatically.
           </p>
-          <div className="flex gap-2">
+          <div style={{ display: 'flex', gap: 8 }}>
             <input
               type="password"
               value={token}
               onChange={(e) => setToken(e.target.value)}
               placeholder="Paste your API token here"
-              className="input-base flex-1 text-sm"
+              style={{ ...AURORA_INPUT, flex: 1 }}
+              onFocus={onAuroraFocus}
+              onBlur={onAuroraBlur}
             />
             <button
               type="button"
               disabled={patchMutation.isPending || !token.trim()}
               onClick={() => { setError(null); setSaved(false); patchMutation.mutate() }}
-              className="rounded-md bg-amber-600 px-3 py-1 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
+              style={{
+                background: '#D97706',
+                border: 'none',
+                borderRadius: 20,
+                color: '#FFFFFF',
+                fontSize: 12,
+                fontWeight: 700,
+                padding: '6px 16px',
+                cursor: 'pointer',
+                opacity: patchMutation.isPending || !token.trim() ? 0.5 : 1,
+                transition: 'opacity 0.15s',
+                flexShrink: 0,
+              }}
             >
               {patchMutation.isPending ? 'Saving…' : 'Save Token'}
             </button>
           </div>
           {saved && (
-            <p className="text-xs text-green-700 dark:text-green-400">Token saved.</p>
+            <p style={{ fontSize: 12, color: '#16A34A', margin: 0 }}>✓ Token saved.</p>
           )}
           {error && (
-            <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
+            <p style={{ fontSize: 12, color: 'var(--aurora-danger)', margin: 0 }}>{error}</p>
           )}
-        </div>
+        </>
       )}
       {cap.requires_token && cap.has_token && (
-        <p className="text-sm text-amber-800 dark:text-amber-200">
+        <p style={{ fontSize: 13, color: '#D97706', margin: 0 }}>
           Token is configured for this site.{' '}
-          <span className="text-xs text-muted-foreground">
+          <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>
             (Session: {sessionId.slice(0, 8)}…)
           </span>
         </p>
@@ -156,7 +301,7 @@ function SiteSetupBanner({ domain, cap, sessionId }: SiteSetupBannerProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Shared: AI text preview panel (cleanup / summarize result)
+// Shared: AI text preview panel
 // ---------------------------------------------------------------------------
 
 function AiTextPreview({
@@ -169,23 +314,45 @@ function AiTextPreview({
   onDiscard: () => void
 }) {
   return (
-    <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-2">
-      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        AI suggestion — preview
+    <div
+      style={{
+        background: 'var(--aurora-glass)',
+        border: '1px solid var(--aurora-glass-border)',
+        borderRadius: 10,
+        padding: '14px 16px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+      }}
+    >
+      <span style={SECTION_LABEL}>AI suggestion — preview</span>
+      <p
+        style={{
+          fontSize: 13,
+          color: 'var(--aurora-text)',
+          lineHeight: 1.6,
+          whiteSpace: 'pre-wrap',
+          margin: 0,
+        }}
+      >
+        {text}
       </p>
-      <p className="text-sm whitespace-pre-wrap">{text}</p>
-      <div className="flex gap-2">
+      <div style={{ display: 'flex', gap: 8 }}>
         <button
           type="button"
           onClick={onUse}
-          className="rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground hover:opacity-90 transition-colors"
+          style={AURORA_BTN_PRIMARY}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.85' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
         >
           Use this
         </button>
         <button
           type="button"
           onClick={onDiscard}
-          className="rounded-md border border-border px-3 py-1 text-xs hover:bg-accent transition-colors"
+          style={AURORA_BTN_GHOST}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
         >
           Discard
         </button>
@@ -195,7 +362,7 @@ function AiTextPreview({
 }
 
 // ---------------------------------------------------------------------------
-// Step 1: Title (+ description editing + AI description assistance)
+// Step 1: Title
 // ---------------------------------------------------------------------------
 
 interface TitleStepProps {
@@ -211,9 +378,7 @@ function TitleStep({ session, onNext }: TitleStepProps) {
   const [description, setDescription] = useState(session.description ?? '')
   const [error, setError] = useState<string | null>(null)
 
-  // AI-assist state: null = unknown (optimistic), false = no provider, true = available
   const [providerAvailable, setProviderAvailable] = useState<boolean | null>(null)
-  // Pending AI suggestion — null until user triggers a button, then set to text
   const [aiDescText, setAiDescText] = useState<string | null>(null)
   const [aiStatus, setAiStatus] = useState<string | null>(null)
 
@@ -226,14 +391,12 @@ function TitleStep({ session, onNext }: TitleStepProps) {
     retry: false,
   })
 
-  // Probe AI availability once on mount (only when there is something to process)
   useEffect(() => {
     if (!session.description?.trim()) return
     api
       .aiCleanupDescription(session.id)
       .then((r) => setProviderAvailable(r.provider_available))
-      .catch(() => {}) // network error → leave as null (buttons stay enabled)
-    // Intentionally fire once on mount only; session.id stable for a given route.
+      .catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -300,23 +463,36 @@ function TitleStep({ session, onNext }: TitleStepProps) {
   const aiPending = cleanupMutation.isPending || summarizeMutation.isPending
 
   return (
-    <div className="space-y-4">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       {/* Title */}
       <div>
-        <label className="mb-1 block text-sm font-medium">Title</label>
+        <label style={SECTION_LABEL}>Title</label>
         <input
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="input-base w-full text-base"
+          style={{ ...AURORA_INPUT, fontSize: 15, fontWeight: 500 }}
           placeholder="Item title"
           autoFocus
+          onFocus={onAuroraFocus}
+          onBlur={onAuroraBlur}
         />
         {session.suggested_title && title !== session.suggested_title && (
           <button
             type="button"
-            className="mt-1 text-xs text-muted-foreground hover:text-primary underline"
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: '4px 0',
+              fontSize: 11,
+              color: 'var(--aurora-muted)',
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              transition: 'color 0.15s',
+            }}
             onClick={() => setTitle(session.suggested_title!)}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--aurora-accent)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--aurora-muted)' }}
           >
             Reset to suggested: "{session.suggested_title}"
           </button>
@@ -325,21 +501,23 @@ function TitleStep({ session, onNext }: TitleStepProps) {
 
       {/* Description */}
       <div>
-        <label className="mb-1 block text-sm font-medium">
-          Description{' '}
-          <span className="font-normal text-muted-foreground">(optional)</span>
-        </label>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+          <label style={{ ...SECTION_LABEL, marginBottom: 0 }}>Description</label>
+          <span style={{ fontSize: 10, color: 'var(--aurora-muted)' }}>optional</span>
+        </div>
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={4}
-          className="input-base w-full resize-y text-sm"
+          style={{ ...AURORA_INPUT, resize: 'vertical', lineHeight: 1.6 }}
           placeholder="Describe this item…"
+          onFocus={onAuroraFocus}
+          onBlur={onAuroraBlur}
         />
 
-        {/* AI description buttons — only shown when there is text to process */}
+        {/* AI description buttons */}
         {description.trim() && (
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
             <button
               type="button"
               disabled={aiPending || noProvider}
@@ -349,9 +527,15 @@ function TitleStep({ session, onNext }: TitleStepProps) {
                 setAiDescText(null)
                 cleanupMutation.mutate()
               }}
-              className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+              style={{
+                ...AURORA_BTN_GHOST_SM,
+                opacity: aiPending || noProvider ? 0.4 : 1,
+                cursor: aiPending || noProvider ? 'not-allowed' : 'pointer',
+              }}
+              onMouseEnter={(e) => { if (!aiPending && !noProvider) (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
             >
-              {cleanupMutation.isPending ? 'Cleaning…' : 'Clean up (AI)'}
+              ✦ {cleanupMutation.isPending ? 'Cleaning…' : 'Clean up (AI)'}
             </button>
             <button
               type="button"
@@ -362,26 +546,28 @@ function TitleStep({ session, onNext }: TitleStepProps) {
                 setAiDescText(null)
                 summarizeMutation.mutate()
               }}
-              className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+              style={{
+                ...AURORA_BTN_GHOST_SM,
+                opacity: aiPending || noProvider ? 0.4 : 1,
+                cursor: aiPending || noProvider ? 'not-allowed' : 'pointer',
+              }}
+              onMouseEnter={(e) => { if (!aiPending && !noProvider) (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
             >
-              {summarizeMutation.isPending ? 'Summarizing…' : 'Summarize scrape (AI)'}
+              ✦ {summarizeMutation.isPending ? 'Summarizing…' : 'Summarize scrape (AI)'}
             </button>
             {noProvider && (
-              <span className="text-xs text-muted-foreground/70">
-                No AI provider configured
-              </span>
+              <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>No AI provider configured</span>
             )}
             {aiStatus && (
-              <span className="text-xs text-red-600 dark:text-red-400">
-                {aiStatus}
-              </span>
+              <span style={{ fontSize: 11, color: 'var(--aurora-danger)' }}>{aiStatus}</span>
             )}
           </div>
         )}
 
         {/* AI text preview */}
         {aiDescText && (
-          <div className="mt-2">
+          <div style={{ marginTop: 12 }}>
             <AiTextPreview
               text={aiDescText}
               onUse={() => {
@@ -394,38 +580,63 @@ function TitleStep({ session, onNext }: TitleStepProps) {
         )}
       </div>
 
+      {/* Source URL */}
       {session.source_url && (
-        <p className="text-sm text-muted-foreground">
-          Source:{' '}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            background: 'var(--aurora-glass)',
+            border: '1px solid var(--aurora-glass-border)',
+            borderRadius: 8,
+            padding: '8px 12px',
+          }}
+        >
+          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--aurora-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', flexShrink: 0 }}>
+            Source
+          </span>
           <a
             href={session.source_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-primary hover:underline break-all"
+            style={{
+              fontSize: 12,
+              color: 'var(--aurora-accent)',
+              textDecoration: 'none',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              flex: 1,
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none' }}
           >
             {session.source_url}
           </a>
-        </p>
+        </div>
       )}
 
+      {/* Site setup banner */}
       {domain && siteCap && (
-        <SiteSetupBanner
-          domain={domain}
-          cap={siteCap}
-          sessionId={session.id}
-        />
+        <SiteSetupBanner domain={domain} cap={siteCap} sessionId={session.id} />
       )}
 
       {error && (
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        <p style={{ fontSize: 13, color: 'var(--aurora-danger)', margin: 0 }}>{error}</p>
       )}
 
-      <div className="flex justify-end">
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button
           type="button"
           disabled={patchMutation.isPending}
           onClick={handleNext}
-          className="rounded-md bg-primary px-5 py-2 text-sm text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          style={{
+            ...AURORA_BTN_PRIMARY,
+            opacity: patchMutation.isPending ? 0.6 : 1,
+          }}
+          onMouseEnter={(e) => { if (!patchMutation.isPending) (e.currentTarget as HTMLButtonElement).style.opacity = '0.85' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = patchMutation.isPending ? '0.6' : '1' }}
         >
           {patchMutation.isPending ? 'Saving…' : 'Next →'}
         </button>
@@ -475,8 +686,8 @@ function ImagesStep({ session, onNext, onPrev }: ImagesStepProps) {
   }
 
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: 0 }}>
         {session.images.length === 0
           ? 'No images yet. You can upload some below.'
           : `${session.images.length} image(s). Click "Set as default" to choose the cover image.`}
@@ -484,38 +695,82 @@ function ImagesStep({ session, onNext, onPrev }: ImagesStepProps) {
 
       {/* Horizontal scrollable strip */}
       {session.images.length > 0 && (
-        <div className="flex gap-3 overflow-x-auto pb-2">
+        <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
           {[...session.images]
             .sort((a, b) => a.order - b.order)
             .map((img) => (
-              <div key={img.id} className="relative shrink-0">
+              <div key={img.id} style={{ position: 'relative', flexShrink: 0 }}>
                 <div
-                  className={`h-40 w-40 overflow-hidden rounded-lg border-2 transition-colors ${
-                    img.is_default ? 'border-primary' : 'border-border'
-                  }`}
+                  style={{
+                    width: 160,
+                    height: 160,
+                    overflow: 'hidden',
+                    borderRadius: 10,
+                    border: img.is_default
+                      ? '2px solid var(--aurora-accent)'
+                      : '2px solid var(--aurora-glass-border)',
+                    boxShadow: img.is_default ? 'var(--aurora-glow)' : 'none',
+                    transition: 'border-color 0.15s, box-shadow 0.15s',
+                  }}
                 >
                   {img.is_url ? (
                     <img
                       src={img.path}
                       alt=""
-                      className="h-full w-full object-cover"
+                      style={{ height: '100%', width: '100%', objectFit: 'cover', display: 'block' }}
                       onError={(e) => {
-                        (e.currentTarget as HTMLImageElement).style.display = 'none'
+                        ;(e.currentTarget as HTMLImageElement).style.display = 'none'
                       }}
                     />
                   ) : (
-                    /* Local staged files have no public API endpoint until committed */
-                    <div className="flex h-full w-full items-center justify-center bg-muted/50 text-center">
-                      <span className="px-2 text-[10px] text-muted-foreground leading-tight">
+                    <div
+                      style={{
+                        height: '100%',
+                        width: '100%',
+                        background: 'var(--aurora-glass)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: 12,
+                        boxSizing: 'border-box',
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 10,
+                          color: 'var(--aurora-muted)',
+                          textAlign: 'center',
+                          lineHeight: 1.4,
+                          wordBreak: 'break-all',
+                          fontFamily: 'monospace',
+                        }}
+                      >
                         {img.path.split('/').pop()}
                         <br />
-                        (preview after commit)
+                        <span style={{ fontSize: 9, color: 'var(--aurora-muted)', fontFamily: 'sans-serif' }}>
+                          (preview after commit)
+                        </span>
                       </span>
                     </div>
                   )}
                 </div>
                 {img.is_default && (
-                  <span className="absolute left-1 top-1 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground">
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: 6,
+                      left: 6,
+                      background: 'var(--aurora-accent)',
+                      color: 'var(--aurora-accent-fg)',
+                      borderRadius: 20,
+                      fontSize: 9,
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      boxShadow: '0 0 8px var(--aurora-accent-glow)',
+                      letterSpacing: '0.05em',
+                      textTransform: 'uppercase',
+                    }}
+                  >
                     Default
                   </span>
                 )}
@@ -524,7 +779,21 @@ function ImagesStep({ session, onNext, onPrev }: ImagesStepProps) {
                     type="button"
                     disabled={setDefaultMutation.isPending}
                     onClick={() => { setError(null); setDefaultMutation.mutate(img.path) }}
-                    className="mt-1 w-full rounded text-center text-xs text-muted-foreground hover:text-primary underline disabled:opacity-50"
+                    style={{
+                      marginTop: 6,
+                      width: '100%',
+                      background: 'none',
+                      border: 'none',
+                      fontSize: 11,
+                      color: 'var(--aurora-muted)',
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                      opacity: setDefaultMutation.isPending ? 0.5 : 1,
+                      transition: 'color 0.15s',
+                      padding: 0,
+                    }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--aurora-accent)' }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--aurora-muted)' }}
                   >
                     Set as default
                   </button>
@@ -534,15 +803,25 @@ function ImagesStep({ session, onNext, onPrev }: ImagesStepProps) {
         </div>
       )}
 
-      {/* Upload additional images */}
+      {/* Upload images */}
       <div>
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={uploadMutation.isPending}
-          className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent transition-colors disabled:opacity-50"
+          style={{
+            ...AURORA_BTN_GHOST,
+            opacity: uploadMutation.isPending ? 0.5 : 1,
+            cursor: uploadMutation.isPending ? 'not-allowed' : 'pointer',
+          }}
+          onMouseEnter={(e) => { if (!uploadMutation.isPending) (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
         >
-          {uploadMutation.isPending ? 'Uploading…' : '+ Upload Images'}
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" style={{ width: 14, height: 14 }}>
+            <path d="M9.25 13.25a.75.75 0 0 0 1.5 0V4.636l2.955 3.129a.75.75 0 0 0 1.09-1.03l-4.25-4.5a.75.75 0 0 0-1.09 0l-4.25 4.5a.75.75 0 1 0 1.09 1.03L9.25 4.636v8.614Z" />
+            <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
+          </svg>
+          {uploadMutation.isPending ? 'Uploading…' : 'Upload Images'}
         </button>
         <input
           ref={fileInputRef}
@@ -555,21 +834,25 @@ function ImagesStep({ session, onNext, onPrev }: ImagesStepProps) {
       </div>
 
       {error && (
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        <p style={{ fontSize: 13, color: 'var(--aurora-danger)', margin: 0 }}>{error}</p>
       )}
 
-      <div className="flex justify-between">
+      <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 4 }}>
         <button
           type="button"
           onClick={onPrev}
-          className="rounded-md border border-border px-5 py-2 text-sm hover:bg-accent"
+          style={AURORA_BTN_GHOST}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
         >
           ← Back
         </button>
         <button
           type="button"
           onClick={onNext}
-          className="rounded-md bg-primary px-5 py-2 text-sm text-primary-foreground hover:opacity-90"
+          style={AURORA_BTN_PRIMARY}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.85' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
         >
           Next →
         </button>
@@ -599,7 +882,6 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
 
-  // AI tag suggestion state
   const [tagProviderAvailable, setTagProviderAvailable] = useState<boolean | null>(null)
   const [aiTagSuggestions, setAiTagSuggestions] = useState<api.AiTagSuggestionOut | null>(null)
   const [tagAiStatus, setTagAiStatus] = useState<string | null>(null)
@@ -619,7 +901,7 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
     mutationFn: () => api.aiSuggestTags(session.id),
     onSuccess: (result) => {
       setTagProviderAvailable(result.provider_available)
-      if (!result.provider_available) return // button will now show disabled
+      if (!result.provider_available) return
       if (result.error) {
         setTagAiStatus(`Error: ${result.error}`)
         setTimeout(() => setTagAiStatus(null), 3000)
@@ -677,12 +959,11 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
   const noTagProvider = tagProviderAvailable === false
 
   return (
-    <div className="space-y-4">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       {/* Confirmed tags */}
       <div>
-        <div className="mb-2 flex items-center gap-3">
-          <h3 className="text-sm font-medium">Tags</h3>
-          {/* AI suggest button */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <span style={{ ...SECTION_LABEL, marginBottom: 0 }}>Confirmed Tags</span>
           <button
             type="button"
             disabled={suggestTagsMutation.isPending || noTagProvider}
@@ -691,33 +972,71 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
               setTagAiStatus(null)
               suggestTagsMutation.mutate()
             }}
-            className="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+            style={{
+              ...AURORA_BTN_GHOST_SM,
+              opacity: suggestTagsMutation.isPending || noTagProvider ? 0.4 : 1,
+              cursor: suggestTagsMutation.isPending || noTagProvider ? 'not-allowed' : 'pointer',
+            }}
+            onMouseEnter={(e) => { if (!suggestTagsMutation.isPending && !noTagProvider) (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
           >
-            {suggestTagsMutation.isPending ? 'Suggesting…' : 'Suggest tags (AI)'}
+            ✦ {suggestTagsMutation.isPending ? 'Suggesting…' : 'Suggest tags (AI)'}
           </button>
           {noTagProvider && (
-            <span className="text-xs text-muted-foreground/70">No AI configured</span>
+            <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>No AI configured</span>
           )}
           {tagAiStatus && (
-            <span className="text-xs text-red-600 dark:text-red-400">{tagAiStatus}</span>
+            <span style={{ fontSize: 11, color: 'var(--aurora-danger)' }}>{tagAiStatus}</span>
           )}
         </div>
 
         {confirmed.length === 0 ? (
-          <p className="text-sm text-muted-foreground italic">No tags yet.</p>
+          <div>
+            <p style={{ fontSize: 13, color: 'var(--aurora-muted)', fontStyle: 'italic', margin: '0 0 4px' }}>
+              No tags yet.
+            </p>
+            <p style={{ fontSize: 11, color: '#D97706', margin: 0 }}>
+              Tip: add at least one tag to make this item discoverable.
+            </p>
+          </div>
         ) : (
-          <div className="flex flex-wrap gap-2">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {confirmed.map((tag) => (
               <span
                 key={tag}
-                className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-sm font-medium text-primary"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  background: 'var(--aurora-pill)',
+                  border: '1px solid var(--aurora-pill-border)',
+                  borderRadius: 20,
+                  padding: '4px 12px 4px 10px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: 'var(--aurora-accent)',
+                }}
               >
-                {tag}
+                #{tag}
                 <button
                   type="button"
                   onClick={() => handleRemoveConfirmed(tag)}
-                  className="hover:opacity-70"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'pointer',
+                    color: 'var(--aurora-accent)',
+                    lineHeight: 1,
+                    fontSize: 13,
+                    display: 'flex',
+                    alignItems: 'center',
+                    opacity: 0.7,
+                    transition: 'opacity 0.15s',
+                  }}
                   aria-label={`Remove tag ${tag}`}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.7' }}
                 >
                   ✕
                 </button>
@@ -725,25 +1044,41 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
             ))}
           </div>
         )}
-        {confirmed.length === 0 && (
-          <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-            Tip: add at least one tag to make this item discoverable.
-          </p>
-        )}
       </div>
 
       {/* AI tag suggestions card */}
       {aiTagSuggestions && aiTagSuggestions.provider_available && !aiTagSuggestions.error && (
-        <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              AI Tag Suggestions
-            </p>
+        <div
+          style={{
+            background: 'var(--aurora-glass)',
+            border: '1px solid var(--aurora-glass-border)',
+            borderRadius: 10,
+            padding: '14px 16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={SECTION_LABEL}>AI Tag Suggestions</span>
             <button
               type="button"
               onClick={() => setAiTagSuggestions(null)}
-              className="text-xs text-muted-foreground hover:text-foreground"
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: 11,
+                color: 'var(--aurora-muted)',
+                padding: 0,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                transition: 'color 0.15s',
+              }}
               aria-label="Dismiss AI suggestions"
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--aurora-text)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--aurora-muted)' }}
             >
               ✕ Dismiss
             </button>
@@ -751,28 +1086,38 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
 
           {aiTagSuggestions.canonical.length > 0 && (
             <div>
-              <p className="mb-1 text-xs text-muted-foreground">
+              <p style={{ fontSize: 11, color: 'var(--aurora-muted)', margin: '0 0 8px' }}>
                 Matching existing catalog tags:
               </p>
-              <div className="flex flex-wrap gap-1.5">
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {aiTagSuggestions.canonical.map((tag) => (
                   <span
                     key={tag}
-                    className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2.5 py-0.5 text-xs"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      background: confirmed.includes(tag) ? 'var(--aurora-pill)' : 'var(--aurora-glass)',
+                      border: `1px solid ${confirmed.includes(tag) ? 'var(--aurora-pill-border)' : 'var(--aurora-glass-border)'}`,
+                      borderRadius: 20,
+                      padding: '3px 10px',
+                      fontSize: 11,
+                      color: confirmed.includes(tag) ? 'var(--aurora-accent)' : 'var(--aurora-text-dim)',
+                    }}
                   >
-                    {tag}
+                    #{tag}
                     {!confirmed.includes(tag) && (
                       <button
                         type="button"
                         onClick={() => setConfirmed((c) => addConfirmedTag(c, tag))}
                         title={`Add tag "${tag}"`}
-                        className="text-green-600 hover:opacity-80"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#16A34A', fontSize: 14, padding: 0, lineHeight: 1, display: 'flex' }}
                       >
                         +
                       </button>
                     )}
                     {confirmed.includes(tag) && (
-                      <span className="text-muted-foreground/60 text-[10px]">✓</span>
+                      <Check size={11} style={{ color: 'var(--aurora-accent)' }} />
                     )}
                   </span>
                 ))}
@@ -782,28 +1127,38 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
 
           {aiTagSuggestions.new_suggestions.length > 0 && (
             <div>
-              <p className="mb-1 text-xs text-muted-foreground">
+              <p style={{ fontSize: 11, color: 'var(--aurora-muted)', margin: '0 0 8px' }}>
                 New tags (will need admin approval after commit):
               </p>
-              <div className="flex flex-wrap gap-1.5">
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {aiTagSuggestions.new_suggestions.map((tag) => (
                   <span
                     key={tag}
-                    className="inline-flex items-center gap-1 rounded-full border border-dashed border-border bg-muted px-2.5 py-0.5 text-xs text-muted-foreground"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      background: confirmed.includes(tag) ? 'var(--aurora-pill)' : 'var(--aurora-glass)',
+                      border: `1px dashed ${confirmed.includes(tag) ? 'var(--aurora-pill-border)' : 'var(--aurora-glass-border)'}`,
+                      borderRadius: 20,
+                      padding: '3px 10px',
+                      fontSize: 11,
+                      color: confirmed.includes(tag) ? 'var(--aurora-accent)' : 'var(--aurora-muted)',
+                    }}
                   >
-                    {tag}
+                    #{tag}
                     {!confirmed.includes(tag) && (
                       <button
                         type="button"
                         onClick={() => setConfirmed((c) => addConfirmedTag(c, tag))}
                         title={`Add tag "${tag}"`}
-                        className="text-green-600 hover:opacity-80"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#16A34A', fontSize: 14, padding: 0, lineHeight: 1, display: 'flex' }}
                       >
                         +
                       </button>
                     )}
                     {confirmed.includes(tag) && (
-                      <span className="text-muted-foreground/60 text-[10px]">✓</span>
+                      <Check size={11} style={{ color: 'var(--aurora-accent)' }} />
                     )}
                   </span>
                 ))}
@@ -816,21 +1171,29 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
       {/* Pending / suggested tags */}
       {pending.length > 0 && (
         <div>
-          <h3 className="mb-2 text-sm font-medium text-muted-foreground">
-            Suggested tags (new — need approval after commit)
-          </h3>
-          <div className="flex flex-wrap gap-2">
+          <span style={SECTION_LABEL}>Suggested tags (new — need approval after commit)</span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {pending.map((tag) => (
               <span
                 key={tag}
-                className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border bg-muted px-2.5 py-1 text-sm text-muted-foreground"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  background: 'var(--aurora-glass)',
+                  border: '1px dashed var(--aurora-glass-border)',
+                  borderRadius: 20,
+                  padding: '4px 10px',
+                  fontSize: 12,
+                  color: 'var(--aurora-text-dim)',
+                }}
               >
-                {tag}
+                #{tag}
                 <button
                   type="button"
                   onClick={() => handleAccept(tag)}
                   title="Accept"
-                  className="text-green-600 hover:opacity-80"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#16A34A', fontSize: 14, padding: 0, lineHeight: 1, display: 'flex' }}
                 >
                   ✓
                 </button>
@@ -838,7 +1201,7 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
                   type="button"
                   onClick={() => handleReject(tag)}
                   title="Reject"
-                  className="text-red-500 hover:opacity-80"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--aurora-danger)', fontSize: 13, padding: 0, lineHeight: 1, display: 'flex' }}
                 >
                   ✕
                 </button>
@@ -849,34 +1212,44 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
       )}
 
       {/* Manual tag input */}
-      <div className="flex gap-2">
+      <div style={{ display: 'flex', gap: 8 }}>
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleInputKeyDown}
           placeholder="Add a tag and press Enter"
-          className="input-base flex-1 text-sm"
+          style={{ ...AURORA_INPUT, flex: 1 }}
+          onFocus={onAuroraFocus}
+          onBlur={onAuroraBlur}
         />
         <button
           type="button"
           onClick={handleAddTag}
           disabled={!input.trim()}
-          className="rounded-md border border-border px-3 py-1 text-sm hover:bg-accent disabled:opacity-40"
+          style={{
+            ...AURORA_BTN_GHOST,
+            opacity: !input.trim() ? 0.4 : 1,
+            cursor: !input.trim() ? 'not-allowed' : 'pointer',
+          }}
+          onMouseEnter={(e) => { if (input.trim()) (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
         >
           Add
         </button>
       </div>
 
       {error && (
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        <p style={{ fontSize: 13, color: 'var(--aurora-danger)', margin: 0 }}>{error}</p>
       )}
 
-      <div className="flex justify-between">
+      <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 4 }}>
         <button
           type="button"
           onClick={onPrev}
-          className="rounded-md border border-border px-5 py-2 text-sm hover:bg-accent"
+          style={AURORA_BTN_GHOST}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
         >
           ← Back
         </button>
@@ -884,7 +1257,12 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
           type="button"
           disabled={patchMutation.isPending}
           onClick={handleNext}
-          className="rounded-md bg-primary px-5 py-2 text-sm text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          style={{
+            ...AURORA_BTN_PRIMARY,
+            opacity: patchMutation.isPending ? 0.6 : 1,
+          }}
+          onMouseEnter={(e) => { if (!patchMutation.isPending) (e.currentTarget as HTMLButtonElement).style.opacity = '0.85' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = patchMutation.isPending ? '0.6' : '1' }}
         >
           {patchMutation.isPending ? 'Saving…' : 'Next →'}
         </button>
@@ -907,9 +1285,7 @@ function CreatorStep({ session, onNext, onPrev }: CreatorStepProps) {
   const queryClient = useQueryClient()
   const [ownDesign, setOwnDesign] = useState(session.creator_is_own_design)
   const [creatorName, setCreatorName] = useState(session.creator_name ?? '')
-  const [profileUrl, setProfileUrl] = useState(
-    session.creator_profile_url ?? '',
-  )
+  const [profileUrl, setProfileUrl] = useState(session.creator_profile_url ?? '')
   const [error, setError] = useState<string | null>(null)
 
   const patchMutation = useMutation({
@@ -933,18 +1309,33 @@ function CreatorStep({ session, onNext, onPrev }: CreatorStepProps) {
   }
 
   return (
-    <div className="space-y-4">
-      {/* Own design toggle */}
-      <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-border p-3 hover:bg-muted/30 transition-colors">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {/* Own design toggle — aurora interactive card */}
+      <label
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 14,
+          background: ownDesign ? 'var(--aurora-pill)' : 'var(--aurora-glass)',
+          border: `1px solid ${ownDesign ? 'var(--aurora-pill-border)' : 'var(--aurora-glass-border)'}`,
+          borderRadius: 10,
+          padding: '14px 16px',
+          cursor: 'pointer',
+          transition: 'all 0.2s',
+          boxShadow: ownDesign ? 'var(--aurora-glow)' : 'none',
+        }}
+      >
         <input
           type="checkbox"
           checked={ownDesign}
           onChange={(e) => setOwnDesign(e.target.checked)}
-          className="h-4 w-4 rounded border-border accent-primary"
+          style={{ accentColor: 'var(--aurora-accent)', width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
         />
         <div>
-          <p className="text-sm font-medium">This is my own design</p>
-          <p className="text-xs text-muted-foreground">
+          <p style={{ fontSize: 14, fontWeight: 600, color: ownDesign ? 'var(--aurora-accent)' : 'var(--aurora-text)', margin: '0 0 2px', transition: 'color 0.2s' }}>
+            This is my own design
+          </p>
+          <p style={{ fontSize: 11, color: 'var(--aurora-muted)', margin: 0 }}>
             Links this item to your account in "My Creations"
           </p>
         </div>
@@ -952,38 +1343,54 @@ function CreatorStep({ session, onNext, onPrev }: CreatorStepProps) {
 
       {/* Attribution fields */}
       {!ownDesign && (
-        <div className="space-y-3 rounded-lg border border-border p-4">
-          <h3 className="text-sm font-medium text-muted-foreground">
-            Attributed to a creator
-          </h3>
+        <div
+          style={{
+            background: 'var(--aurora-glass)',
+            border: '1px solid var(--aurora-glass-border)',
+            borderRadius: 10,
+            padding: '16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 14,
+          }}
+        >
+          <span style={SECTION_LABEL}>Attributed to a creator</span>
+
           <div>
-            <label className="mb-1 block text-sm font-medium">Designer name</label>
+            <label style={SECTION_LABEL}>Designer name</label>
             <input
               type="text"
               value={creatorName}
               onChange={(e) => setCreatorName(e.target.value)}
               placeholder="Creator name"
-              className="input-base w-full"
+              style={AURORA_INPUT}
+              onFocus={onAuroraFocus}
+              onBlur={onAuroraBlur}
             />
           </div>
+
           <div>
-            <label className="mb-1 block text-sm font-medium">
-              Profile URL{' '}
-              <span className="font-normal text-muted-foreground">(optional)</span>
-            </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <label style={{ ...SECTION_LABEL, marginBottom: 0 }}>Profile URL</label>
+              <span style={{ fontSize: 10, color: 'var(--aurora-muted)' }}>optional</span>
+            </div>
             <input
               type="url"
               value={profileUrl}
               onChange={(e) => setProfileUrl(e.target.value)}
               placeholder="https://…"
-              className="input-base w-full"
+              style={AURORA_INPUT}
+              onFocus={onAuroraFocus}
+              onBlur={onAuroraBlur}
             />
             {profileUrl && (
               <a
                 href={profileUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-1 block text-xs text-primary hover:underline"
+                style={{ display: 'block', marginTop: 4, fontSize: 11, color: 'var(--aurora-accent)', textDecoration: 'none' }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none' }}
               >
                 Open profile ↗
               </a>
@@ -993,14 +1400,16 @@ function CreatorStep({ session, onNext, onPrev }: CreatorStepProps) {
       )}
 
       {error && (
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        <p style={{ fontSize: 13, color: 'var(--aurora-danger)', margin: 0 }}>{error}</p>
       )}
 
-      <div className="flex justify-between">
+      <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 4 }}>
         <button
           type="button"
           onClick={onPrev}
-          className="rounded-md border border-border px-5 py-2 text-sm hover:bg-accent"
+          style={AURORA_BTN_GHOST}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
         >
           ← Back
         </button>
@@ -1008,7 +1417,12 @@ function CreatorStep({ session, onNext, onPrev }: CreatorStepProps) {
           type="button"
           disabled={patchMutation.isPending}
           onClick={handleNext}
-          className="rounded-md bg-primary px-5 py-2 text-sm text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          style={{
+            ...AURORA_BTN_PRIMARY,
+            opacity: patchMutation.isPending ? 0.6 : 1,
+          }}
+          onMouseEnter={(e) => { if (!patchMutation.isPending) (e.currentTarget as HTMLButtonElement).style.opacity = '0.85' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = patchMutation.isPending ? '0.6' : '1' }}
         >
           {patchMutation.isPending ? 'Saving…' : 'Next →'}
         </button>
@@ -1061,9 +1475,10 @@ function SummaryStep({ session, onPrev, onCancelled }: SummaryStepProps) {
   const title = session.confirmed_title ?? session.suggested_title ?? '—'
 
   return (
-    <div className="space-y-5">
-      <div className="rounded-lg border border-border">
-        <table className="w-full text-sm">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {/* Summary table */}
+      <div style={{ ...AURORA_CARD, overflow: 'hidden' }}>
+        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
           <tbody>
             <SummaryRow label="Title" value={title} />
             <SummaryRow
@@ -1096,38 +1511,74 @@ function SummaryStep({ session, onPrev, onCancelled }: SummaryStepProps) {
         </table>
       </div>
 
+      {/* No library warning */}
       {!session.library_id && (
-        <p className="text-sm text-amber-600 dark:text-amber-400">
-          ⚠ No library selected. Go back to the Title step to set one.
-        </p>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            background: 'rgba(245,158,11,0.08)',
+            border: '1px solid rgba(245,158,11,0.25)',
+            borderRadius: 8,
+            padding: '10px 14px',
+          }}
+        >
+          <span style={{ fontSize: 13, color: '#D97706' }}>
+            ⚠ No library selected. Go back to the Title step to set one.
+          </span>
+        </div>
       )}
 
+      {/* Commit error */}
       {commitError && (
-        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 dark:border-red-700 dark:bg-red-900/20">
-          <p className="text-sm font-medium text-red-700 dark:text-red-300">
+        <div
+          style={{
+            background: 'rgba(220,38,38,0.08)',
+            border: '1px solid rgba(220,38,38,0.25)',
+            borderRadius: 10,
+            padding: '12px 16px',
+          }}
+        >
+          <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--aurora-danger)', margin: '0 0 4px' }}>
             Commit failed: {commitError}
           </p>
-          <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+          <p style={{ fontSize: 11, color: 'var(--aurora-muted)', margin: 0 }}>
             Your session data is preserved — fix the issue and try again.
           </p>
         </div>
       )}
 
-      <div className="flex justify-between">
+      {/* Actions */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <button
           type="button"
           disabled={cancelling}
           onClick={handleCancel}
-          className="rounded-md border border-red-300 px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50"
+          style={{
+            background: 'transparent',
+            border: '1px solid rgba(220,38,38,0.35)',
+            borderRadius: 20,
+            color: 'var(--aurora-danger)',
+            fontSize: 13,
+            padding: '7px 18px',
+            cursor: 'pointer',
+            opacity: cancelling ? 0.5 : 1,
+            transition: 'all 0.15s',
+          }}
+          onMouseEnter={(e) => { if (!cancelling) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(220,38,38,0.06)' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
         >
           {cancelling ? 'Cancelling…' : 'Cancel Import'}
         </button>
 
-        <div className="flex gap-2">
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <button
             type="button"
             onClick={onPrev}
-            className="rounded-md border border-border px-5 py-2 text-sm hover:bg-accent"
+            style={AURORA_BTN_GHOST}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
           >
             ← Back
           </button>
@@ -1135,9 +1586,32 @@ function SummaryStep({ session, onPrev, onCancelled }: SummaryStepProps) {
             type="button"
             disabled={commitMutation.isPending || !session.library_id}
             onClick={() => { setCommitError(null); commitMutation.mutate() }}
-            className="rounded-md bg-green-600 px-6 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
+            style={{
+              background: '#16A34A',
+              border: 'none',
+              borderRadius: 20,
+              color: '#FFFFFF',
+              fontSize: 13,
+              fontWeight: 700,
+              padding: '8px 24px',
+              cursor: commitMutation.isPending || !session.library_id ? 'not-allowed' : 'pointer',
+              boxShadow: '0 4px 14px rgba(22,163,74,0.28)',
+              transition: 'opacity 0.15s',
+              opacity: commitMutation.isPending || !session.library_id ? 0.5 : 1,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+            onMouseEnter={(e) => {
+              if (!commitMutation.isPending && session.library_id)
+                (e.currentTarget as HTMLButtonElement).style.opacity = '0.85'
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.opacity =
+                commitMutation.isPending || !session.library_id ? '0.5' : '1'
+            }}
           >
-            {commitMutation.isPending ? 'Committing…' : 'Commit to Library'}
+            {commitMutation.isPending ? 'Committing…' : 'Commit to Library →'}
           </button>
         </div>
       </div>
@@ -1157,22 +1631,36 @@ function SummaryRow({
   href?: string
 }) {
   return (
-    <tr className="border-b border-border last:border-0">
-      <td className="w-32 shrink-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+    <tr style={{ borderBottom: '1px solid var(--aurora-divider)' }}>
+      <td
+        style={{
+          width: 100,
+          padding: '10px 16px',
+          fontSize: 10,
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+          color: 'var(--aurora-muted)',
+          verticalAlign: 'top',
+          whiteSpace: 'nowrap',
+        }}
+      >
         {label}
       </td>
-      <td className="px-4 py-3">
+      <td style={{ padding: '10px 16px', color: 'var(--aurora-text)', wordBreak: 'break-word', fontSize: 13 }}>
         {isLink && href ? (
           <a
             href={href}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-primary hover:underline break-all"
+            style={{ color: 'var(--aurora-accent)', textDecoration: 'none' }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none' }}
           >
             {value}
           </a>
         ) : (
-          <span className="break-words">{value}</span>
+          <span>{value}</span>
         )}
       </td>
     </tr>
@@ -1180,19 +1668,41 @@ function SummaryRow({
 }
 
 // ---------------------------------------------------------------------------
-// Processing spinner (while status=processing)
+// Processing overlay
 // ---------------------------------------------------------------------------
 
 function ProcessingOverlay({ sessionId }: { sessionId: string }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-4 py-20">
-      <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-      <div className="text-center">
-        <p className="font-medium">Processing your import…</p>
-        <p className="mt-1 text-sm text-muted-foreground">
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 18,
+        padding: '60px 24px',
+      }}
+    >
+      {/* Aurora spinner */}
+      <div
+        className="animate-spin"
+        style={{
+          width: 44,
+          height: 44,
+          borderRadius: '50%',
+          border: '3px solid var(--aurora-glass)',
+          borderTopColor: 'var(--aurora-accent)',
+          boxShadow: '0 0 20px var(--aurora-accent-glow)',
+        }}
+      />
+      <div style={{ textAlign: 'center' }}>
+        <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--aurora-text)', margin: '0 0 6px' }}>
+          Processing your import…
+        </p>
+        <p style={{ fontSize: 12, color: 'var(--aurora-muted)', margin: '0 0 8px' }}>
           Scraping metadata and reconciling tags. This usually takes a few seconds.
         </p>
-        <p className="mt-2 font-mono text-xs text-muted-foreground">
+        <p style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--aurora-muted)', margin: 0 }}>
           Session {sessionId.slice(0, 8)}…
         </p>
       </div>
@@ -1212,7 +1722,6 @@ export function ImportWizardPage() {
     queryKey: ['import-session', sessionId],
     queryFn: () => api.getImportSession(sessionId!),
     enabled: !!sessionId,
-    // Poll every 3 s while processing
     refetchInterval: (query) => {
       const data = query.state.data
       if (data && isProcessing(data.status)) return 3_000
@@ -1228,42 +1737,94 @@ export function ImportWizardPage() {
   }, [session, step])
 
   if (!sessionId) {
-    return <p className="text-red-600">No session ID in URL.</p>
+    return <p style={{ color: 'var(--aurora-danger)', fontSize: 13 }}>No session ID in URL.</p>
   }
 
   if (isLoading) {
-    return <p className="text-muted-foreground text-sm">Loading session…</p>
+    return (
+      <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 13, color: 'var(--aurora-muted)' }}>
+        Loading…
+      </div>
+    )
   }
 
   if (isError || !session) {
     return (
-      <p className="text-red-600">
+      <p style={{ color: 'var(--aurora-danger)', fontSize: 13 }}>
         {error instanceof Error ? error.message : 'Failed to load session.'}
       </p>
     )
   }
 
-  // Handle terminal / unexpected statuses
+  // Terminal states
   if (session.status === 'committed') {
     return (
-      <div className="py-12 text-center">
-        <p className="text-lg font-medium text-green-700 dark:text-green-400">
-          This session has already been committed.
-        </p>
-        <a href="/catalog" className="mt-2 block text-primary hover:underline">
-          Browse catalog →
-        </a>
+      <div style={{ maxWidth: 560, margin: '0 auto' }}>
+        <div
+          style={{
+            ...AURORA_CARD,
+            padding: '48px 24px',
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 14,
+          }}
+        >
+          <div
+            style={{
+              width: 52,
+              height: 52,
+              borderRadius: '50%',
+              background: 'rgba(22,163,74,0.15)',
+              border: '1px solid rgba(22,163,74,0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Check size={22} style={{ color: '#16A34A' }} />
+          </div>
+          <div>
+            <p style={{ fontSize: 16, fontWeight: 700, color: 'var(--aurora-text)', margin: '0 0 8px' }}>
+              This session has already been committed.
+            </p>
+            <a
+              href="/catalog"
+              style={{ color: 'var(--aurora-accent)', fontSize: 13, textDecoration: 'none' }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none' }}
+            >
+              Browse catalog →
+            </a>
+          </div>
+        </div>
       </div>
     )
   }
 
   if (session.status === 'cancelled') {
     return (
-      <div className="py-12 text-center">
-        <p className="text-muted-foreground">This import session was cancelled.</p>
-        <a href="/catalog" className="mt-2 block text-primary hover:underline">
-          Back to catalog
-        </a>
+      <div style={{ maxWidth: 560, margin: '0 auto' }}>
+        <div
+          style={{
+            ...AURORA_CARD,
+            padding: '48px 24px',
+            textAlign: 'center',
+          }}
+        >
+          <p style={{ fontSize: 14, color: 'var(--aurora-muted)', margin: '0 0 10px' }}>
+            This import session was cancelled.
+          </p>
+          <a
+            href="/catalog"
+            style={{ color: 'var(--aurora-accent)', fontSize: 13, textDecoration: 'none' }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none' }}
+          >
+            Back to catalog →
+          </a>
+        </div>
       </div>
     )
   }
@@ -1272,42 +1833,67 @@ export function ImportWizardPage() {
   const processing = isProcessing(session.status)
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div
+      style={{
+        maxWidth: 640,
+        margin: '0 auto',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 18,
+        color: 'var(--aurora-text)',
+      }}
+    >
       {/* Page header */}
       <div>
-        <h1 className="text-2xl font-bold">Import Wizard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <h1
+          style={{
+            fontSize: 22,
+            fontWeight: 800,
+            color: 'var(--aurora-text)',
+            letterSpacing: '-0.02em',
+            margin: '0 0 4px',
+          }}
+        >
+          Import Wizard
+        </h1>
+        <p style={{ fontSize: 12, color: 'var(--aurora-muted)', margin: 0 }}>
           Review and finalize your import before adding it to the library.
         </p>
       </div>
 
       {/* Error banner for failed sessions */}
       {session.status === 'failed' && session.error && (
-        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 dark:border-red-700 dark:bg-red-900/20">
-          <p className="text-sm font-medium text-red-700 dark:text-red-300">
+        <div
+          style={{
+            background: 'rgba(220,38,38,0.08)',
+            border: '1px solid rgba(220,38,38,0.25)',
+            borderRadius: 10,
+            padding: '12px 16px',
+          }}
+        >
+          <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--aurora-danger)', margin: '0 0 4px' }}>
             Import processing failed
           </p>
-          <p className="mt-1 text-xs text-red-600 dark:text-red-400 font-mono">
+          <p style={{ fontSize: 11, color: 'var(--aurora-danger)', fontFamily: 'monospace', margin: '0 0 4px' }}>
             {session.error}
           </p>
-          <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+          <p style={{ fontSize: 11, color: 'var(--aurora-muted)', margin: 0 }}>
             You can still edit the fields below and commit manually.
           </p>
         </div>
       )}
 
-      {/* Processing state */}
+      {/* Processing spinner */}
       {processing ? (
-        <ProcessingOverlay sessionId={session.id} />
+        <div style={AURORA_CARD}>
+          <ProcessingOverlay sessionId={session.id} />
+        </div>
       ) : !editable ? null : (
-        <div className="rounded-lg border border-border bg-card p-6 shadow-sm">
-          {/* Step progress */}
-          <div className="mb-6 space-y-2">
+        /* Wizard card */
+        <div style={{ ...AURORA_CARD, padding: '28px 24px' }}>
+          {/* Stepper */}
+          <div style={{ marginBottom: 28 }}>
             <StepProgress current={step} />
-            <p className="text-center text-sm font-medium">
-              Step {stepIndex(step) + 1} of {WIZARD_STEPS.length}:{' '}
-              {STEP_LABELS[step]}
-            </p>
           </div>
 
           {/* Step content */}
