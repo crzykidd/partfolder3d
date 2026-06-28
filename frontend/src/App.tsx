@@ -43,6 +43,7 @@ import { BackupsPage } from '@/pages/admin/BackupsPage'
 import { ExportPage } from '@/pages/admin/ExportPage'
 import { TagAdminPage } from '@/pages/admin/TagAdminPage'
 import { SiteCapabilitiesPage } from '@/pages/admin/SiteCapabilitiesPage'
+import { LibrariesPage } from '@/pages/admin/LibrariesPage'
 
 import { PublicSharePage } from '@/pages/PublicSharePage'
 
@@ -233,6 +234,14 @@ function App() {
                     element={
                       <AdminGuard>
                         <SiteCapabilitiesPage />
+                      </AdminGuard>
+                    }
+                  />
+                  <Route
+                    path="/admin/libraries"
+                    element={
+                      <AdminGuard>
+                        <LibrariesPage />
                       </AdminGuard>
                     }
                   />

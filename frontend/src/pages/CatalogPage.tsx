@@ -29,10 +29,11 @@ import {
   type SortingState,
 } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Box, LayoutGrid, List, Search, Star, X } from 'lucide-react'
+import { Box, HardDrive, LayoutGrid, List, Search, Star, X } from 'lucide-react'
 
 import * as api from '@/lib/api'
 import { getTagFontSize, getTagFontWeight } from '@/lib/catalog-utils'
+import { useAuth } from '@/context/AuthContext'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -648,6 +649,7 @@ function Pagination({ page, totalPages, onPage }: PaginationProps) {
 export function CatalogPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
+  const { user } = useAuth()
 
   // --- Read URL params ---
   const urlQ = searchParams.get('q') ?? ''
@@ -782,6 +784,12 @@ export function CatalogPage() {
   const { data: tagsData } = useQuery({
     queryKey: ['tags', 'cloud'],
     queryFn: () => api.listTags({ per_page: TAG_CLOUD_PER_PAGE }),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const { data: libraries } = useQuery({
+    queryKey: ['libraries'],
+    queryFn: api.listLibraries,
     staleTime: 5 * 60 * 1000,
   })
 
@@ -1031,8 +1039,78 @@ export function CatalogPage() {
             </div>
           )}
 
-          {/* Grid view */}
-          {!itemsLoading && urlView === 'grid' && (
+          {/* Empty-state CTA — only when not loading, no filters active, and no items */}
+          {!itemsLoading && total === 0 && !urlQ && !urlTags.length && !urlFavorited && !urlCreatorId && (
+            <div
+              style={{
+                ...CARD_STYLE,
+                padding: '48px 24px',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 12,
+              }}
+            >
+              <div
+                style={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: 14,
+                  background: 'rgba(15,164,171,0.10)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <HardDrive size={26} style={{ color: 'var(--aurora-accent)' }} />
+              </div>
+              <div>
+                <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--aurora-text)', margin: '0 0 6px' }}>
+                  {libraries && libraries.length === 0 ? 'No libraries configured yet' : 'No items yet'}
+                </p>
+                {user?.role === 'admin' ? (
+                  <>
+                    <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: '0 0 16px' }}>
+                      {libraries && libraries.length === 0
+                        ? 'Add a library so PartFolder 3D knows where to store your models.'
+                        : 'Start importing models through the import wizard.'}
+                    </p>
+                    {libraries && libraries.length === 0 && (
+                      <Link
+                        to="/admin/libraries"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          background: 'var(--aurora-accent)',
+                          color: '#fff',
+                          textDecoration: 'none',
+                          borderRadius: 8,
+                          padding: '8px 18px',
+                          fontSize: 13,
+                          fontWeight: 600,
+                          transition: 'opacity 0.15s',
+                        }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = '0.85' }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = '1' }}
+                      >
+                        <HardDrive size={14} />
+                        Add a library
+                      </Link>
+                    )}
+                  </>
+                ) : (
+                  <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: 0 }}>
+                    No items have been added yet. Ask an admin to configure a library and import some models.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Grid view — skip when showing empty-state CTA */}
+          {!itemsLoading && urlView === 'grid' && (total > 0 || urlQ || urlTags.length > 0 || urlFavorited || urlCreatorId) && (
             <VirtualGrid
               items={items}
               onToggleFavorite={handleToggleFavorite}
@@ -1040,8 +1118,8 @@ export function CatalogPage() {
             />
           )}
 
-          {/* Table view */}
-          {!itemsLoading && urlView === 'table' && (
+          {/* Table view — skip when showing empty-state CTA */}
+          {!itemsLoading && urlView === 'table' && (total > 0 || urlQ || urlTags.length > 0 || urlFavorited || urlCreatorId) && (
             <TableView
               items={items}
               onToggleFavorite={handleToggleFavorite}

@@ -311,8 +311,10 @@ container. The dev stack additionally bind-mounts all storage under
 Then open **http://localhost:8973** and complete the **first-run wizard**:
 
 1. Create the admin account + instance basics (name, external URL/port, time zone).
-2. *(Optional, skippable)* add a first library path, set storage layout and tag-tree
-   depth, configure an AI provider, and seed tags / a backup schedule.
+2. Navigate to **Admin → Libraries** and add your first library — give it a name and
+   set the mount path to the container path of the mounted volume (e.g. `/library`
+   for the dev stack, or `/library/main` for a custom prod mount).
+3. *(Optional, skippable)* configure an AI provider, seed tags, or set up a backup schedule.
 
 The default external port is **`8973`** and is changeable in `docker-compose.yml`.
 

@@ -30,6 +30,7 @@ import {
   Share2,
   Printer,
   ShieldCheck,
+  HardDrive,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -105,6 +106,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     label: 'Admin',
     requiresAdmin: true,
     items: [
+      { label: 'Libraries',         icon: HardDrive,   path: '/admin/libraries' },
       { label: 'Users',             icon: Users,       path: '/admin/users' },
       { label: 'Invites',           icon: Mail,        path: '/admin/invites' },
       { label: 'AI Providers',      icon: Zap,         path: '/admin/ai-providers' },

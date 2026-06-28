@@ -75,6 +75,7 @@ services:
     volumes:
       - ./backend:/app                       # source bind-mount for live reload
       - ./private_data/data/app:/data        # app data (config, thumbnails, inbox, renders…)
+      - ./private_data/data/library:/library # dev library mount (add more via Admin → Libraries)
     depends_on:
       db:
         condition: service_healthy
@@ -106,6 +107,7 @@ services:
     volumes:
       - ./backend:/app
       - ./private_data/data/app:/data
+      - ./private_data/data/library:/library # dev library mount (same as backend)
     depends_on:
       db:
         condition: service_healthy

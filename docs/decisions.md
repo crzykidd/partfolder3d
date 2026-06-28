@@ -2,6 +2,43 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-28 — Libraries management + dev library mount
+
+### Dev library mount convention
+
+`./private_data/data/library` is bind-mounted to `/library` in both the backend
+and worker containers in `docker-compose.dev.yml`. The path is gitignored (under
+`private_data/`). This gives every fresh dev instance a ready-to-use library
+root: after first login, go to Admin → Libraries, add Name="Main Library" and
+Mount path="/library". The prod compose adds only commented examples — operators
+mount their own volumes.
+
+### Libraries management page
+
+Added `frontend/src/pages/admin/LibrariesPage.tsx` (Aurora-styled) providing
+list / add / disable flows. Uses TanStack Query + `api.createLibrary` /
+`api.disableLibrary` — no new dependencies. Added to the Admin nav group in
+`navConfig.ts` at the top (highest-priority admin setup action). Route
+`/admin/libraries` added to `App.tsx` under `<AdminGuard>`.
+
+### Catalog empty-state CTA
+
+`CatalogPage.tsx` now shows a CTA when no filters are active and total === 0.
+Admins see a "No libraries configured yet" state with a direct link to
+`/admin/libraries`; non-admins see a "ask an admin" message. The CTA is
+suppressed when any filter (q, tags, favorited, creator_id) is active — those
+cases fall through to the grid/table's existing "No items found." text. The
+libraries query is a separate TanStack Query call (staleTime 5 min) so it does
+not interfere with the catalog items query.
+
+### Item-create mkdir-p path
+
+`items.py`'s `create_item` already calls `item_dir.mkdir(parents=True,
+exist_ok=True)`. The library root does NOT need to be pre-created by the app —
+it must already exist on disk (the container mount creates it). A fresh
+`./private_data/data/library/` dir is pre-created in the repo so the dev bind
+mount succeeds on first `docker compose up`.
+
 ## 2026-06-28 — UI revamp B1: CatalogPage + ItemPage Aurora restyle
 
 ### Styling approach: inline CSS vars, not Tailwind tokens

@@ -26,6 +26,7 @@ const REAL_ROUTES = new Set([
   '/admin/issues',
   '/admin/changes',
   '/admin/reviews',
+  '/admin/libraries',
   '/admin/users',
   '/admin/invites',
   '/admin/ai-providers',

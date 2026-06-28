@@ -65,6 +65,9 @@ services:
       RUN_MIGRATIONS: "true"
     volumes:
       - ./data:/data
+      # Library mounts — add one bind-mount per library, e.g.:
+      #   - /mnt/nas/3dprints:/library/main
+      # Then register each path in the app under Admin → Libraries.
     depends_on:
       db:
         condition: service_healthy
@@ -94,6 +97,9 @@ services:
       DATA_DIR: /data
     volumes:
       - ./data:/data
+      # Library mounts — mirror the backend mounts exactly so the worker can
+      # read/write files.  Example:
+      #   - /mnt/nas/3dprints:/library/main
     depends_on:
       db:
         condition: service_healthy
