@@ -11,19 +11,34 @@
 </div>
 
 > [!WARNING]
-> 🚧 **Early development — no working code yet.** PartFolder 3D is in the design/planning
-> phase. There is nothing to install or run today. This README describes the *intended*
-> product, not a shipping one. Watch/star to follow along.
+> 🚧 **Early alpha — not yet released.** PartFolder 3D is functional but has not had
+> its first tagged release. The Docker images are not yet published. Watch/star to
+> follow along; see [Getting started](#getting-started) for the dev-stack instructions.
 
 <div align="center">
 
-![Status](https://img.shields.io/badge/status-planning-blue)
-![Stage](https://img.shields.io/badge/stage-pre--alpha-orange)
-![Code](https://img.shields.io/badge/code-none%20yet-lightgrey)
+![Version](https://img.shields.io/badge/version-0.1.0-0FA4AB)
+![Status](https://img.shields.io/badge/status-alpha-blue)
+![Stage](https://img.shields.io/badge/stage-alpha-orange)
+![Code](https://img.shields.io/badge/code-yes-brightgreen)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![PRs](https://img.shields.io/badge/PRs-not%20yet-inactive)
 
 </div>
+
+---
+
+## What's New
+
+### v0.1.0 (unreleased)
+
+First full-stack alpha covering all core features: multi-user catalog with full-text
+search and tag cloud browse; item library with YAML sidecars and atomic renames;
+import/inbox wizard with URL scraping and tag reconciliation; headless CPU mesh
+rendering (STL/3MF/OBJ/PLY); reconcile engine with issues, change log, and review
+queue; print history with gcode parsing; tokenized share links with audit; optional
+AI tagging (Claude / OpenAI / Ollama); admin backup, JSON export, and tag management.
+See [CHANGELOG.md](CHANGELOG.md) for the full details.
 
 ---
 
@@ -41,8 +56,8 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> All features below are **planned**. None of this is implemented yet — see the
-> [Roadmap](#roadmap--status).
+> The full feature set below is **built** (early alpha, not yet tagged/released) — see the
+> [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
 
@@ -57,9 +72,9 @@ transfer, and resilience against database loss.
 
 ---
 
-## Planned features
+## Features
 
-> Everything in this section is **planned**, not built.
+> Built and working in the current alpha (pending the first tagged release).
 
 ### 📚 Catalog, search & browse
 - Shared multi-user catalog — everyone sees the same items, files, and images.
@@ -241,44 +256,44 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is at the **planning** stage.
+Honest snapshot — this project is at the **alpha** stage (v0.1.0, unreleased).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
-- [ ] Repository scaffolding (docker-compose, services, CI)
-- [ ] Data model + database migrations
-- [ ] Authentication, invites, password reset, API keys
-- [ ] Storage layout, sidecar read/write, sharding
-- [ ] Reconciliation / scan engine (Auto vs. Review, Issues, Change Log)
-- [ ] Import wizard + inbox watcher
-- [ ] Mesh rendering / thumbnail pipeline (STL / 3MF / OBJ / PLY)
-- [ ] Catalog UI — search, tag tree, table/grid views, favorites
-- [ ] Print history + gcode parsing + stats
-- [ ] Sharing (per-item & full-site links) + share audit
-- [ ] AI-assisted tagging (optional providers)
-- [ ] Admin tools — backups, JSON export, scheduled jobs
-- [ ] Full REST API + OpenAPI docs
-- [ ] First-run setup wizard
+- [x] Repository scaffolding (docker-compose, services, CI)
+- [x] Data model + database migrations (10 migration files)
+- [x] Authentication, invites, password reset, API keys
+- [x] Storage layout, sidecar read/write, sharding
+- [x] Reconciliation / scan engine (Auto vs. Review, Issues, Change Log)
+- [x] Import wizard + inbox watcher
+- [x] Mesh rendering / thumbnail pipeline (STL / 3MF / OBJ / PLY)
+- [x] Catalog UI — full-text search, tag cloud, table/grid views, favorites
+- [x] Print history + gcode parsing + stats
+- [x] Sharing (per-item & full-site links) + share audit
+- [x] AI-assisted tagging (Claude / OpenAI / Ollama — optional)
+- [x] Admin tools — backups, JSON export, tag admin, scheduled jobs
+- [x] Full REST API + OpenAPI docs
+- [x] First-run setup wizard
+- [ ] First tagged release + published Docker images
+- [ ] Load testing at 100k-item scale
+- [ ] SSO (OIDC/SAML), email delivery, OctoPrint integration (out-of-scope / future)
 
-Indicative phases drawn from the PRD: data model → storage/sidecars → reconciliation
-engine → import/render → UI → print history/sharing → AI/admin → API polish. The PRD
-also tracks an explicit [out-of-scope / future](PRD.md) list (native CAD rendering,
-GPU rendering, SSO, email delivery, OctoPrint integration, federated sync).
+See the [CHANGELOG](CHANGELOG.md) for the full delivered feature list.
 
 ---
 
 ## Getting started
 
-> [!WARNING]
-> **Nothing to run yet.** There is no code, no published image, and no
-> `docker-compose.yml` in this repository today. The steps below describe the
-> **intended** future experience.
+> [!NOTE]
+> **Alpha — no published image yet.** The code and `docker-compose.yml` exist; a
+> tagged release and registry images are coming with v0.1.0. For now, build locally
+> from source.
 
 <details>
-<summary><strong>Planned — not yet functional</strong></summary>
+<summary><strong>Build from source (dev stack)</strong></summary>
 
 ```bash
-# (planned) clone and start the stack
+# clone and start the stack
 git clone https://github.com/crzykidd/partfolder3d.git
 cd partfolder3d
 cp .env.example .env
@@ -340,6 +355,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — design/planning phase · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — alpha (v0.1.0 unreleased) · built by <code>crzykidd</code></sub>
 
 </div>

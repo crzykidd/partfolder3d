@@ -2,6 +2,42 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-28 — Phase 10b release machinery decisions
+
+### Version source-of-truth: `backend/app/version.py` (already existed from Phase 0)
+
+The version source-of-truth file was locked at scaffolding (Phase 0 decision:
+`backend/app/version.py` → `__version__ = "0.1.0"`). Phase 10b formalizes this
+in the release commands: `frontend/package.json` `"version"` must be kept in sync
+by `/release-prep` (same bare semver), and `GET /api/version` reads
+`backend/app/version.py` at runtime. No additional version file introduced.
+
+### Release command placeholders filled
+
+All `<PLACEHOLDER>` tokens in `.claude/commands/release-prep.md` and
+`.claude/commands/release-cut.md` replaced with project-specific values:
+- Version file: `backend/app/version.py` (+ `frontend/package.json` sync)
+- Image registry: `ghcr.io/crzykidd/partfolder3d` + `…-frontend`
+- Publish workflow: `Build and publish Docker images`
+- Release image tags: `:latest`, `:<semver>`, `:<major>`
+- Local checks: ruff, tsc, vitest, compose-validate (pytest/alembic flagged as
+  needing live Postgres — CI covers them; the commands note when to skip locally)
+- Docs to sync: `CLAUDE.md` Status line
+- Changelog archive dir: `docs/`
+- README badge pattern: `version-<current>-0FA4AB` (brand teal)
+
+The top HTML-comment placeholder guide was removed from both command files now that
+the values are filled.
+
+### CI `compose-validate` step corrected: standalone dev compose
+
+The `Validate dev compose overlay` step in `.github/workflows/ci.yml` ran
+`docker compose -f docker-compose.yml -f docker-compose.dev.yml config` — the old
+overlay invocation. The dev compose was made self-contained in Phase 0 (a decision
+recorded in the 2026-06-27 deployment-readiness entry below), but the CI step
+was never updated. Corrected to `docker compose -f docker-compose.dev.yml config --quiet`
+and renamed to `Validate dev compose`. Production compose step unchanged.
+
 ## 2026-06-28 — Phase 10a hardening decisions
 
 ### SSRF guard: DNS pre-flight block (new module `app/storage/ssrf_guard.py`)

@@ -1,0 +1,253 @@
+# Changelog
+
+All notable changes to PartFolder 3D are documented in this file.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The version is stored bare (no `v` prefix) in `backend/app/version.py`; the `v`
+prefix appears only on git tags and GitHub releases.
+
+---
+
+<!-- SKELETON — categories to use when adding entries:
+### Added      new user-facing feature
+### Changed    changed behaviour in an existing feature
+### Fixed      bug fix
+### Deprecated features removed in a future release
+### Removed    features removed in this release
+### Security   security-relevant fix or hardening
+-->
+
+## [Unreleased]
+
+_Nothing yet — all delivered features are listed under the v0.1.0 entries below._
+
+---
+
+## [0.1.0] — unreleased
+
+> First full-stack alpha release covering Phases 0–10 of the build plan.
+
+### Added
+
+**Scaffolding & infrastructure (Phase 0)**
+- Docker Compose production stack: `backend` (FastAPI), `worker` (arq), `frontend`
+  (React build artifact), `nginx` (reverse proxy, port 8973), `db` (PostgreSQL 16),
+  `redis` (job queue + scheduler).
+- Self-contained `docker-compose.dev.yml` for local development: hot-reload uvicorn
+  + Vite dev server, host-visible bind-mounted data under `./private_data/data/`.
+- Backend auto-migration on startup via `backend/docker-entrypoint.sh`
+  (`RUN_MIGRATIONS=true` on the backend service; worker gates on backend health).
+- GitHub Actions CI: `lint` (ruff + tsc), `config-validate`, `migration-check` (live
+  Postgres), `compose-validate`, `image-build`, `test` (pytest + vitest).
+- GitHub Actions publish workflow pushing to `ghcr.io/crzykidd/partfolder3d` and
+  `ghcr.io/crzykidd/partfolder3d-frontend`; tags `:latest` on main/release, semver
+  tags on release events.
+- CodeQL analysis on Python and TypeScript/JavaScript.
+- Artifact retention policy workflow.
+
+**Identity & auth (Phase 1)**
+- First-run setup wizard: admin account creation, instance name, external URL,
+  time zone, and optional first library path.
+- Session-cookie auth (httpOnly, Secure, server-stored in Postgres `user_sessions`).
+- Argon2id password hashing via passlib; CSRF protection.
+- Admin password-reset flow with tokenized links (7-day expiry, revocable).
+- Tokenized invite links for new users (7-day expiry, revocable, with invite history).
+- Per-user API keys (SHA-256 stored, once-only display at creation); Bearer token
+  auth accepted on all API endpoints.
+- User management: create, disable, role assignment (admin / regular user).
+- Instance Fernet encryption key auto-generated into `DATA_DIR/config/secret.key`
+  (0600); never stored in DB or repo. All in-DB secrets encrypted with this key.
+- Settings page: display name, email, password change, theme preference, API keys,
+  path-prefix rewrite.
+- Dark / light / system-default theme, persisted per user (DB + localStorage).
+- Full REST API for all identity operations; OpenAPI/Swagger docs auto-generated.
+
+**Libraries & storage (Phase 2)**
+- Library management: create, rename, enable/disable multiple library mounts.
+- Sharded on-disk item directory layout (`/<library>/<shard>/<itemname>-<key>/`);
+  shard = first 2 chars of 7-char lowercase base32 key.
+- YAML sidecar (`<itemname>-<key>.yml`): full portable metadata mirror per item —
+  no DB surrogate IDs, carries tags by name, files by name + SHA-256, creator
+  descriptively. Schema version field for future migration.
+- Atomic, all-or-nothing directory rename for item title changes: crash-safe
+  filesystem journal at `/data/journal/<key>.json`, roll-forward recovery on
+  startup and rescan.
+- Item CRUD REST API: create, read, list, update, delete (soft-delete to trash).
+- File inventory: automatic role inference (model, render, image, gcode, photo, zip)
+  from subdirectory and extension; SHA-256 per-file hash; size tracking.
+- Creator (designer attribution) entity: normalized, optional, best-effort; optional
+  `user_id` FK to User for "my own design" toggle powering the "My Creations" view.
+
+**Catalog, search & browse (Phase 3)**
+- Full-text search via PostgreSQL application-maintained `TSVECTOR` column + GIN
+  index; `websearch_to_tsquery` query parsing.
+- Popularity-weighted tag cloud: linear font-size scale + weight tiers; clicking a
+  tag filters the catalog (multiple tags stack as AND).
+- Catalog list: **table** and **grid** views (TanStack Virtual row-virtualizer for
+  large catalogs); per-user **favorites** (star, filter, sort); sort by newest,
+  oldest, title A–Z/Z–A, or relevance.
+- Item page: image carousel + default-image picker, full metadata, source link,
+  license, SHA-256 file hashes, configurable **path-prefix rewrite** with copy
+  button for host-filesystem navigation.
+- Download individual files or a **ZIP bundle** (tracked in `download_bundles`
+  table, invalidated automatically when files change, ~24 h expiry).
+- Creator browse: "My Creations" view (items whose Creator is linked to the current
+  user); browse-by-creator for external designers.
+- Tag browse: filter by category namespace, sort by popularity or name.
+
+**Worker jobs & rendering (Phase 4)**
+- Headless CPU mesh rendering to PNG for **STL / 3MF / OBJ / PLY** using
+  pyrender + OSMesa (EGL path tried first in Docker; OSMesa fallback; VTK
+  detection via subprocess probe to avoid SIGABRT on missing EGL/OSMesa).
+- Render cache keyed by file SHA-256; auto-re-rendered on file change.
+- Background job model: UUID PK, type, status, progress, payload JSONB, log, error,
+  optional `item_id` FK; `queued → running → succeeded | failed` lifecycle.
+- Scheduled-job registry with per-job DB tracking (last run, status, next run,
+  is-running); arq cron wrappers; "Run now" endpoint for on-demand triggers.
+- Job monitor page (admin): live table of recent jobs with status, progress, log.
+- Scheduled-job monitor page (admin): per-job status, last/next run, run-now button.
+
+**Import & inbox wizard (Phase 5)**
+- **"Add Asset" web wizard** (5-step): source URL → title confirm → tag selection →
+  image selection → commit. Supported input: drag-drop upload or source URL only.
+- **Inbox folder watcher**: detects new subdirectories under the configured inbox
+  path (mtime-settle check prevents ingesting in-progress uploads); queues sessions
+  automatically.
+- **URL scraper**: `httpx` + `selectolax`; extracts Open Graph, meta-keywords,
+  JSON-LD keywords; robots.txt pre-flight check; result cached per worker invocation.
+- **Site capabilities** table: per-domain scrapeability flags (`can_scrape_metadata`,
+  `can_scrape_images`, `requires_token`, `is_manual_only`); probed on first hit.
+- **Tag reconciliation**: exact match → alias lookup → pending queue; pending tags
+  created with `TagStatus.pending` and promoted via admin approval.
+- Pending-tag approval queue and admin approval endpoint (`POST /api/tags/{id}/approve`).
+- **Import from another instance's share link** (fetch assets + metadata, reconcile
+  against local library and canonical tags).
+
+**Reconcile engine (Phase 6)**
+- **Bidirectional sidecar ⇄ DB sync**: three-way mtime comparison
+  (`sidecar_written_at`, `sidecar_file_mtime`, `item.updated_at`) with 5 s tolerance.
+- Detect new / removed / extra files; re-render on file change.
+- **Issues** page: durably-recorded problems (conflict, dead_link, corruption, orphan,
+  missing_file, extra_file, sidecar_error, other); filterable by type and status.
+- **Change Log** page: append-only audit trail of all reconcile actions.
+- **Review Queue** page: pending decisions for changes in `review` mode; approve /
+  reject with actor tracking. Pending-count badge in the nav refreshed every 60 s.
+- **Auto vs. Review modes** per behavior (`sidecar_sync`, `re_render`, `file_changes`);
+  defaults: sidecar_sync=review, re_render=auto, file_changes=review. Stored in
+  `settings` table; per-item rescan always uses auto.
+- §8.5 isolated-per-item transactions in library scan: one bad item fails alone as
+  an Issue, never blocking the rest of the scan.
+- Per-item **"Rescan disk"** button for on-demand reconciliation.
+
+**Print history & sharing (Phase 7)**
+- Per-item **print records**: date, note, private/public visibility, structured slicer
+  settings (printer, material, nozzle_diameter, layer_height, supports), logging user.
+- **gcode parser** (best-effort, first 32 KB only): filament length, filament weight,
+  estimated print time; binary `.bgcode` files skipped gracefully.
+- **Aggregate print stats**: total prints, success rate, filament used, most-printed
+  items.
+- Per-design **tokenized share links** (256-bit entropy, `secrets.token_hex(32)`):
+  public, read-only, optionally downloadable; configurable expiry, per-link override,
+  and revocation.
+- **Full-site share link** (admin): temporary anonymous catalog browse/download for
+  guests.
+- **Share audit log**: `ShareAuditEvent` rows on every view and download access;
+  expiry events recorded by nightly cron.
+- Public ZIP bundles: `requester_user_id=NULL`, `include_print_history=False` by
+  default; `include_history` flag opt-in for share-link holders.
+
+**AI tagging — optional (Phase 8)**
+- Provider registry: **Anthropic Claude** (`claude-opus-4-8` default via `anthropic`
+  SDK), **OpenAI** (via `openai` SDK), **local LLM / Ollama** (OpenAI-compatible
+  endpoint).
+- Provider API keys stored Fernet-encrypted in DB (`api_key_encrypted`); never
+  returned in responses; test-connection endpoint does not persist to DB.
+- **Tag suggestion**: structured JSON schema in system prompt; canonical tags matched
+  against existing vocabulary; hallucination guard strips unknown canonicals; new
+  suggestions capped at 5.
+- **Description cleanup**: rewrite, extend, or summarize item description via AI.
+- **Web-scrape summarization**: condense scraped metadata into a clean description.
+- AI provider settings page (admin): add, test, remove providers; model override.
+- **Manual-only always works** with zero AI configured; all AI paths degrade
+  gracefully and never raise to the HTTP layer.
+
+**Admin & backup (Phase 9)**
+- **Scheduled DB backup**: in-process asyncpg dump of all table rows to
+  `db.json.gz` inside a timestamped `.tar.gz` archive; bundles `config/secret.key`.
+  Runs nightly at 04:00 UTC; configurable retention count (default 10); run-now-able.
+- **Catalog JSON export** (`GET /api/admin/export/catalog`): full export of items,
+  tags, aliases, creators, and print records as a downloadable JSON file.
+- **Tag administration page**: list pending tags, approve/reject, set category,
+  manage aliases, merge tags (repoints ItemTag + TagAlias rows, adds source as alias
+  of target, idempotent).
+- **Site capabilities admin**: full CRUD for site-capability entries and encrypted
+  tokens; reprobe endpoint.
+- **API key admin**: create, list, revoke per-user API keys.
+- **API parity**: every UI action has a corresponding REST endpoint; Bearer API-key
+  auth verified across all admin endpoints.
+
+**Hardening (Phase 10a)**
+- 8 database indexes added (migration 0010): `item_tags(tag_id)`, `items(creator_id)`,
+  `items(created_at DESC)`, `items(updated_at DESC)`, `items(title)`,
+  `share_links(created_by_id)`, `print_records(item_id, visibility)`,
+  `download_bundles(item_id, status, expires_at)`.
+- 31 hardening tests added: SSRF guard (unit + integration), path traversal guards,
+  admin-only route enforcement, per-user write scoping, AI key masking, share-link
+  public/private record separation, FTS injection resistance, index existence.
+
+**Release machinery (Phase 10b)**
+- `CHANGELOG.md` created (this file).
+- `/release-prep` and `/release-cut` slash commands filled with project-specific
+  values (version file, image registry, CI checks, docs-to-sync).
+- CI `compose-validate` job corrected for the now-standalone dev compose.
+- README version badge and `## What's New` section added.
+
+### Changed
+
+- **Tag browse:** replaced the planned hierarchical tag tree (PRD §5.2) with a
+  popularity-weighted flat tag cloud. The tree was a holdover from an earlier
+  on-disk-by-tag-directory design that was dropped; the cloud is simpler and
+  equally powerful for navigation.
+- **Dev compose:** `docker-compose.dev.yml` made self-contained (single file, run
+  with `docker compose -f docker-compose.dev.yml up --build`) rather than an overlay
+  on top of the production compose. Provides a uniform one-file/one-command dev
+  workflow.
+- **Reconcile modes UI:** placed on the Reviews page (not the Settings page) so
+  the mode controls appear alongside the review queue they govern.
+
+### Fixed
+
+- `CREATE TYPE IF NOT EXISTS` is not valid PostgreSQL — migration 0006 corrected to
+  use `DO $$ BEGIN ... EXCEPTION WHEN duplicate_object THEN null; END $$;` blocks.
+- PyOpenGL platform module cache conflict: `_try_egl()` now clears `OpenGL.*` from
+  `sys.modules` on failure so `_try_osmesa()` starts with a clean module state.
+- VTK render detection changed from importability check to subprocess probe to
+  prevent undetectable SIGABRT when VTK lacks EGL/OSMesa support.
+- `from __future__ import annotations` + FastAPI 204 routes: `response_model=None`
+  added explicitly on all 204 routes in files using PEP 563 annotations to avoid
+  FastAPI assertion on `NoneType` response model.
+- `python-multipart` added to `requirements.txt` (required for FastAPI Form/File
+  endpoints; absence caused import-time crash on startup).
+
+### Security
+
+- **SSRF guard** (`app/storage/ssrf_guard.py`): DNS pre-flight resolution blocks all
+  requests from the URL scraper and instance-import endpoints to RFC-1918 private
+  ranges, loopback, link-local, and cloud-metadata addresses (e.g. 169.254.169.254).
+  Applied to `scraper.scrape_url()`, `import_sessions.create_import_session()`, and
+  `import_sessions.import_from_share_link()`.
+- **Share-link private-data protection**: print records with `visibility="private"` are
+  filtered at the SQL query level on every public share endpoint — private records are
+  never fetched and then filtered in Python. A double-gate (endpoint + worker) ensures
+  a programming mistake in one layer is caught by the other. Public ZIP bundles
+  explicitly set `requester_user_id=NULL` and default `include_print_history=False`.
+
+---
+
+## Archived releases
+
+_No archived releases yet. When v0.2.0 or later ships, the v0.1.x detail is moved to
+[`docs/CHANGELOG-0.1.x.md`](docs/CHANGELOG-0.1.x.md) and a summary block replaces it
+here. See Step 3 of [`/release-prep`](.claude/commands/release-prep.md) for the
+archive trigger rules._
