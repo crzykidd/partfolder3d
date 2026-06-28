@@ -2,6 +2,58 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Phase 9b admin frontend decisions
+
+### API keys page already existed — no duplicate created
+
+`frontend/src/pages/settings/ApiKeysPage.tsx` was created as part of Phase 9a
+(the backend commit already landed it). `App.tsx` and `AppShell.tsx` already had
+the route and nav entry wired. Phase 9b confirmed it complete and did not modify it.
+
+### New admin API functions added to api.ts (not a separate file)
+
+All new Phase 9 API helpers (backup, export, tag admin, admin site capabilities)
+were appended to the existing `frontend/src/lib/api.ts` rather than split into
+separate modules. Rationale: the existing pattern is one flat file; splitting now
+would require touching all import sites for no immediate benefit. The file is
+getting long (~1700 lines) — if it grows further a module-per-domain split is the
+right next step.
+
+### Admin site capabilities use a separate `AdminSiteCapabilityOut` type
+
+The Phase 5 `SiteCapability` interface (used by the Phase 5 import wizard) lacks
+`created_at` / `updated_at`. The Phase 9a admin router returns `SiteCapabilityOut`
+with those fields. Rather than mutate the Phase 5 type and risk breaking the import
+wizard, a separate `AdminSiteCapabilityOut` interface was added to `api.ts`.
+
+### TagAdminPage: merge target loaded via a separate all-tags query (up to 500)
+
+The "Merge Into" dropdown in `TagAdminPage` needs a list of all tags as merge
+targets. Rather than reuse the paginated view (which shows only the current 50),
+a dedicated query (`['admin-tags-merge-list']`) loads up to 500 tags when the page
+mounts. For catalogs with > 500 tags, the user should search-narrow first. This
+is an acceptable trade-off for an admin tool.
+
+### TagAdminPage: separate admin endpoints, not the existing PendingTagsPage path
+
+The existing `PendingTagsPage` calls `/api/tags/{id}/approve` (the public tags
+router). `TagAdminPage` calls `/api/admin/tags/{id}/approve` (the Phase 9a admin
+router). Both exist in the backend; this separation preserves the existing page
+and avoids a regression.
+
+### Reindex: ScheduledJobsPage already has "Run now" per job
+
+The `ScheduledJobsPage` already exposes a "Run now" button for every scheduled job,
+including `library_reconcile_scan`. Option A from the prompt (no new page, reuse
+existing) applies — no ReindexPage was created.
+
+### Backup download uses plain anchor with `download` attribute
+
+The `GET /api/admin/backups/{id}/download` endpoint returns a `FileResponse`
+(Content-Disposition: attachment). The UI uses a plain `<a href="..." download>`
+anchor rather than a fetch + Blob URL. This avoids holding the full archive in
+memory and is the correct pattern for file downloads.
+
 ## 2026-06-27 — UI prototype examples (`/examples`, `/example1..3`)
 
 Three standalone mock-data prototypes added under `frontend/src/pages/examples/` for

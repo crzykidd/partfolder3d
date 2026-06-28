@@ -134,6 +134,10 @@ export function AppShell() {
                 <NavItem to="/admin/print-stats">Print Stats</NavItem>
                 <NavItem to="/admin/shares">Site Shares</NavItem>
                 <NavItem to="/admin/ai-providers">AI Providers</NavItem>
+                <NavItem to="/admin/backups">Backups</NavItem>
+                <NavItem to="/admin/export">Export</NavItem>
+                <NavItem to="/admin/tags">Tag Admin</NavItem>
+                <NavItem to="/admin/site-capabilities">Site Caps</NavItem>
                 <span className="relative inline-flex items-center">
                   <NavItem to="/admin/reviews">Review Queue</NavItem>
                   {pendingReviews && pendingReviews.total > 0 && (

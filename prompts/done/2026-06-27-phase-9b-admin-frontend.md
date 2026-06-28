@@ -1,10 +1,13 @@
 ---
 name: 2026-06-27-phase-9b-admin-frontend
-status: pending          # pending | completed | failed
+status: completed
 created: 2026-06-27
 model: sonnet            # coding against a locked plan
-completed:
-result:
+completed: 2026-06-27
+result: >
+  Created BackupsPage, ExportPage, TagAdminPage, SiteCapabilitiesPage; confirmed
+  ApiKeysPage already existed; added Phase 9 API helpers to api.ts; wired routes
+  in App.tsx and nav in AppShell.tsx. tsc --noEmit clean; 131/131 tests green.
 ---
 
 # Task: Phase 9b — Admin frontend (backup, export, reindex, tag admin, site caps, API keys)

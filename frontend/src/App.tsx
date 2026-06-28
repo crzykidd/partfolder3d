@@ -39,6 +39,10 @@ import { ReviewsPage } from '@/pages/admin/ReviewsPage'
 import { PrintStatsPage } from '@/pages/admin/PrintStatsPage'
 import { ShareAuditPage } from '@/pages/admin/ShareAuditPage'
 import { AiProvidersPage } from '@/pages/admin/AiProvidersPage'
+import { BackupsPage } from '@/pages/admin/BackupsPage'
+import { ExportPage } from '@/pages/admin/ExportPage'
+import { TagAdminPage } from '@/pages/admin/TagAdminPage'
+import { SiteCapabilitiesPage } from '@/pages/admin/SiteCapabilitiesPage'
 
 import { PublicSharePage } from '@/pages/PublicSharePage'
 
@@ -197,6 +201,38 @@ function App() {
                     element={
                       <AdminGuard>
                         <AiProvidersPage />
+                      </AdminGuard>
+                    }
+                  />
+                  <Route
+                    path="/admin/backups"
+                    element={
+                      <AdminGuard>
+                        <BackupsPage />
+                      </AdminGuard>
+                    }
+                  />
+                  <Route
+                    path="/admin/export"
+                    element={
+                      <AdminGuard>
+                        <ExportPage />
+                      </AdminGuard>
+                    }
+                  />
+                  <Route
+                    path="/admin/tags"
+                    element={
+                      <AdminGuard>
+                        <TagAdminPage />
+                      </AdminGuard>
+                    }
+                  />
+                  <Route
+                    path="/admin/site-capabilities"
+                    element={
+                      <AdminGuard>
+                        <SiteCapabilitiesPage />
                       </AdminGuard>
                     }
                   />
