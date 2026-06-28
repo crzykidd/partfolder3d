@@ -2,6 +2,55 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-28 — UI revamp B1: CatalogPage + ItemPage Aurora restyle
+
+### Styling approach: inline CSS vars, not Tailwind tokens
+
+The shell (SideNavShell/TopNavShell) uses inline `style={{ ... }}` with
+`var(--aurora-*)` CSS variables throughout. Pages in B1 follow the same
+pattern for color/background/border/shadow properties, keeping Tailwind only
+for non-visual layout helpers (`sr-only`, responsive grid). This avoids
+a parallel Tailwind theme layer and keeps aurora colors consistent with the
+shell at zero extra config cost.
+
+### local style constant objects
+
+Rather than repeating `var(--aurora-*)` strings inline at every element, each
+file defines a small set of `const AURORA_*: React.CSSProperties` objects at
+the top (`AURORA_CARD`, `AURORA_INPUT`, `AURORA_BTN_PRIMARY`, `AURORA_BTN_GHOST`
+in ItemPage; `CARD_STYLE`, `INPUT_STYLE` in CatalogPage). These are spread with
+`{ ...CONSTANT, overrideKey: value }` where needed. No new shared module was
+created — the constants are file-local.
+
+### `AuroraSection` local primitive (ItemPage only)
+
+A small `AuroraSection({ title, children })` component wraps each ItemPage section
+in a glass card with the aurora uppercase section header pattern. It is defined
+locally in ItemPage.tsx (not extracted to a shared file) since ItemPage is its
+only consumer.
+
+### Virtualized grid: row height unchanged
+
+`ROW_HEIGHT_PX = 280` and `VIRTUAL_CONTAINER_HEIGHT = 640` are unchanged.
+The aurora card image area is 160 px (down from the conceptual 86 px of
+Example3 which used a tighter grid) to maintain good visual proportion at
+the 3-col layout. The virtualizer `estimateSize` is unchanged.
+
+### lucide-react icons added to CatalogPage + ItemPage
+
+CatalogPage imports: `Box`, `LayoutGrid`, `List`, `Search`, `Star`, `X`.
+ItemPage imports: `Check`, `Copy`, `Download`, `X as XIcon`.
+These replace the custom `StarIcon` SVG in CatalogPage and add icon affordances
+to search, view toggle, copy/download/close controls. No new dependencies —
+`lucide-react` was already in `package.json`.
+
+### `getTagFontWeight` Tailwind class usage preserved
+
+`catalog-utils.ts`'s `getTagFontWeight()` returns Tailwind font-weight class
+strings (`'font-bold'` etc.). In the aurora tag cloud these are kept as
+`className={weight}` on the button alongside `style={{...}}` aurora colors.
+This avoids changing catalog-utils or adding a numeric weight mapping.
+
 ## 2026-06-28 — UI revamp A2: customizable widget framework
 
 ### Widget registry design: typed metadata + region-keyed, single file to add

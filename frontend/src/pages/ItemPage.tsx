@@ -9,11 +9,14 @@
  * - Downloads: individual files + queued ZIP with 2-second poll + include-history checkbox (PRD §11)
  * - Print History: log, view, edit, delete records; gcode + photo upload (PRD §9)
  * - Share controls: mint / list / revoke per-item share links (PRD §10)
+ *
+ * Styling: Aurora aesthetic — glass cards, teal accent (#0FA4AB), --aurora-* CSS vars.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Check, Copy, Download, X as XIcon } from 'lucide-react'
 
 import * as api from '@/lib/api'
 import { mapBundleStatus, rewritePath, shouldContinuePolling, type ZipPollStatus } from '@/lib/catalog-utils'
@@ -50,6 +53,77 @@ function formatExpiry(iso: string | null): string {
 }
 
 // ---------------------------------------------------------------------------
+// Aurora style constants
+// ---------------------------------------------------------------------------
+
+const AURORA_CARD: React.CSSProperties = {
+  background: 'var(--aurora-card)',
+  border: '1px solid var(--aurora-card-border)',
+  borderRadius: 14,
+  backdropFilter: 'blur(16px)',
+  WebkitBackdropFilter: 'blur(16px)',
+}
+
+const AURORA_SECTION_HEADER: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  color: 'var(--aurora-muted)',
+  letterSpacing: '0.1em',
+  textTransform: 'uppercase',
+  marginBottom: 14,
+}
+
+const AURORA_INPUT: React.CSSProperties = {
+  background: 'var(--aurora-input-bg)',
+  border: '1px solid var(--aurora-input-border)',
+  borderRadius: 8,
+  color: 'var(--aurora-text)',
+  padding: '6px 10px',
+  fontSize: 13,
+  outline: 'none',
+  width: '100%',
+  transition: 'border-color 0.15s',
+  boxSizing: 'border-box',
+}
+
+const AURORA_BTN_PRIMARY: React.CSSProperties = {
+  background: 'var(--aurora-accent)',
+  border: 'none',
+  borderRadius: 20,
+  color: 'var(--aurora-accent-fg)',
+  fontSize: 12,
+  fontWeight: 700,
+  padding: '6px 16px',
+  cursor: 'pointer',
+  boxShadow: '0 4px 14px var(--aurora-accent-glow)',
+  transition: 'opacity 0.15s',
+}
+
+const AURORA_BTN_GHOST: React.CSSProperties = {
+  background: 'var(--aurora-glass)',
+  border: '1px solid var(--aurora-glass-border)',
+  borderRadius: 20,
+  color: 'var(--aurora-text-dim)',
+  fontSize: 12,
+  padding: '5px 14px',
+  cursor: 'pointer',
+  transition: 'all 0.15s',
+}
+
+// ---------------------------------------------------------------------------
+// Small shared section wrapper
+// ---------------------------------------------------------------------------
+
+function AuroraSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section style={{ ...AURORA_CARD, padding: '18px 20px' }}>
+      <div style={AURORA_SECTION_HEADER as React.CSSProperties}>{title}</div>
+      {children}
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Image carousel
 // ---------------------------------------------------------------------------
 
@@ -66,8 +140,16 @@ function ImageCarousel({ images, itemKey, onSetDefault, isSettingDefault }: Imag
 
   if (!images.length) {
     return (
-      <div className="flex h-64 items-center justify-center rounded-lg border border-border bg-muted/40">
-        <p className="text-sm text-muted-foreground">No images</p>
+      <div
+        style={{
+          ...AURORA_CARD,
+          height: 200,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <p style={{ fontSize: 12, color: 'var(--aurora-muted)', fontStyle: 'italic' }}>No images</p>
       </div>
     )
   }
@@ -75,18 +157,42 @@ function ImageCarousel({ images, itemKey, onSetDefault, isSettingDefault }: Imag
   const active = images[activeIdx]
 
   return (
-    <div className="flex flex-col gap-3">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {/* Main image */}
-      <div className="relative rounded-lg overflow-hidden bg-muted/40 aspect-video flex items-center justify-center">
+      <div
+        style={{
+          ...AURORA_CARD,
+          position: 'relative',
+          overflow: 'hidden',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          aspectRatio: '16/9',
+          minHeight: 200,
+        }}
+      >
         <img
           src={`/api/items/${itemKey}/files/${active.path}`}
           alt={`Image ${activeIdx + 1}`}
-          className="max-h-80 max-w-full object-contain cursor-zoom-in"
+          style={{ maxHeight: 320, maxWidth: '100%', objectFit: 'contain', cursor: 'zoom-in' }}
           onClick={() => setLightbox(true)}
           loading="lazy"
         />
         {active.is_default && (
-          <span className="absolute top-2 left-2 rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
+          <span
+            style={{
+              position: 'absolute',
+              top: 8,
+              left: 8,
+              background: 'var(--aurora-accent)',
+              color: 'var(--aurora-accent-fg)',
+              borderRadius: 20,
+              fontSize: 10,
+              fontWeight: 700,
+              padding: '3px 8px',
+              boxShadow: '0 0 8px var(--aurora-accent-glow)',
+            }}
+          >
             Default
           </span>
         )}
@@ -94,7 +200,15 @@ function ImageCarousel({ images, itemKey, onSetDefault, isSettingDefault }: Imag
           <button
             onClick={() => onSetDefault(active.id)}
             disabled={isSettingDefault}
-            className="absolute top-2 right-2 rounded-full bg-background/80 px-2 py-0.5 text-xs font-medium hover:bg-background transition-colors disabled:opacity-50 border border-border"
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              ...AURORA_BTN_GHOST,
+              fontSize: 11,
+              padding: '3px 9px',
+              opacity: isSettingDefault ? 0.5 : 1,
+            }}
           >
             Set as default
           </button>
@@ -103,19 +217,28 @@ function ImageCarousel({ images, itemKey, onSetDefault, isSettingDefault }: Imag
 
       {/* Thumbnail strip */}
       {images.length > 1 && (
-        <div className="flex gap-2 overflow-x-auto py-1">
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
           {images.map((img, idx) => (
             <button
               key={img.id}
               onClick={() => setActiveIdx(idx)}
-              className={`shrink-0 h-16 w-16 rounded overflow-hidden border-2 transition-colors ${
-                idx === activeIdx ? 'border-primary' : 'border-border hover:border-muted-foreground'
-              }`}
+              style={{
+                flexShrink: 0,
+                height: 56,
+                width: 56,
+                borderRadius: 8,
+                overflow: 'hidden',
+                border: `2px solid ${idx === activeIdx ? 'var(--aurora-accent)' : 'var(--aurora-glass-border)'}`,
+                boxShadow: idx === activeIdx ? 'var(--aurora-glow)' : 'none',
+                cursor: 'pointer',
+                padding: 0,
+                transition: 'all 0.15s',
+              }}
             >
               <img
                 src={`/api/items/${itemKey}/files/${img.path}`}
                 alt={`Thumbnail ${idx + 1}`}
-                className="h-full w-full object-cover"
+                style={{ height: '100%', width: '100%', objectFit: 'cover', display: 'block' }}
                 loading="lazy"
               />
             </button>
@@ -126,20 +249,45 @@ function ImageCarousel({ images, itemKey, onSetDefault, isSettingDefault }: Imag
       {/* Lightbox */}
       {lightbox && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 50,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(5,13,28,0.88)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            padding: 16,
+          } as React.CSSProperties}
           onClick={() => setLightbox(false)}
         >
           <img
             src={`/api/items/${itemKey}/files/${active.path}`}
             alt={`Full size ${activeIdx + 1}`}
-            className="max-h-full max-w-full object-contain"
+            style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }}
             onClick={(e) => e.stopPropagation()}
           />
           <button
             onClick={() => setLightbox(false)}
-            className="absolute top-4 right-4 text-white/80 hover:text-white text-2xl"
+            style={{
+              position: 'absolute',
+              top: 16,
+              right: 16,
+              background: 'var(--aurora-glass)',
+              border: '1px solid var(--aurora-glass-border)',
+              borderRadius: '50%',
+              width: 32,
+              height: 32,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: 'var(--aurora-text)',
+            }}
           >
-            ✕
+            <XIcon size={16} />
           </button>
         </div>
       )}
@@ -178,20 +326,40 @@ function PathDisplay({ dirPath, itemKey }: PathDisplayProps) {
   }, [displayPath])
 
   return (
-    <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
-      <code className="flex-1 truncate text-xs font-mono text-muted-foreground">
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        background: 'var(--aurora-input-bg)',
+        border: '1px solid var(--aurora-input-border)',
+        borderRadius: 10,
+        padding: '8px 12px',
+      }}
+    >
+      <code style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, fontFamily: 'monospace', color: 'var(--aurora-text-dim)' }}>
         {displayPath}
       </code>
       <button
         onClick={handleCopy}
-        className="shrink-0 rounded px-2 py-1 text-xs hover:bg-accent transition-colors"
+        style={{
+          ...AURORA_BTN_GHOST,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 5,
+          padding: '4px 10px',
+          flexShrink: 0,
+        }}
         title="Copy path"
       >
-        {copied ? '✓ Copied' : 'Copy'}
+        {copied ? <Check size={12} style={{ color: '#22C55E' }} /> : <Copy size={12} />}
+        {copied ? 'Copied' : 'Copy'}
       </button>
       <Link
         to={`/settings?focus=path-prefix&from=/items/${itemKey}`}
-        className="shrink-0 text-xs text-muted-foreground hover:text-primary"
+        style={{ flexShrink: 0, fontSize: 11, color: 'var(--aurora-muted)', textDecoration: 'none', transition: 'color 0.15s' }}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--aurora-accent)' }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--aurora-muted)' }}
         title="Configure path prefix"
       >
         Edit prefix
@@ -239,7 +407,7 @@ function DownloadsSection({ itemKey, files }: DownloadsSectionProps) {
     },
   })
 
-  // Reset zip state when includeHistory changes (so the next click starts fresh)
+  // Reset zip state when includeHistory changes
   const prevIncludeHistory = useRef(includeHistory)
   useEffect(() => {
     if (prevIncludeHistory.current !== includeHistory) {
@@ -292,52 +460,93 @@ function DownloadsSection({ itemKey, files }: DownloadsSectionProps) {
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {/* Individual files */}
       {files.length === 0 ? (
-        <p className="text-sm text-muted-foreground italic">No files catalogued yet.</p>
+        <p style={{ fontSize: 12, color: 'var(--aurora-muted)', fontStyle: 'italic', margin: 0 }}>
+          No files catalogued yet.
+        </p>
       ) : (
-        <ul className="divide-y divide-border rounded-lg border border-border overflow-hidden">
-          {files.map((file) => (
-            <li key={file.id} className="flex items-center justify-between px-4 py-2.5 hover:bg-muted/30">
-              <div className="flex flex-col gap-0.5">
-                <span className="text-sm font-medium font-mono">{file.path}</span>
-                <span className="text-xs text-muted-foreground">
+        <div
+          style={{
+            background: 'var(--aurora-glass)',
+            border: '1px solid var(--aurora-glass-border)',
+            borderRadius: 10,
+            overflow: 'hidden',
+          }}
+        >
+          {files.map((file, idx) => (
+            <div
+              key={file.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 14px',
+                borderTop: idx > 0 ? '1px solid var(--aurora-divider)' : 'none',
+                transition: 'background 0.1s',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--aurora-glass-hover)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ fontSize: 12, fontWeight: 500, fontFamily: 'monospace', color: 'var(--aurora-text)' }}>
+                  {file.path}
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>
                   {file.role} · {formatBytes(file.size)}
                 </span>
               </div>
               <a
                 href={api.fileDownloadUrl(itemKey, file.path)}
                 download
-                className="shrink-0 rounded border border-border px-3 py-1 text-xs font-medium hover:bg-accent transition-colors"
+                style={{
+                  ...AURORA_BTN_GHOST,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  textDecoration: 'none',
+                  flexShrink: 0,
+                }}
               >
+                <Download size={12} />
                 Download
               </a>
-            </li>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
 
       {/* ZIP download */}
-      <div className="flex flex-col gap-2">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {/* Include history checkbox */}
-        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 12,
+            cursor: 'pointer',
+            userSelect: 'none',
+            color: 'var(--aurora-text-dim)',
+          }}
+        >
           <input
             type="checkbox"
             checked={includeHistory}
             onChange={(e) => setIncludeHistory(e.target.checked)}
-            className="h-4 w-4 rounded border-border accent-primary"
+            style={{ accentColor: 'var(--aurora-accent)', width: 14, height: 14 }}
           />
           <span>Include print history</span>
           <span
-            className="text-xs text-muted-foreground"
+            style={{ fontSize: 11, color: 'var(--aurora-muted)', cursor: 'help' }}
             title="Adds a print-history.json to the ZIP. Public records always included; private records included only for your own download."
           >
             (?)
           </span>
         </label>
 
-        <div className="flex items-center gap-3">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button
             onClick={
               zipStatus === 'ready'
@@ -347,15 +556,18 @@ function DownloadsSection({ itemKey, files }: DownloadsSectionProps) {
                   : undefined
             }
             disabled={zipStatus === 'queued' || zipStatus === 'building' || zipMutation.isPending}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            style={{
+              ...AURORA_BTN_PRIMARY,
+              opacity: zipStatus === 'queued' || zipStatus === 'building' || zipMutation.isPending ? 0.5 : 1,
+            }}
           >
             {zipLabel[zipStatus]}
           </button>
           {errorMsg && (
-            <span className="text-xs text-destructive">{errorMsg}</span>
+            <span style={{ fontSize: 11, color: 'var(--aurora-danger)' }}>{errorMsg}</span>
           )}
           {(zipStatus === 'queued' || zipStatus === 'building') && (
-            <span className="text-xs text-muted-foreground animate-pulse">
+            <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>
               Polling every 2 s…
             </span>
           )}
@@ -425,53 +637,108 @@ function PrintRecordForm({ itemKey, existing, onClose, onSaved }: PrintRecordFor
     }
   }
 
+  const labelStyle: React.CSSProperties = {
+    fontSize: 10,
+    fontWeight: 700,
+    color: 'var(--aurora-muted)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    display: 'block',
+    marginBottom: 5,
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 50,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'rgba(5,13,28,0.82)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+        padding: 16,
+      } as React.CSSProperties}
+      onClick={onClose}
+    >
       <div
-        className="bg-background rounded-lg border border-border shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+        style={{
+          background: 'var(--aurora-palette-bg)',
+          border: '1px solid var(--aurora-palette-border)',
+          borderRadius: 16,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.5)',
+          backdropFilter: 'blur(40px)',
+          WebkitBackdropFilter: 'blur(40px)',
+          width: '100%',
+          maxWidth: 520,
+          maxHeight: '90vh',
+          overflowY: 'auto',
+        } as React.CSSProperties}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <h2 className="text-base font-semibold">
+        {/* Header */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '14px 18px',
+            borderBottom: '1px solid var(--aurora-divider)',
+          }}
+        >
+          <h2 style={{ fontSize: 14, fontWeight: 700, color: 'var(--aurora-text)', margin: 0 }}>
             {existing ? 'Edit Print Record' : 'Log a Print'}
           </h2>
           <button
             onClick={onClose}
-            className="text-muted-foreground hover:text-foreground transition-colors"
+            style={{
+              background: 'var(--aurora-glass)',
+              border: '1px solid var(--aurora-glass-border)',
+              borderRadius: '50%',
+              width: 28,
+              height: 28,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: 'var(--aurora-muted)',
+            }}
           >
-            ✕
+            <XIcon size={14} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 flex flex-col gap-4">
+        <form onSubmit={handleSubmit} style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
           {/* Visibility + Date */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Visibility</label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label style={labelStyle}>Visibility</label>
               <select
                 value={form.visibility}
                 onChange={(e) => setForm((f) => ({ ...f, visibility: e.target.value }))}
-                className="input-base py-1.5 text-sm"
+                style={AURORA_INPUT}
               >
                 <option value="private">Private</option>
                 <option value="public">Public</option>
               </select>
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Date</label>
+            <div>
+              <label style={labelStyle}>Date</label>
               <input
                 type="date"
                 value={form.date ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, date: e.target.value || null }))}
-                className="input-base py-1.5 text-sm"
+                style={AURORA_INPUT}
               />
             </div>
           </div>
 
-          {/* Outcome */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Outcome</label>
+          {/* Outcome + Rating */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label style={labelStyle}>Outcome</label>
               <select
                 value={form.success == null ? '' : form.success ? 'true' : 'false'}
                 onChange={(e) => {
@@ -481,22 +748,22 @@ function PrintRecordForm({ itemKey, existing, onClose, onSaved }: PrintRecordFor
                     success: v === '' ? null : v === 'true',
                   }))
                 }}
-                className="input-base py-1.5 text-sm"
+                style={AURORA_INPUT}
               >
                 <option value="">Not recorded</option>
                 <option value="true">Success</option>
                 <option value="false">Failed</option>
               </select>
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Rating (1–5)</label>
+            <div>
+              <label style={labelStyle}>Rating (1–5)</label>
               <select
                 value={form.rating ?? ''}
                 onChange={(e) => {
                   const v = e.target.value
                   setForm((f) => ({ ...f, rating: v === '' ? null : Number(v) }))
                 }}
-                className="input-base py-1.5 text-sm"
+                style={AURORA_INPUT}
               >
                 <option value="">None</option>
                 {[1, 2, 3, 4, 5].map((n) => (
@@ -507,43 +774,43 @@ function PrintRecordForm({ itemKey, existing, onClose, onSaved }: PrintRecordFor
           </div>
 
           {/* Printer + Material */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Printer</label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label style={labelStyle}>Printer</label>
               <input
                 type="text"
                 value={form.printer ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, printer: e.target.value }))}
                 placeholder="e.g. Bambu X1C"
-                className="input-base py-1.5 text-sm"
+                style={AURORA_INPUT}
               />
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Material</label>
+            <div>
+              <label style={labelStyle}>Material</label>
               <input
                 type="text"
                 value={form.material ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, material: e.target.value }))}
                 placeholder="e.g. PLA"
-                className="input-base py-1.5 text-sm"
+                style={AURORA_INPUT}
               />
             </div>
           </div>
 
-          {/* Filament color + supports */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Filament color</label>
+          {/* Filament color + Supports */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label style={labelStyle}>Filament color</label>
               <input
                 type="text"
                 value={form.filament_color ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, filament_color: e.target.value }))}
                 placeholder="e.g. Black"
-                className="input-base py-1.5 text-sm"
+                style={AURORA_INPUT}
               />
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Supports</label>
+            <div>
+              <label style={labelStyle}>Supports</label>
               <select
                 value={form.supports == null ? '' : form.supports ? 'true' : 'false'}
                 onChange={(e) => {
@@ -553,7 +820,7 @@ function PrintRecordForm({ itemKey, existing, onClose, onSaved }: PrintRecordFor
                     supports: v === '' ? null : v === 'true',
                   }))
                 }}
-                className="input-base py-1.5 text-sm"
+                style={AURORA_INPUT}
               >
                 <option value="">Not recorded</option>
                 <option value="true">Yes</option>
@@ -562,10 +829,10 @@ function PrintRecordForm({ itemKey, existing, onClose, onSaved }: PrintRecordFor
             </div>
           </div>
 
-          {/* Nozzle + layer height */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Nozzle (mm)</label>
+          {/* Nozzle + Layer height */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label style={labelStyle}>Nozzle (mm)</label>
               <input
                 type="number"
                 step="0.1"
@@ -576,11 +843,11 @@ function PrintRecordForm({ itemKey, existing, onClose, onSaved }: PrintRecordFor
                   setForm((f) => ({ ...f, nozzle_diameter: v === '' ? null : Number(v) }))
                 }}
                 placeholder="0.4"
-                className="input-base py-1.5 text-sm"
+                style={AURORA_INPUT}
               />
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Layer height (mm)</label>
+            <div>
+              <label style={labelStyle}>Layer height (mm)</label>
               <input
                 type="number"
                 step="0.01"
@@ -591,39 +858,39 @@ function PrintRecordForm({ itemKey, existing, onClose, onSaved }: PrintRecordFor
                   setForm((f) => ({ ...f, layer_height: v === '' ? null : Number(v) }))
                 }}
                 placeholder="0.20"
-                className="input-base py-1.5 text-sm"
+                style={AURORA_INPUT}
               />
             </div>
           </div>
 
           {/* Note */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground">Note</label>
+          <div>
+            <label style={labelStyle}>Note</label>
             <textarea
               rows={3}
               value={form.note ?? ''}
               onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
               placeholder="Any notes about this print…"
-              className="input-base py-1.5 text-sm resize-none"
+              style={{ ...AURORA_INPUT, resize: 'none', lineHeight: 1.5 }}
             />
           </div>
 
           {submitError && (
-            <p className="text-sm text-destructive">{submitError}</p>
+            <p style={{ fontSize: 12, color: 'var(--aurora-danger)', margin: 0 }}>{submitError}</p>
           )}
 
-          <div className="flex justify-end gap-2 pt-1">
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 4 }}>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent transition-colors"
+              style={AURORA_BTN_GHOST}
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isPending}
-              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+              style={{ ...AURORA_BTN_PRIMARY, opacity: isPending ? 0.5 : 1 }}
             >
               {isPending ? 'Saving…' : existing ? 'Save changes' : 'Log print'}
             </button>
@@ -703,17 +970,35 @@ function PrintRecordCard({ record, itemKey, onUpdated, onDeleted }: PrintRecordC
         />
       )}
 
-      <div className="rounded-lg border border-border bg-card p-4 flex flex-col gap-3">
+      <div
+        style={{
+          background: 'var(--aurora-glass)',
+          border: '1px solid var(--aurora-card-border)',
+          borderRadius: 10,
+          padding: '12px 14px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+        }}
+      >
         {/* Header row */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
             {/* Visibility badge */}
             <span
-              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                record.visibility === 'public'
-                  ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                  : 'bg-muted text-muted-foreground'
-              }`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '2px 8px',
+                borderRadius: 20,
+                fontSize: 10,
+                fontWeight: 700,
+                background: record.visibility === 'public' ? 'rgba(34,197,94,0.15)' : 'var(--aurora-glass)',
+                color: record.visibility === 'public' ? '#22C55E' : 'var(--aurora-muted)',
+                border: `1px solid ${record.visibility === 'public' ? 'rgba(34,197,94,0.3)' : 'var(--aurora-glass-border)'}`,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+              }}
             >
               {record.visibility}
             </span>
@@ -721,11 +1006,17 @@ function PrintRecordCard({ record, itemKey, onUpdated, onDeleted }: PrintRecordC
             {/* Outcome chip */}
             {record.success != null && (
               <span
-                className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                  record.success
-                    ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                    : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                }`}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '2px 8px',
+                  borderRadius: 20,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  background: record.success ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                  color: record.success ? '#22C55E' : '#EF4444',
+                  border: `1px solid ${record.success ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                }}
               >
                 {record.success ? '✓ Success' : '✗ Failed'}
               </span>
@@ -733,44 +1024,71 @@ function PrintRecordCard({ record, itemKey, onUpdated, onDeleted }: PrintRecordC
 
             {/* Rating */}
             {record.rating != null && (
-              <span className="text-sm text-amber-500" title={`Rating: ${record.rating}/5`}>
+              <span style={{ fontSize: 13, color: '#F59E0B' }} title={`Rating: ${record.rating}/5`}>
                 {renderStars(record.rating)}
               </span>
             )}
 
             {/* Date */}
             {record.date && (
-              <span className="text-xs text-muted-foreground">{record.date}</span>
+              <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>{record.date}</span>
             )}
           </div>
 
           {/* Actions */}
-          <div className="flex gap-1 shrink-0">
+          <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
             <button
               onClick={() => setEditing(true)}
-              className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors"
+              style={{
+                ...AURORA_BTN_GHOST,
+                fontSize: 11,
+                padding: '3px 9px',
+              }}
             >
               Edit
             </button>
             {!confirmDelete ? (
               <button
                 onClick={() => setConfirmDelete(true)}
-                className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-red-100 hover:text-red-700 transition-colors"
+                style={{
+                  ...AURORA_BTN_GHOST,
+                  fontSize: 11,
+                  padding: '3px 9px',
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.12)'
+                  ;(e.currentTarget as HTMLButtonElement).style.color = '#EF4444'
+                  ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(239,68,68,0.3)'
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)'
+                  ;(e.currentTarget as HTMLButtonElement).style.color = 'var(--aurora-text-dim)'
+                  ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--aurora-glass-border)'
+                }}
               >
                 Delete
               </button>
             ) : (
-              <div className="flex gap-1">
+              <div style={{ display: 'flex', gap: 4 }}>
                 <button
                   onClick={() => deleteMutation.mutate()}
                   disabled={deleteMutation.isPending}
-                  className="rounded px-2 py-1 text-xs bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                  style={{
+                    background: '#EF4444',
+                    border: 'none',
+                    borderRadius: 20,
+                    color: '#FFF',
+                    fontSize: 11,
+                    padding: '3px 9px',
+                    cursor: 'pointer',
+                    opacity: deleteMutation.isPending ? 0.5 : 1,
+                  }}
                 >
                   {deleteMutation.isPending ? '…' : 'Confirm'}
                 </button>
                 <button
                   onClick={() => setConfirmDelete(false)}
-                  className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors"
+                  style={{ ...AURORA_BTN_GHOST, fontSize: 11, padding: '3px 9px' }}
                 >
                   Cancel
                 </button>
@@ -782,7 +1100,7 @@ function PrintRecordCard({ record, itemKey, onUpdated, onDeleted }: PrintRecordC
         {/* Settings row */}
         {(record.printer || record.material || record.filament_color ||
           record.nozzle_diameter != null || record.layer_height != null) && (
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: 11, color: 'var(--aurora-text-dim)' }}>
             {record.printer && <span>Printer: {record.printer}</span>}
             {record.material && <span>Material: {record.material}</span>}
             {record.filament_color && <span>Color: {record.filament_color}</span>}
@@ -795,7 +1113,7 @@ function PrintRecordCard({ record, itemKey, onUpdated, onDeleted }: PrintRecordC
         {/* Gcode stats (parsed) */}
         {(record.filament_length_mm != null || record.filament_weight_g != null ||
           record.estimated_print_time_s != null) && (
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: 11, color: 'var(--aurora-text-dim)' }}>
             {record.filament_length_mm != null && (
               <span>Filament: {formatFilamentLength(record.filament_length_mm)}</span>
             )}
@@ -810,18 +1128,17 @@ function PrintRecordCard({ record, itemKey, onUpdated, onDeleted }: PrintRecordC
 
         {/* Note */}
         {record.note && (
-          <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+          <p style={{ fontSize: 12, color: 'var(--aurora-text-dim)', lineHeight: 1.6, whiteSpace: 'pre-wrap', margin: 0 }}>
             {record.note}
           </p>
         )}
 
         {/* File uploads */}
-        <div className="flex flex-wrap gap-2 pt-1">
-          {/* Gcode upload */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, paddingTop: 2 }}>
           <button
             onClick={() => gcodeInput?.click()}
             disabled={uploadingGcode}
-            className="rounded border border-border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50 transition-colors"
+            style={{ ...AURORA_BTN_GHOST, fontSize: 11, padding: '3px 10px', opacity: uploadingGcode ? 0.5 : 1 }}
           >
             {uploadingGcode ? 'Uploading…' : record.gcode_file_path ? 'Replace gcode' : 'Upload gcode'}
           </button>
@@ -829,7 +1146,7 @@ function PrintRecordCard({ record, itemKey, onUpdated, onDeleted }: PrintRecordC
             ref={setGcodeInput}
             type="file"
             accept=".gcode,.bgcode,.gco"
-            className="hidden"
+            style={{ display: 'none' }}
             onChange={(e) => {
               const file = e.target.files?.[0]
               if (file) void handleGcodeUpload(file)
@@ -837,11 +1154,10 @@ function PrintRecordCard({ record, itemKey, onUpdated, onDeleted }: PrintRecordC
             }}
           />
 
-          {/* Photo upload */}
           <button
             onClick={() => photoInput?.click()}
             disabled={uploadingPhoto}
-            className="rounded border border-border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50 transition-colors"
+            style={{ ...AURORA_BTN_GHOST, fontSize: 11, padding: '3px 10px', opacity: uploadingPhoto ? 0.5 : 1 }}
           >
             {uploadingPhoto ? 'Uploading…' : record.print_photo_path ? 'Replace photo' : 'Upload photo'}
           </button>
@@ -849,7 +1165,7 @@ function PrintRecordCard({ record, itemKey, onUpdated, onDeleted }: PrintRecordC
             ref={setPhotoInput}
             type="file"
             accept="image/*"
-            className="hidden"
+            style={{ display: 'none' }}
             onChange={(e) => {
               const file = e.target.files?.[0]
               if (file) void handlePhotoUpload(file)
@@ -859,7 +1175,7 @@ function PrintRecordCard({ record, itemKey, onUpdated, onDeleted }: PrintRecordC
         </div>
 
         {uploadError && (
-          <p className="text-xs text-destructive">{uploadError}</p>
+          <p style={{ fontSize: 11, color: 'var(--aurora-danger)', margin: 0 }}>{uploadError}</p>
         )}
       </div>
     </>
@@ -907,7 +1223,7 @@ function PrintHistorySection({ itemKey }: PrintHistorySectionProps) {
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {addingRecord && (
         <PrintRecordForm
           itemKey={itemKey}
@@ -916,33 +1232,33 @@ function PrintHistorySection({ itemKey }: PrintHistorySectionProps) {
         />
       )}
 
-      <div className="flex items-center justify-between">
-        <span className="text-sm text-muted-foreground">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>
           {records.length > 0 ? `${records.length} record(s)` : ''}
         </span>
         <button
           onClick={() => setAddingRecord(true)}
-          className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+          style={AURORA_BTN_PRIMARY}
         >
           + Log a print
         </button>
       </div>
 
       {isLoading && (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <p style={{ fontSize: 12, color: 'var(--aurora-muted)', margin: 0 }}>Loading…</p>
       )}
 
       {isError && (
-        <p className="text-sm text-destructive">Failed to load print records.</p>
+        <p style={{ fontSize: 12, color: 'var(--aurora-danger)', margin: 0 }}>Failed to load print records.</p>
       )}
 
       {!isLoading && !isError && records.length === 0 && (
-        <p className="text-sm text-muted-foreground italic">
+        <p style={{ fontSize: 12, color: 'var(--aurora-muted)', fontStyle: 'italic', margin: 0 }}>
           No print records yet. Log your first print above.
         </p>
       )}
 
-      <div className="flex flex-col gap-3">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {records.map((rec) => (
           <PrintRecordCard
             key={rec.id}
@@ -1026,86 +1342,148 @@ function ShareSection({ itemKey }: ShareSectionProps) {
     }
   }
 
+  const labelStyle: React.CSSProperties = {
+    fontSize: 10,
+    fontWeight: 700,
+    color: 'var(--aurora-muted)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    display: 'block',
+    marginBottom: 5,
+  }
+
   return (
-    <div className="flex flex-col gap-3">
-      {/* Link list */}
-      {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
-      {isError && <p className="text-sm text-destructive">Failed to load share links.</p>}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {isLoading && <p style={{ fontSize: 12, color: 'var(--aurora-muted)', margin: 0 }}>Loading…</p>}
+      {isError && <p style={{ fontSize: 12, color: 'var(--aurora-danger)', margin: 0 }}>Failed to load share links.</p>}
 
       {!isLoading && links.length === 0 && (
-        <p className="text-sm text-muted-foreground italic">No share links yet.</p>
+        <p style={{ fontSize: 12, color: 'var(--aurora-muted)', fontStyle: 'italic', margin: 0 }}>No share links yet.</p>
       )}
 
       {links.length > 0 && (
-        <ul className="divide-y divide-border rounded-lg border border-border overflow-hidden">
-          {links.map((link) => (
-            <li key={link.id} className="flex items-center justify-between px-4 py-3 hover:bg-muted/30">
-              <div className="flex flex-col gap-0.5 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono text-muted-foreground">
+        <div
+          style={{
+            background: 'var(--aurora-glass)',
+            border: '1px solid var(--aurora-glass-border)',
+            borderRadius: 10,
+            overflow: 'hidden',
+          }}
+        >
+          {links.map((link, idx) => (
+            <div
+              key={link.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 14px',
+                borderTop: idx > 0 ? '1px solid var(--aurora-divider)' : 'none',
+                transition: 'background 0.1s',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--aurora-glass-hover)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--aurora-muted)' }}>
                     {link.token.slice(0, 8)}…
                   </span>
                   {link.label && (
-                    <span className="text-xs font-medium truncate">{link.label}</span>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--aurora-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {link.label}
+                    </span>
                   )}
                   {link.revoked && (
-                    <span className="inline-flex items-center rounded-full bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 px-2 py-0.5 text-xs font-medium">
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      padding: '2px 7px',
+                      borderRadius: 20,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      background: 'rgba(239,68,68,0.15)',
+                      color: '#EF4444',
+                      border: '1px solid rgba(239,68,68,0.3)',
+                    }}>
                       Revoked
                     </span>
                   )}
                   {copiedToken === link.token && (
-                    <span className="text-xs text-green-600">✓ Copied!</span>
+                    <span style={{ fontSize: 11, color: '#22C55E', display: 'flex', alignItems: 'center', gap: 3 }}>
+                      <Check size={11} /> Copied!
+                    </span>
                   )}
                 </div>
-                <span className="text-xs text-muted-foreground">
+                <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>
                   {formatExpiry(link.expires_at)}
                 </span>
               </div>
-              <div className="flex items-center gap-1 shrink-0 ml-2">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, marginLeft: 8 }}>
                 {!link.revoked && (
                   <button
                     onClick={() => void handleCopy(link.token)}
-                    className="rounded px-2 py-1 text-xs border border-border hover:bg-accent transition-colors"
+                    style={{ ...AURORA_BTN_GHOST, fontSize: 11, padding: '3px 9px', display: 'flex', alignItems: 'center', gap: 4 }}
                   >
+                    <Copy size={11} />
                     Copy link
                   </button>
                 )}
                 {!link.revoked && confirmRevoke !== link.id && (
                   <button
                     onClick={() => setConfirmRevoke(link.id)}
-                    className="rounded px-2 py-1 text-xs text-muted-foreground hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950 transition-colors"
+                    style={{ ...AURORA_BTN_GHOST, fontSize: 11, padding: '3px 9px' }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.12)'
+                      ;(e.currentTarget as HTMLButtonElement).style.color = '#EF4444'
+                      ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(239,68,68,0.3)'
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)'
+                      ;(e.currentTarget as HTMLButtonElement).style.color = 'var(--aurora-text-dim)'
+                      ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--aurora-glass-border)'
+                    }}
                   >
                     Revoke
                   </button>
                 )}
                 {confirmRevoke === link.id && (
-                  <div className="flex gap-1">
+                  <div style={{ display: 'flex', gap: 4 }}>
                     <button
                       onClick={() => revokeMutation.mutate(link.id)}
                       disabled={revokeMutation.isPending}
-                      className="rounded px-2 py-1 text-xs bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                      style={{
+                        background: '#EF4444',
+                        border: 'none',
+                        borderRadius: 20,
+                        color: '#FFF',
+                        fontSize: 11,
+                        padding: '3px 9px',
+                        cursor: 'pointer',
+                        opacity: revokeMutation.isPending ? 0.5 : 1,
+                      }}
                     >
                       {revokeMutation.isPending ? '…' : 'Confirm'}
                     </button>
                     <button
                       onClick={() => setConfirmRevoke(null)}
-                      className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors"
+                      style={{ ...AURORA_BTN_GHOST, fontSize: 11, padding: '3px 9px' }}
                     >
                       Cancel
                     </button>
                   </div>
                 )}
               </div>
-            </li>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
 
       {/* Mint button */}
       {!mintOpen && (
         <button
           onClick={() => setMintOpen(true)}
-          className="self-start rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors"
+          style={{ ...AURORA_BTN_GHOST, alignSelf: 'flex-start' }}
         >
           + Create share link
         </button>
@@ -1113,42 +1491,52 @@ function ShareSection({ itemKey }: ShareSectionProps) {
 
       {/* Mint form */}
       {mintOpen && (
-        <div className="rounded-lg border border-border bg-muted/20 p-4 flex flex-col gap-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Label (optional)</label>
+        <div
+          style={{
+            background: 'var(--aurora-glass)',
+            border: '1px solid var(--aurora-glass-border)',
+            borderRadius: 10,
+            padding: '14px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}
+        >
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label style={labelStyle}>Label (optional)</label>
               <input
                 type="text"
                 value={mintLabel}
                 onChange={(e) => setMintLabel(e.target.value)}
                 placeholder="e.g. Public gallery"
-                className="input-base py-1.5 text-sm"
+                style={AURORA_INPUT}
               />
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Expires in (days)</label>
+            <div>
+              <label style={labelStyle}>Expires in (days)</label>
               <input
                 type="number"
                 min="0"
                 value={mintExpiry}
                 onChange={(e) => setMintExpiry(e.target.value)}
                 placeholder="30 (blank = instance default)"
-                className="input-base py-1.5 text-sm"
+                style={AURORA_INPUT}
               />
             </div>
           </div>
-          {mintError && <p className="text-xs text-destructive">{mintError}</p>}
-          <div className="flex gap-2">
+          {mintError && <p style={{ fontSize: 11, color: 'var(--aurora-danger)', margin: 0 }}>{mintError}</p>}
+          <div style={{ display: 'flex', gap: 8 }}>
             <button
               onClick={() => mintMutation.mutate()}
               disabled={mintMutation.isPending}
-              className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+              style={{ ...AURORA_BTN_PRIMARY, opacity: mintMutation.isPending ? 0.5 : 1 }}
             >
               {mintMutation.isPending ? 'Creating…' : 'Create & copy link'}
             </button>
             <button
               onClick={() => { setMintOpen(false); setMintError(null) }}
-              className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent transition-colors"
+              style={AURORA_BTN_GHOST}
             >
               Cancel
             </button>
@@ -1185,17 +1573,19 @@ export function ItemPage() {
 
   if (isLoading) {
     return (
-      <div className="py-24 text-center text-sm text-muted-foreground">Loading…</div>
+      <div style={{ padding: '96px 0', textAlign: 'center', fontSize: 13, color: 'var(--aurora-muted)' }}>
+        Loading…
+      </div>
     )
   }
 
   if (isError || !item) {
     return (
-      <div className="py-24 text-center">
-        <p className="text-sm text-destructive mb-3">Item not found.</p>
+      <div style={{ padding: '96px 0', textAlign: 'center' }}>
+        <p style={{ fontSize: 13, color: 'var(--aurora-danger)', marginBottom: 12 }}>Item not found.</p>
         <button
           onClick={() => navigate(-1)}
-          className="text-sm text-primary hover:underline"
+          style={{ ...AURORA_BTN_GHOST, cursor: 'pointer' }}
         >
           Go back
         </button>
@@ -1211,15 +1601,42 @@ export function ItemPage() {
   })
 
   return (
-    <div className="flex flex-col gap-8 max-w-4xl mx-auto">
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 16,
+        maxWidth: 900,
+        margin: '0 auto',
+        color: 'var(--aurora-text)',
+      }}
+    >
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Link to="/catalog" className="hover:text-primary">Catalog</Link>
-        <span>›</span>
-        <span className="text-foreground font-medium truncate">{item.title}</span>
+      <nav style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+        <Link
+          to="/catalog"
+          style={{ color: 'var(--aurora-muted)', textDecoration: 'none', transition: 'color 0.15s' }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--aurora-accent)' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--aurora-muted)' }}
+        >
+          Catalog
+        </Link>
+        <span style={{ color: 'var(--aurora-muted)' }}>›</span>
+        <span
+          style={{
+            color: 'var(--aurora-text-dim)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            fontWeight: 500,
+          }}
+        >
+          {item.title}
+        </span>
       </nav>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+      {/* Hero: images + metadata side by side */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         {/* Left: images */}
         <div>
           <ImageCarousel
@@ -1230,21 +1647,34 @@ export function ItemPage() {
           />
         </div>
 
-        {/* Right: metadata */}
-        <div className="flex flex-col gap-4">
+        {/* Right: metadata card */}
+        <div
+          style={{
+            ...AURORA_CARD,
+            padding: '18px 20px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 14,
+          }}
+        >
+          {/* Title + creator */}
           <div>
-            <h1 className="text-2xl font-bold leading-tight">{item.title}</h1>
+            <h1 style={{ fontSize: 20, fontWeight: 800, lineHeight: 1.2, color: 'var(--aurora-text)', letterSpacing: '-0.02em', margin: '0 0 6px' }}>
+              {item.title}
+            </h1>
             {item.creator && (
-              <p className="mt-1 text-sm text-muted-foreground">
+              <p style={{ fontSize: 12, color: 'var(--aurora-muted)', margin: 0 }}>
                 By{' '}
                 <Link
                   to={`/catalog?creator_id=${item.creator.id}`}
-                  className="text-primary hover:underline"
+                  style={{ color: 'var(--aurora-accent)', textDecoration: 'none' }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'underline' }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'none' }}
                 >
                   {item.creator.name}
                 </Link>
                 {item.creator.source_site && (
-                  <span className="ml-1 text-xs text-muted-foreground">
+                  <span style={{ marginLeft: 4, fontSize: 11, color: 'var(--aurora-muted)' }}>
                     ({item.creator.source_site})
                   </span>
                 )}
@@ -1254,14 +1684,36 @@ export function ItemPage() {
 
           {/* Tags */}
           {item.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {item.tags.map((tag) => (
                 <Link
                   key={tag.id}
                   to={`/catalog?tags=${encodeURIComponent(tag.name)}`}
-                  className="inline-flex items-center rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    padding: '3px 9px',
+                    borderRadius: 20,
+                    fontSize: 11,
+                    fontWeight: 500,
+                    background: 'var(--aurora-glass)',
+                    border: '1px solid var(--aurora-glass-border)',
+                    color: 'var(--aurora-text-dim)',
+                    textDecoration: 'none',
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLElement).style.background = 'var(--aurora-pill)'
+                    ;(e.currentTarget as HTMLElement).style.borderColor = 'var(--aurora-pill-border)'
+                    ;(e.currentTarget as HTMLElement).style.color = 'var(--aurora-accent)'
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLElement).style.background = 'var(--aurora-glass)'
+                    ;(e.currentTarget as HTMLElement).style.borderColor = 'var(--aurora-glass-border)'
+                    ;(e.currentTarget as HTMLElement).style.color = 'var(--aurora-text-dim)'
+                  }}
                 >
-                  {tag.name}
+                  #{tag.name}
                 </Link>
               ))}
             </div>
@@ -1269,40 +1721,40 @@ export function ItemPage() {
 
           {/* Source + license */}
           {(item.source_url || item.license) && (
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
+            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 10, rowGap: 6, alignItems: 'baseline', fontSize: 12 }}>
               {item.source_url && (
                 <>
-                  <dt className="text-muted-foreground font-medium">Source</dt>
-                  <dd>
-                    <a
-                      href={item.source_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary hover:underline truncate block"
-                    >
-                      {item.source_url}
-                    </a>
-                  </dd>
+                  <span style={{ color: 'var(--aurora-muted)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>Source</span>
+                  <a
+                    href={item.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: 'var(--aurora-accent)', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'underline' }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'none' }}
+                  >
+                    {item.source_url}
+                  </a>
                 </>
               )}
               {item.license && (
                 <>
-                  <dt className="text-muted-foreground font-medium">License</dt>
-                  <dd>{item.license}</dd>
+                  <span style={{ color: 'var(--aurora-muted)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>License</span>
+                  <span style={{ color: 'var(--aurora-text-dim)' }}>{item.license}</span>
                 </>
               )}
-            </dl>
+            </div>
           )}
 
           {/* Description */}
           {item.description && (
-            <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+            <p style={{ fontSize: 12, color: 'var(--aurora-text-dim)', lineHeight: 1.6, whiteSpace: 'pre-wrap', margin: 0 }}>
               {item.description}
             </p>
           )}
 
           {/* Timestamps */}
-          <div className="text-xs text-muted-foreground">
+          <div style={{ fontSize: 11, color: 'var(--aurora-muted)', marginTop: 'auto' }}>
             Added {formatDate(item.created_at)}
             {item.updated_at !== item.created_at && (
               <> · Updated {formatDate(item.updated_at)}</>
@@ -1311,37 +1763,37 @@ export function ItemPage() {
         </div>
       </div>
 
-      {/* Dir path */}
-      <section>
-        <h2 className="text-base font-semibold mb-2">Location</h2>
+      {/* Location */}
+      <AuroraSection title="Location">
         <PathDisplay dirPath={item.dir_path} itemKey={item.key} />
-      </section>
+      </AuroraSection>
 
       {/* Downloads */}
-      <section>
-        <h2 className="text-base font-semibold mb-3">Files &amp; Downloads</h2>
+      <AuroraSection title="Files &amp; Downloads">
         <DownloadsSection itemKey={item.key} files={item.files} />
-      </section>
+      </AuroraSection>
 
-      {/* Print History (Phase 7) */}
-      <section>
-        <h2 className="text-base font-semibold mb-3">Print History</h2>
+      {/* Print History */}
+      <AuroraSection title="Print History">
         {isOwnerOrAdmin ? (
           <PrintHistorySection itemKey={item.key} />
         ) : (
-          <p className="text-sm text-muted-foreground">Sign in to view print history.</p>
+          <p style={{ fontSize: 12, color: 'var(--aurora-muted)', fontStyle: 'italic', margin: 0 }}>
+            Sign in to view print history.
+          </p>
         )}
-      </section>
+      </AuroraSection>
 
-      {/* Share (Phase 7) */}
-      <section>
-        <h2 className="text-base font-semibold mb-3">Share</h2>
+      {/* Share */}
+      <AuroraSection title="Share">
         {isOwnerOrAdmin ? (
           <ShareSection itemKey={item.key} />
         ) : (
-          <p className="text-sm text-muted-foreground">Sign in to manage share links.</p>
+          <p style={{ fontSize: 12, color: 'var(--aurora-muted)', fontStyle: 'italic', margin: 0 }}>
+            Sign in to manage share links.
+          </p>
         )}
-      </section>
+      </AuroraSection>
     </div>
   )
 }

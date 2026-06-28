@@ -13,6 +13,8 @@
  * Tag browse: popularity-weighted tag cloud (NO hierarchy, NO depth control).
  * Grid view: virtualized with @tanstack/react-virtual (rows of 3 cards).
  * Table view: @tanstack/react-table with sortable headers.
+ *
+ * Styling: Aurora aesthetic — glass cards, teal accent (#0FA4AB), --aurora-* CSS vars.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -27,6 +29,7 @@ import {
   type SortingState,
 } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
+import { Box, LayoutGrid, List, Search, Star, X } from 'lucide-react'
 
 import * as api from '@/lib/api'
 import { getTagFontSize, getTagFontWeight } from '@/lib/catalog-utils'
@@ -51,52 +54,27 @@ const SORT_OPTIONS = [
 ]
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Aurora style helpers
 // ---------------------------------------------------------------------------
 
-function StarIcon({ filled }: { filled: boolean }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill={filled ? 'currentColor' : 'none'}
-      stroke="currentColor"
-      strokeWidth={1.5}
-      className={`h-5 w-5 ${filled ? 'text-yellow-400' : 'text-muted-foreground'}`}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.562.562 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z"
-      />
-    </svg>
-  )
+const CARD_STYLE: React.CSSProperties = {
+  background: 'var(--aurora-card)',
+  border: '1px solid var(--aurora-card-border)',
+  borderRadius: 12,
+  backdropFilter: 'blur(16px)',
+  WebkitBackdropFilter: 'blur(16px)',
 }
 
-// ---------------------------------------------------------------------------
-// Placeholder image
-// ---------------------------------------------------------------------------
-
-function PlaceholderImage({ title }: { title: string }) {
-  return (
-    <div className="flex h-full w-full items-center justify-center bg-muted/50 rounded">
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1}
-        className="h-12 w-12 text-muted-foreground/40"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M21 7.5l-2.25-1.313M21 7.5v2.25m0-2.25l-2.25 1.313M3 7.5l2.25-1.313M3 7.5l2.25 1.313M3 7.5v2.25m9 3l2.25-1.313M12 12.75l-2.25-1.313M12 12.75V15m0 6.75l2.25-1.313M12 21.75V19.5m0 2.25l-2.25-1.313m0-16.875L12 2.25l2.25 1.313M21 14.25v2.25l-9 5.25-9-5.25v-2.25"
-        />
-      </svg>
-      <span className="sr-only">{title}</span>
-    </div>
-  )
+const INPUT_STYLE: React.CSSProperties = {
+  background: 'var(--aurora-input-bg)',
+  border: '1px solid var(--aurora-input-border)',
+  borderRadius: 10,
+  color: 'var(--aurora-text)',
+  padding: '7px 12px',
+  fontSize: 13,
+  outline: 'none',
+  width: '100%',
+  transition: 'border-color 0.15s, box-shadow 0.15s',
 }
 
 // ---------------------------------------------------------------------------
@@ -116,12 +94,12 @@ function TagCloud({ tags, selectedTags, onToggle }: TagCloudProps) {
 
   if (!tags.length) {
     return (
-      <p className="text-sm text-muted-foreground italic">No tags yet.</p>
+      <p style={{ fontSize: 12, color: 'var(--aurora-muted)', fontStyle: 'italic' }}>No tags yet.</p>
     )
   }
 
   return (
-    <div className="flex flex-wrap gap-x-3 gap-y-2">
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 8px' }}>
       {tags.map((tag) => {
         const selected = selectedTags.includes(tag.name)
         const fontSize = getTagFontSize(tag.popularity_count, minCount, maxCount)
@@ -130,15 +108,22 @@ function TagCloud({ tags, selectedTags, onToggle }: TagCloudProps) {
           <button
             key={tag.id}
             onClick={() => onToggle(tag.name)}
-            style={{ fontSize }}
-            className={`${weight} transition-colors leading-tight rounded px-1 py-0.5 ${
-              selected
-                ? 'bg-primary text-primary-foreground'
-                : 'text-foreground hover:text-primary'
-            }`}
+            className={weight}
+            style={{
+              fontSize,
+              lineHeight: 1.2,
+              padding: '3px 10px',
+              borderRadius: 20,
+              border: `1px solid ${selected ? 'var(--aurora-pill-border)' : 'var(--aurora-glass-border)'}`,
+              background: selected ? 'var(--aurora-pill)' : 'var(--aurora-glass)',
+              color: selected ? 'var(--aurora-accent)' : 'var(--aurora-text-dim)',
+              boxShadow: selected ? 'var(--aurora-glow)' : 'none',
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+            }}
             title={`${tag.name} (${tag.popularity_count})`}
           >
-            {tag.name}
+            #{tag.name}
           </button>
         )
       })}
@@ -147,7 +132,7 @@ function TagCloud({ tags, selectedTags, onToggle }: TagCloudProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Item card (grid view)
+// Item card (grid view) — Aurora glass card
 // ---------------------------------------------------------------------------
 
 interface ItemCardProps {
@@ -158,60 +143,135 @@ interface ItemCardProps {
 
 function ItemCard({ item, onToggleFavorite, isFavoriting }: ItemCardProps) {
   return (
-    <div className="rounded-lg border border-border bg-card overflow-hidden flex flex-col hover:border-primary/50 transition-colors">
+    <div
+      style={{
+        ...CARD_STYLE,
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        transition: 'all 0.15s cubic-bezier(0.4,0,0.2,1)',
+        cursor: 'default',
+      }}
+      onMouseEnter={(e) => {
+        const el = e.currentTarget as HTMLDivElement
+        el.style.borderColor = 'rgba(15,164,171,0.5)'
+        el.style.boxShadow = '0 0 20px rgba(15,164,171,0.18)'
+        el.style.transform = 'translateY(-2px)'
+      }}
+      onMouseLeave={(e) => {
+        const el = e.currentTarget as HTMLDivElement
+        el.style.borderColor = 'var(--aurora-card-border)'
+        el.style.boxShadow = 'none'
+        el.style.transform = 'none'
+      }}
+    >
       {/* Cover image */}
-      <Link to={`/items/${item.key}`} className="block h-40 bg-muted relative">
+      <Link
+        to={`/items/${item.key}`}
+        style={{ display: 'block', height: 160, position: 'relative', textDecoration: 'none', flexShrink: 0 }}
+      >
         {item.default_image_path ? (
           <img
             src={`/api/items/${item.key}/files/${item.default_image_path}`}
             alt={item.title}
-            className="absolute inset-0 h-full w-full object-cover"
+            style={{ position: 'absolute', inset: 0, height: '100%', width: '100%', objectFit: 'cover' }}
             loading="lazy"
             onError={(e) => {
               ;(e.currentTarget as HTMLImageElement).style.display = 'none'
             }}
           />
         ) : (
-          <PlaceholderImage title={item.title} />
+          <div
+            style={{
+              height: '100%',
+              background:
+                'radial-gradient(ellipse at 50% 65%, rgba(15,164,171,0.22) 0%, rgba(15,164,171,0.06) 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Box
+              size={30}
+              style={{ color: 'var(--aurora-accent)', filter: 'drop-shadow(0 0 8px rgba(15,164,171,0.55))' }}
+            />
+            <span className="sr-only">{item.title}</span>
+          </div>
         )}
       </Link>
 
       {/* Body */}
-      <div className="flex flex-col gap-1 p-3 flex-1">
-        <div className="flex items-start justify-between gap-2">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
           <Link
             to={`/items/${item.key}`}
-            className="text-sm font-medium leading-snug hover:text-primary line-clamp-2"
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--aurora-text)',
+              textDecoration: 'none',
+              lineHeight: 1.3,
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+            } as React.CSSProperties}
           >
             {item.title}
           </Link>
           <button
             onClick={() => onToggleFavorite(item.key, item.favorited)}
             disabled={isFavoriting}
-            className="shrink-0 mt-0.5 disabled:opacity-50"
+            style={{
+              flexShrink: 0,
+              marginTop: 1,
+              opacity: isFavoriting ? 0.5 : 1,
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: 2,
+              display: 'flex',
+            }}
             title={item.favorited ? 'Remove from favorites' : 'Add to favorites'}
           >
-            <StarIcon filled={item.favorited} />
+            <Star
+              size={15}
+              fill={item.favorited ? '#FBBF24' : 'none'}
+              style={{
+                color: item.favorited ? '#FBBF24' : 'var(--aurora-muted)',
+                filter: item.favorited ? 'drop-shadow(0 0 4px rgba(251,191,36,0.5))' : 'none',
+                transition: 'all 0.15s',
+              }}
+            />
           </button>
         </div>
 
         {item.creator_name && (
-          <p className="text-xs text-muted-foreground truncate">{item.creator_name}</p>
+          <p style={{ fontSize: 11, color: 'var(--aurora-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: 0 }}>
+            {item.creator_name}
+          </p>
         )}
 
-        {/* Tag chips (first 3 + overflow) */}
+        {/* Tag chips */}
         {item.tag_names.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-auto pt-2">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 'auto', paddingTop: 6 }}>
             {item.tag_names.slice(0, 3).map((tag) => (
               <span
                 key={tag}
-                className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                style={{
+                  fontSize: 10,
+                  padding: '2px 7px',
+                  background: 'var(--aurora-glass)',
+                  color: 'var(--aurora-text-dim)',
+                  borderRadius: 10,
+                  border: '1px solid var(--aurora-glass-border)',
+                }}
               >
-                {tag}
+                #{tag}
               </span>
             ))}
             {item.tag_names.length > 3 && (
-              <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+              <span style={{ fontSize: 10, color: 'var(--aurora-muted)', display: 'flex', alignItems: 'center' }}>
                 +{item.tag_names.length - 3}
               </span>
             )}
@@ -253,12 +313,9 @@ function VirtualGrid({ items, onToggleFavorite, favoritingKey }: VirtualGridProp
   return (
     <div
       ref={parentRef}
-      style={{ height: VIRTUAL_CONTAINER_HEIGHT, overflowY: 'auto' }}
-      className="w-full"
+      style={{ height: VIRTUAL_CONTAINER_HEIGHT, overflowY: 'auto', width: '100%', scrollbarWidth: 'thin', scrollbarColor: 'var(--aurora-glass) transparent' }}
     >
-      <div
-        style={{ height: rowVirtualizer.getTotalSize(), position: 'relative' }}
-      >
+      <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative' }}>
         {rowVirtualizer.getVirtualItems().map((virtualRow) => {
           const rowItems = rows[virtualRow.index]
           return (
@@ -274,7 +331,7 @@ function VirtualGrid({ items, onToggleFavorite, favoritingKey }: VirtualGridProp
                 transform: `translateY(${virtualRow.start}px)`,
               }}
             >
-              <div className="grid grid-cols-3 gap-4 pb-4">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, paddingBottom: 12 }}>
                 {rowItems.map((item) => (
                   <ItemCard
                     key={item.key}
@@ -293,7 +350,7 @@ function VirtualGrid({ items, onToggleFavorite, favoritingKey }: VirtualGridProp
 }
 
 // ---------------------------------------------------------------------------
-// Table view
+// Table view — Aurora glass container
 // ---------------------------------------------------------------------------
 
 const colHelper = createColumnHelper<api.ItemSummary>()
@@ -316,19 +373,31 @@ function TableView({ items, onToggleFavorite, favoritingKey }: TableViewProps) {
         cell: (info) => {
           const item = info.row.original
           return (
-            <div className="h-10 w-10 rounded overflow-hidden bg-muted shrink-0">
+            <div
+              style={{
+                height: 40,
+                width: 40,
+                borderRadius: 8,
+                overflow: 'hidden',
+                background: 'radial-gradient(ellipse at 50% 60%, rgba(15,164,171,0.2) 0%, rgba(15,164,171,0.06) 100%)',
+                flexShrink: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
               {item.default_image_path ? (
                 <img
                   src={`/api/items/${item.key}/files/${item.default_image_path}`}
                   alt={item.title}
-                  className="h-full w-full object-cover"
+                  style={{ height: '100%', width: '100%', objectFit: 'cover' }}
                   loading="lazy"
                   onError={(e) => {
                     ;(e.currentTarget as HTMLImageElement).style.display = 'none'
                   }}
                 />
               ) : (
-                <PlaceholderImage title={item.title} />
+                <Box size={16} style={{ color: 'var(--aurora-accent)' }} />
               )}
             </div>
           )
@@ -339,7 +408,9 @@ function TableView({ items, onToggleFavorite, favoritingKey }: TableViewProps) {
         cell: (info) => (
           <Link
             to={`/items/${info.row.original.key}`}
-            className="font-medium hover:text-primary"
+            style={{ fontWeight: 600, color: 'var(--aurora-text)', textDecoration: 'none', fontSize: 13 }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--aurora-accent)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--aurora-text)' }}
           >
             {info.getValue()}
           </Link>
@@ -348,7 +419,7 @@ function TableView({ items, onToggleFavorite, favoritingKey }: TableViewProps) {
       colHelper.accessor('creator_name', {
         header: 'Creator',
         cell: (info) => (
-          <span className="text-muted-foreground text-sm">
+          <span style={{ color: 'var(--aurora-muted)', fontSize: 12 }}>
             {info.getValue() ?? '—'}
           </span>
         ),
@@ -357,17 +428,24 @@ function TableView({ items, onToggleFavorite, favoritingKey }: TableViewProps) {
         header: 'Tags',
         enableSorting: false,
         cell: (info) => (
-          <div className="flex flex-wrap gap-1">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
             {info.getValue().slice(0, 3).map((tag) => (
               <span
                 key={tag}
-                className="inline-flex rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                style={{
+                  fontSize: 10,
+                  padding: '2px 7px',
+                  background: 'var(--aurora-glass)',
+                  color: 'var(--aurora-text-dim)',
+                  borderRadius: 10,
+                  border: '1px solid var(--aurora-glass-border)',
+                }}
               >
-                {tag}
+                #{tag}
               </span>
             ))}
             {info.getValue().length > 3 && (
-              <span className="inline-flex rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+              <span style={{ fontSize: 10, color: 'var(--aurora-muted)', display: 'flex', alignItems: 'center' }}>
                 +{info.getValue().length - 3}
               </span>
             )}
@@ -377,7 +455,7 @@ function TableView({ items, onToggleFavorite, favoritingKey }: TableViewProps) {
       colHelper.accessor('created_at', {
         header: 'Added',
         cell: (info) => (
-          <span className="text-xs text-muted-foreground">
+          <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>
             {new Date(info.getValue()).toLocaleDateString()}
           </span>
         ),
@@ -394,10 +472,24 @@ function TableView({ items, onToggleFavorite, favoritingKey }: TableViewProps) {
                 onToggleFavorite(item.key, item.favorited)
               }}
               disabled={favoritingKey === item.key}
-              className="disabled:opacity-50"
+              style={{
+                opacity: favoritingKey === item.key ? 0.5 : 1,
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: 2,
+                display: 'flex',
+              }}
               title={item.favorited ? 'Remove from favorites' : 'Add to favorites'}
             >
-              <StarIcon filled={item.favorited} />
+              <Star
+                size={15}
+                fill={item.favorited ? '#FBBF24' : 'none'}
+                style={{
+                  color: item.favorited ? '#FBBF24' : 'var(--aurora-muted)',
+                  filter: item.favorited ? 'drop-shadow(0 0 4px rgba(251,191,36,0.5))' : 'none',
+                }}
+              />
             </button>
           )
         },
@@ -417,23 +509,41 @@ function TableView({ items, onToggleFavorite, favoritingKey }: TableViewProps) {
   })
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-border">
-      <table className="w-full text-sm">
-        <thead className="bg-muted/50">
+    <div
+      style={{
+        ...CARD_STYLE,
+        overflow: 'hidden',
+      }}
+    >
+      <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+        <thead>
           {table.getHeaderGroups().map((hg) => (
-            <tr key={hg.id}>
+            <tr key={hg.id} style={{ borderBottom: '1px solid var(--aurora-divider)' }}>
               {hg.headers.map((header) => (
                 <th
                   key={header.id}
-                  className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground ${
-                    header.column.getCanSort() ? 'cursor-pointer select-none' : ''
-                  }`}
+                  style={{
+                    padding: '10px 14px',
+                    textAlign: 'left',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.08em',
+                    color: 'var(--aurora-muted)',
+                    cursor: header.column.getCanSort() ? 'pointer' : 'default',
+                    userSelect: 'none',
+                    background: 'var(--aurora-glass)',
+                  }}
                   onClick={header.column.getToggleSortingHandler()}
                 >
-                  <span className="flex items-center gap-1">
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                     {flexRender(header.column.columnDef.header, header.getContext())}
-                    {header.column.getIsSorted() === 'asc' && ' ↑'}
-                    {header.column.getIsSorted() === 'desc' && ' ↓'}
+                    {header.column.getIsSorted() === 'asc' && (
+                      <span style={{ color: 'var(--aurora-accent)' }}>↑</span>
+                    )}
+                    {header.column.getIsSorted() === 'desc' && (
+                      <span style={{ color: 'var(--aurora-accent)' }}>↓</span>
+                    )}
                   </span>
                 </th>
               ))}
@@ -444,11 +554,13 @@ function TableView({ items, onToggleFavorite, favoritingKey }: TableViewProps) {
           {table.getRowModel().rows.map((row) => (
             <tr
               key={row.id}
-              className="border-t border-border hover:bg-muted/30 transition-colors cursor-pointer"
+              style={{ borderTop: '1px solid var(--aurora-divider)', cursor: 'pointer', transition: 'background 0.1s' }}
               onClick={() => navigate(`/items/${row.original.key}`)}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = 'var(--aurora-glass-hover)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = 'transparent' }}
             >
               {row.getVisibleCells().map((cell) => (
-                <td key={cell.id} className="px-4 py-3">
+                <td key={cell.id} style={{ padding: '10px 14px' }}>
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
                 </td>
               ))}
@@ -458,7 +570,7 @@ function TableView({ items, onToggleFavorite, favoritingKey }: TableViewProps) {
             <tr>
               <td
                 colSpan={columns.length}
-                className="px-4 py-12 text-center text-sm text-muted-foreground"
+                style={{ padding: '48px 14px', textAlign: 'center', fontSize: 13, color: 'var(--aurora-muted)', fontStyle: 'italic' }}
               >
                 No items found.
               </td>
@@ -483,23 +595,47 @@ interface PaginationProps {
 function Pagination({ page, totalPages, onPage }: PaginationProps) {
   if (totalPages <= 1) return null
   return (
-    <div className="flex items-center justify-center gap-2 pt-2">
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, paddingTop: 8 }}>
       <button
         onClick={() => onPage(page - 1)}
         disabled={page <= 1}
-        className="rounded border border-border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40 transition-colors"
+        style={{
+          background: 'var(--aurora-glass)',
+          border: '1px solid var(--aurora-glass-border)',
+          borderRadius: 20,
+          color: page <= 1 ? 'var(--aurora-muted)' : 'var(--aurora-text-dim)',
+          fontSize: 12,
+          padding: '5px 14px',
+          cursor: page <= 1 ? 'default' : 'pointer',
+          opacity: page <= 1 ? 0.4 : 1,
+          transition: 'all 0.15s',
+        }}
+        onMouseEnter={(e) => { if (page > 1) (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
       >
-        Previous
+        ← Prev
       </button>
-      <span className="text-sm text-muted-foreground">
+      <span style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>
         {page} / {totalPages}
       </span>
       <button
         onClick={() => onPage(page + 1)}
         disabled={page >= totalPages}
-        className="rounded border border-border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40 transition-colors"
+        style={{
+          background: 'var(--aurora-glass)',
+          border: '1px solid var(--aurora-glass-border)',
+          borderRadius: 20,
+          color: page >= totalPages ? 'var(--aurora-muted)' : 'var(--aurora-text-dim)',
+          fontSize: 12,
+          padding: '5px 14px',
+          cursor: page >= totalPages ? 'default' : 'pointer',
+          opacity: page >= totalPages ? 0.4 : 1,
+          transition: 'all 0.15s',
+        }}
+        onMouseEnter={(e) => { if (page < totalPages) (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
       >
-        Next
+        Next →
       </button>
     </div>
   )
@@ -658,7 +794,6 @@ export function CatalogPage() {
     onSettled: (_data, _err, { key }) => {
       setFavoritingKey(null)
       void queryClient.invalidateQueries({ queryKey: ['items'] })
-      // Optimistic update is implicitly handled by re-fetch
       void queryClient.invalidateQueries({ queryKey: ['item', key] })
     },
   })
@@ -676,82 +811,163 @@ export function CatalogPage() {
   const tags = tagsData?.tags ?? []
 
   return (
-    <div className="flex flex-col gap-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18, color: 'var(--aurora-text)' }}>
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
         <div>
-          <h1 className="text-2xl font-bold">Catalog</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {total > 0 ? `${total} item${total === 1 ? '' : 's'}` : 'Browse your 3D print library.'}
+          <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--aurora-text)', letterSpacing: '-0.02em', margin: 0 }}>
+            Catalog
+          </h1>
+          <p style={{ marginTop: 4, fontSize: 12, color: 'var(--aurora-muted)', margin: '4px 0 0' }}>
+            {total > 0
+              ? `${total} item${total === 1 ? '' : 's'}`
+              : 'Browse your 3D print library.'}
           </p>
         </div>
       </div>
 
       {/* Search bar */}
-      <div className="flex items-center gap-3">
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          background: 'var(--aurora-input-bg)',
+          border: '1px solid var(--aurora-input-border)',
+          borderRadius: 10,
+          padding: '7px 12px',
+          transition: 'border-color 0.15s, box-shadow 0.15s',
+        }}
+        onFocusCapture={(e) => {
+          (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--aurora-pill-border)'
+          ;(e.currentTarget as HTMLDivElement).style.boxShadow = '0 0 0 3px var(--aurora-pill)'
+        }}
+        onBlurCapture={(e) => {
+          // only reset if focus left the container entirely
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+            ;(e.currentTarget as HTMLDivElement).style.borderColor = 'var(--aurora-input-border)'
+            ;(e.currentTarget as HTMLDivElement).style.boxShadow = 'none'
+          }
+        }}
+      >
+        <Search size={14} style={{ color: 'var(--aurora-muted)', flexShrink: 0 }} />
         <input
           type="search"
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           placeholder="Search titles, descriptions, tags…"
-          className="input-base flex-1 text-sm"
+          style={{
+            flex: 1,
+            background: 'transparent',
+            border: 'none',
+            outline: 'none',
+            color: 'var(--aurora-text)',
+            fontSize: 13,
+          }}
         />
       </div>
 
       {/* Active tag chips */}
       {urlTags.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground">Filtering by:</span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>Filtering by:</span>
           {urlTags.map((tag) => (
             <button
               key={tag}
               onClick={() => clearTag(tag)}
-              className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2.5 py-0.5 text-xs font-medium hover:bg-primary/20 transition-colors"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                background: 'var(--aurora-pill)',
+                border: '1px solid var(--aurora-pill-border)',
+                borderRadius: 20,
+                color: 'var(--aurora-accent)',
+                fontSize: 11,
+                fontWeight: 600,
+                padding: '3px 8px 3px 10px',
+                cursor: 'pointer',
+                boxShadow: 'var(--aurora-glow)',
+                transition: 'all 0.15s',
+              }}
             >
-              {tag}
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
-                <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
-              </svg>
+              #{tag}
+              <X size={11} />
             </button>
           ))}
         </div>
       )}
 
-      <div className="flex gap-6">
+      <div style={{ display: 'flex', gap: 16 }}>
         {/* Sidebar: tag cloud + filters */}
-        <aside className="w-56 shrink-0 flex flex-col gap-4">
+        <aside style={{ width: 200, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
           {/* Favorites filter */}
           <div>
             <button
               onClick={toggleFavorited}
-              className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors ${
-                urlFavorited
-                  ? 'border-primary bg-primary/10 text-primary font-medium'
-                  : 'border-border hover:bg-accent'
-              }`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                background: urlFavorited ? 'var(--aurora-pill)' : 'var(--aurora-glass)',
+                border: `1px solid ${urlFavorited ? 'var(--aurora-pill-border)' : 'var(--aurora-glass-border)'}`,
+                borderRadius: 20,
+                color: urlFavorited ? 'var(--aurora-accent)' : 'var(--aurora-text-dim)',
+                fontSize: 12,
+                fontWeight: urlFavorited ? 700 : 400,
+                padding: '5px 12px',
+                cursor: 'pointer',
+                boxShadow: urlFavorited ? 'var(--aurora-glow)' : 'none',
+                transition: 'all 0.15s',
+              }}
             >
-              <StarIcon filled={urlFavorited} />
+              <Star
+                size={13}
+                fill={urlFavorited ? '#FBBF24' : 'none'}
+                style={{
+                  color: urlFavorited ? '#FBBF24' : 'var(--aurora-muted)',
+                  filter: urlFavorited ? 'drop-shadow(0 0 3px rgba(251,191,36,0.5))' : 'none',
+                }}
+              />
               Favorites only
             </button>
           </div>
 
           {/* Tag cloud */}
-          <div>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <div
+            style={{
+              ...CARD_STYLE,
+              padding: '12px 14px',
+            }}
+          >
+            <div style={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: 'var(--aurora-muted)',
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              marginBottom: 10,
+            }}>
               Browse by tag
-            </h3>
+            </div>
             <TagCloud tags={tags} selectedTags={urlTags} onToggle={toggleTag} />
           </div>
         </aside>
 
         {/* Main content */}
-        <div className="flex-1 flex flex-col gap-4">
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
           {/* Toolbar: sort + view toggle */}
-          <div className="flex items-center justify-between gap-3">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            {/* Sort select */}
             <select
               value={urlSort}
               onChange={(e) => setSort(e.target.value)}
-              className="input-base text-sm py-1.5 w-auto"
+              style={{
+                ...INPUT_STYLE,
+                width: 'auto',
+                padding: '5px 10px',
+                cursor: 'pointer',
+              }}
             >
               {SORT_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
@@ -760,27 +976,49 @@ export function CatalogPage() {
               ))}
             </select>
 
-            <div className="flex items-center rounded-md border border-border overflow-hidden">
+            {/* View toggle — icon buttons */}
+            <div style={{ display: 'flex', background: 'var(--aurora-glass)', border: '1px solid var(--aurora-glass-border)', borderRadius: 10, overflow: 'hidden' }}>
               <button
                 onClick={() => setView('grid')}
-                className={`px-3 py-1.5 text-sm transition-colors ${
-                  urlView === 'grid'
-                    ? 'bg-primary text-primary-foreground'
-                    : 'hover:bg-accent'
-                }`}
                 title="Grid view"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: '6px 12px',
+                  fontSize: 12,
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: urlView === 'grid' ? 'var(--aurora-pill)' : 'transparent',
+                  color: urlView === 'grid' ? 'var(--aurora-accent)' : 'var(--aurora-text-dim)',
+                  fontWeight: urlView === 'grid' ? 700 : 400,
+                  boxShadow: urlView === 'grid' ? 'var(--aurora-glow)' : 'none',
+                  borderRight: '1px solid var(--aurora-glass-border)',
+                  transition: 'all 0.15s',
+                }}
               >
+                <LayoutGrid size={13} />
                 Grid
               </button>
               <button
                 onClick={() => setView('table')}
-                className={`px-3 py-1.5 text-sm transition-colors border-l border-border ${
-                  urlView === 'table'
-                    ? 'bg-primary text-primary-foreground'
-                    : 'hover:bg-accent'
-                }`}
                 title="Table view"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: '6px 12px',
+                  fontSize: 12,
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: urlView === 'table' ? 'var(--aurora-pill)' : 'transparent',
+                  color: urlView === 'table' ? 'var(--aurora-accent)' : 'var(--aurora-text-dim)',
+                  fontWeight: urlView === 'table' ? 700 : 400,
+                  boxShadow: urlView === 'table' ? 'var(--aurora-glow)' : 'none',
+                  transition: 'all 0.15s',
+                }}
               >
+                <List size={13} />
                 Table
               </button>
             </div>
@@ -788,7 +1026,7 @@ export function CatalogPage() {
 
           {/* Loading state */}
           {itemsLoading && (
-            <div className="py-12 text-center text-sm text-muted-foreground">
+            <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 13, color: 'var(--aurora-muted)' }}>
               Loading…
             </div>
           )}
