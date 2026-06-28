@@ -8,7 +8,7 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-06-27 (Phase 5 complete)
+**Last updated:** 2026-06-27 (Phase 6a committed)
 
 ---
 
@@ -31,19 +31,25 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 
 ## Current status
 
-- **Phase:** 5 **complete** (5a `2b44ddd` + 5b `2d032cf` on `dev`). Next action = plan +
-  dispatch **Phase 6 — Reconciliation / scan engine** (write `prompts/2026-06-27-phase-6-*.md`,
-  model: sonnet; see build-plan §"Phase 6" + PRD §8).
+- **Phase:** 6a (backend) **done** (committed `7bc344a` on `dev`); **6b frontend in flight**.
+  Next action = verify + commit 6b (`prompts/2026-06-27-phase-6b-frontend-reconcile.md`), then
+  plan + dispatch **Phase 7 — Print history + sharing** (build-plan §"Phase 7" + PRD §9–11).
 - **Branch:** `dev` (work here). `main` is protected. Nothing pushed/PR'd yet (no dev→main
   until a working product exists).
-- **Done so far:** Phases 0–5 committed on `dev`:
+- **Done so far:** Phases 0–6a committed on `dev`:
   - **0** scaffolding/dev loop; **1** identity/first-run/settings; **2** libraries/storage/
     sidecar/item core (atomic rename); **3** catalog UI (FTS, tag cloud, browse, item page,
     file/ZIP downloads); **4** worker jobs + mesh rendering + job/scheduled-jobs monitor UI;
-    **5a** import-wizard **backend** (ImportSession staging, URL scraper, site-capabilities +
-    encrypted tokens, tag reconciliation/approval, inbox scheduled-scan, commit→`create_item`);
-    **5b** import-wizard **frontend** (Add Asset modal, `/import/:sessionId` wizard, `/imports`
-    list, site-setup prompt, `/admin/pending-tags`). All checks green (189 pytest, tsc, 82 vitest).
+    **5** import wizard (a backend ImportSession/scraper/site-caps/tag-reconcile/inbox-scan;
+    b Add Asset modal + `/import` wizard + `/imports` + `/admin/pending-tags`);
+    **6a** reconcile engine **backend** — Issue/ChangeLog/ReviewItem (migration 0007), the
+    `reconcile.py` engine (4 §8.1 behaviors, isolated per-item txns, daily `library_reconcile_scan`,
+    `apply_review_item`), issues/changes/reviews routers; `rescan_item` refactored onto the engine.
+    All checks green (214 pytest on real PG, alembic 0007 round-trip, ruff).
+- **6b remaining (frontend, in flight):** `/admin/issues`, `/admin/changes`, `/admin/reviews`
+  (approve/reject), + Auto/Review per-behavior mode toggles via the generic settings API
+  (`scan.{sidecar_sync,re_render,file_changes}.mode`). Defaults: sidecar_sync=review,
+  re_render=auto, file_changes=review.
 
 ## Phase 5 follow-ups (small; fold into a later phase)
 
