@@ -4,67 +4,95 @@
  * Route: /creators/:creatorId
  *
  * Shows creator name, profile link, source site, item count, and a paginated
- * list of their items (reuses the same card/list component style as CatalogPage).
+ * list of their items (catalog card style matching CatalogPage / B1 aesthetic).
+ *
+ * Styling: Aurora — AdminPage + Card + aurora catalog cards + DataTable Pagination.
  */
 
 import React, { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { ExternalLink, User, Box } from 'lucide-react'
 
 import * as api from '@/lib/api'
+import {
+  AdminPage,
+  PageHeader,
+  Card,
+  EmptyState,
+  Pagination,
+} from '@/components/ui'
 
 const PER_PAGE = 20
 
 // ---------------------------------------------------------------------------
-// Item mini-card (reused from creator items list)
+// Catalog-style item card (matches B1 aesthetic)
 // ---------------------------------------------------------------------------
 
+const ITEM_CARD_STYLE: React.CSSProperties = {
+  background: 'var(--aurora-card)',
+  border: '1px solid var(--aurora-card-border)',
+  borderRadius: 12,
+  backdropFilter: 'blur(16px)',
+  WebkitBackdropFilter: 'blur(16px)',
+  padding: '14px 16px',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+  textDecoration: 'none',
+  transition: 'border-color 0.15s, box-shadow 0.15s',
+}
+
 function CreatorItemCard({ item }: { item: api.CreatorItemSummary }) {
+  const [hovered, setHovered] = useState(false)
   return (
     <Link
       to={`/items/${item.key}`}
-      className="flex flex-col rounded-lg border border-border bg-card p-3 hover:border-primary/50 transition-colors"
+      style={{
+        ...ITEM_CARD_STYLE,
+        borderColor: hovered ? 'var(--aurora-accent)' : 'var(--aurora-card-border)',
+        boxShadow: hovered ? 'var(--aurora-glow)' : 'none',
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
-      <span className="text-sm font-medium hover:text-primary line-clamp-2">{item.title}</span>
-      <span className="mt-1 text-xs text-muted-foreground">
-        Added {new Date(item.created_at).toLocaleDateString()}
-      </span>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 32,
+            height: 32,
+            borderRadius: 8,
+            background: 'var(--aurora-glass)',
+            border: '1px solid var(--aurora-glass-border)',
+            flexShrink: 0,
+          }}
+        >
+          <Box size={14} style={{ color: 'var(--aurora-muted)' }} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p
+            style={{
+              margin: 0,
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--aurora-text)',
+              overflow: 'hidden',
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+            }}
+          >
+            {item.title}
+          </p>
+          <p style={{ margin: '3px 0 0', fontSize: 11, color: 'var(--aurora-muted)' }}>
+            Added {new Date(item.created_at).toLocaleDateString()}
+          </p>
+        </div>
+      </div>
     </Link>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Pagination
-// ---------------------------------------------------------------------------
-
-interface PaginationProps {
-  page: number
-  totalPages: number
-  onPage: (p: number) => void
-}
-
-function Pagination({ page, totalPages, onPage }: PaginationProps) {
-  if (totalPages <= 1) return null
-  return (
-    <div className="flex items-center justify-center gap-2 pt-4">
-      <button
-        onClick={() => onPage(page - 1)}
-        disabled={page <= 1}
-        className="rounded border border-border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40 transition-colors"
-      >
-        Previous
-      </button>
-      <span className="text-sm text-muted-foreground">
-        {page} / {totalPages}
-      </span>
-      <button
-        onClick={() => onPage(page + 1)}
-        disabled={page >= totalPages}
-        className="rounded border border-border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40 transition-colors"
-      >
-        Next
-      </button>
-    </div>
   )
 }
 
@@ -91,74 +119,112 @@ export function CreatorPage() {
 
   if (isNaN(creatorIdNum)) {
     return (
-      <div className="py-24 text-center text-sm text-destructive">Invalid creator ID.</div>
+      <AdminPage>
+        <p style={{ fontSize: 13, color: 'var(--aurora-danger)' }}>Invalid creator ID.</p>
+      </AdminPage>
     )
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <AdminPage>
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Link to="/catalog" className="hover:text-primary">Catalog</Link>
-        <span>›</span>
-        <span className="text-foreground font-medium">
+      <nav style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--aurora-muted)' }}>
+        <Link
+          to="/catalog"
+          style={{ color: 'var(--aurora-accent)', textDecoration: 'none', fontWeight: 500 }}
+        >
+          Catalog
+        </Link>
+        <span style={{ color: 'var(--aurora-divider)' }}>›</span>
+        <span style={{ color: 'var(--aurora-text)', fontWeight: 500 }}>
           {creator?.name ?? 'Creator'}
         </span>
       </nav>
 
-      {/* Creator header */}
+      {/* Loading / error */}
       {isLoading && (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <p style={{ fontSize: 13, color: 'var(--aurora-muted)' }} className="animate-pulse">Loading…</p>
       )}
-
       {isError && (
-        <p className="text-sm text-destructive">Creator not found.</p>
+        <p style={{ fontSize: 13, color: 'var(--aurora-danger)' }}>Creator not found.</p>
       )}
 
+      {/* Creator header */}
       {creator && (
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-bold">{creator.name}</h1>
-          <div className="flex items-center gap-3 text-sm text-muted-foreground">
-            {creator.source_site && (
-              <span>{creator.source_site}</span>
-            )}
-            {creator.profile_url && (
-              <a
-                href={creator.profile_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary hover:underline"
-              >
-                View profile
-              </a>
-            )}
-            <span>{total} item{total === 1 ? '' : 's'}</span>
-          </div>
-          <div className="mt-1">
+        <>
+          <PageHeader
+            title={creator.name}
+            meta={`${total} item${total === 1 ? '' : 's'}`}
+            actions={
+              creator.profile_url ? (
+                <a
+                  href={creator.profile_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: 'var(--aurora-accent)',
+                    textDecoration: 'none',
+                    background: 'rgba(15,164,171,0.08)',
+                    border: '1px solid rgba(15,164,171,0.2)',
+                    borderRadius: 8,
+                    padding: '6px 12px',
+                  }}
+                >
+                  <ExternalLink size={12} />
+                  View profile
+                </a>
+              ) : undefined
+            }
+          />
+
+          {/* Creator meta + catalog link */}
+          <Card padding="14px 18px" style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <User size={14} style={{ color: 'var(--aurora-muted)' }} />
+              <span style={{ fontSize: 13, color: 'var(--aurora-text-dim)' }}>
+                {creator.source_site ?? 'Unknown source'}
+              </span>
+            </div>
             <Link
               to={`/catalog?creator_id=${creator.id}`}
-              className="text-sm text-primary hover:underline"
+              style={{ fontSize: 13, color: 'var(--aurora-accent)', textDecoration: 'none', fontWeight: 500 }}
             >
               Browse in catalog →
             </Link>
-          </div>
-        </div>
+          </Card>
+        </>
       )}
 
       {/* Items grid */}
       {!isLoading && !isError && items.length === 0 && (
-        <p className="text-sm text-muted-foreground italic">No items found.</p>
+        <EmptyState
+          icon={<Box size={32} />}
+          title="No items found"
+          description="This creator has no items in the catalog yet."
+        />
       )}
 
       {items.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {items.map((item) => (
-            <CreatorItemCard key={item.key} item={item} />
-          ))}
-        </div>
-      )}
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {items.map((item) => (
+              <CreatorItemCard key={item.key} item={item} />
+            ))}
+          </div>
 
-      <Pagination page={page} totalPages={totalPages} onPage={setPage} />
-    </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            onPrev={() => setPage((p) => p - 1)}
+            onNext={() => setPage((p) => p + 1)}
+          />
+        </>
+      )}
+    </AdminPage>
   )
 }

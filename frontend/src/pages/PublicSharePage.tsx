@@ -14,6 +14,9 @@
  * - scope = "full_site"    → show read-only catalog browse via /catalog.
  *   (The /api/public/share/{token} endpoint returns 400 for full_site; we detect
  *    this and fall back to the catalog view instead.)
+ *
+ * Styling: standalone Aurora screen (gradient bg + glass card, dark+light).
+ * Public-facing — first impression matters.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
@@ -24,6 +27,53 @@ import * as api from '@/lib/api'
 import { ApiError } from '@/lib/api'
 import { mapBundleStatus, shouldContinuePolling, type ZipPollStatus } from '@/lib/catalog-utils'
 import { formatPrintTime, formatFilamentLength, formatFilamentWeight, renderStars } from '@/lib/print-utils'
+
+// ---------------------------------------------------------------------------
+// Style constants
+// ---------------------------------------------------------------------------
+
+const PAGE_STYLE: React.CSSProperties = {
+  minHeight: '100vh',
+  background: 'linear-gradient(135deg, var(--aurora-bg-from) 0%, var(--aurora-bg-to) 100%)',
+}
+
+const CARD_STYLE: React.CSSProperties = {
+  background: 'var(--aurora-card)',
+  border: '1px solid var(--aurora-card-border)',
+  borderRadius: 12,
+  backdropFilter: 'blur(16px)',
+  WebkitBackdropFilter: 'blur(16px)',
+}
+
+const BTN_PRIMARY: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  background: 'var(--aurora-accent)',
+  color: '#fff',
+  border: 'none',
+  borderRadius: 8,
+  padding: '8px 16px',
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
+  transition: 'opacity 0.15s',
+}
+
+const BTN_GHOST: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 5,
+  background: 'var(--aurora-glass)',
+  border: '1px solid var(--aurora-glass-border)',
+  borderRadius: 8,
+  color: 'var(--aurora-text-dim)',
+  padding: '6px 14px',
+  fontSize: 12,
+  fontWeight: 500,
+  cursor: 'pointer',
+  transition: 'opacity 0.15s',
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -39,41 +89,115 @@ function formatDate(iso: string | null): string {
 }
 
 // ---------------------------------------------------------------------------
+// Public page header / brand bar
+// ---------------------------------------------------------------------------
+
+function PublicBar() {
+  return (
+    <div
+      style={{
+        borderBottom: '1px solid var(--aurora-divider)',
+        background: 'var(--aurora-card)',
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
+        padding: '10px 24px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+      }}
+    >
+      <div
+        aria-hidden="true"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 28,
+          height: 28,
+          borderRadius: 8,
+          background: 'var(--aurora-accent)',
+        }}
+      >
+        <span style={{ color: '#fff', fontWeight: 900, fontSize: 11, letterSpacing: '-0.03em' }}>PF</span>
+      </div>
+      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--aurora-text)', letterSpacing: '-0.01em' }}>
+        PartFolder 3D
+      </span>
+      <span
+        style={{
+          marginLeft: 4,
+          fontSize: 11,
+          fontWeight: 600,
+          color: 'var(--aurora-accent)',
+          background: 'rgba(15,164,171,0.10)',
+          border: '1px solid rgba(15,164,171,0.25)',
+          borderRadius: 20,
+          padding: '2px 8px',
+          letterSpacing: '0.04em',
+          textTransform: 'uppercase',
+        }}
+      >
+        Public Share
+      </span>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Public print record display (read-only)
 // ---------------------------------------------------------------------------
 
 function PublicPrintRecordCard({ record }: { record: api.PublicPrintRecord }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-4 flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
+    <div style={{ ...CARD_STYLE, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
         {/* Public badge */}
-        <span className="inline-flex items-center rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 px-2 py-0.5 text-xs font-medium">
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            fontSize: 11,
+            fontWeight: 600,
+            background: 'rgba(22,163,74,0.10)',
+            color: '#16a34a',
+            border: '1px solid rgba(22,163,74,0.25)',
+            borderRadius: 20,
+            padding: '2px 8px',
+          }}
+          className="dark:text-green-300"
+        >
           public
         </span>
 
         {record.success != null && (
           <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-              record.success
-                ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-            }`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              fontSize: 11,
+              fontWeight: 600,
+              borderRadius: 20,
+              padding: '2px 8px',
+              background: record.success ? 'rgba(22,163,74,0.10)' : 'rgba(220,38,38,0.10)',
+              color: record.success ? '#16a34a' : 'var(--aurora-danger)',
+              border: record.success ? '1px solid rgba(22,163,74,0.25)' : '1px solid rgba(220,38,38,0.25)',
+            }}
           >
             {record.success ? '✓ Success' : '✗ Failed'}
           </span>
         )}
 
         {record.rating != null && (
-          <span className="text-sm text-amber-500">{renderStars(record.rating)}</span>
+          <span style={{ fontSize: 13, color: '#d97706' }}>{renderStars(record.rating)}</span>
         )}
 
         {record.date && (
-          <span className="text-xs text-muted-foreground">{record.date}</span>
+          <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>{record.date}</span>
         )}
       </div>
 
       {(record.printer || record.material || record.filament_color) && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: 12, color: 'var(--aurora-muted)' }}>
           {record.printer && <span>Printer: {record.printer}</span>}
           {record.material && <span>Material: {record.material}</span>}
           {record.filament_color && <span>Color: {record.filament_color}</span>}
@@ -84,7 +208,7 @@ function PublicPrintRecordCard({ record }: { record: api.PublicPrintRecord }) {
       )}
 
       {(record.filament_length_mm != null || record.estimated_print_time_s != null) && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: 12, color: 'var(--aurora-muted)' }}>
           {record.filament_length_mm != null && (
             <span>Filament: {formatFilamentLength(record.filament_length_mm)}</span>
           )}
@@ -98,7 +222,7 @@ function PublicPrintRecordCard({ record }: { record: api.PublicPrintRecord }) {
       )}
 
       {record.note && (
-        <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--aurora-text-dim)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
           {record.note}
         </p>
       )}
@@ -180,24 +304,30 @@ function PublicZipDownload({ token }: PublicZipDownloadProps) {
     expired: 'ZIP expired — retry?',
   }
 
+  const isActive = zipStatus === 'queued' || zipStatus === 'building' || zipMutation.isPending
+  const isClickable =
+    zipStatus === 'ready'
+      ? handleDownload
+      : zipStatus === 'idle' || zipStatus === 'failed' || zipStatus === 'expired'
+        ? () => zipMutation.mutate()
+        : undefined
+
   return (
-    <div className="flex items-center gap-3">
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
       <button
-        onClick={
-          zipStatus === 'ready'
-            ? handleDownload
-            : zipStatus === 'idle' || zipStatus === 'failed' || zipStatus === 'expired'
-              ? () => zipMutation.mutate()
-              : undefined
-        }
-        disabled={zipStatus === 'queued' || zipStatus === 'building' || zipMutation.isPending}
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+        onClick={isClickable}
+        disabled={isActive}
+        style={{ ...BTN_PRIMARY, opacity: isActive ? 0.6 : 1, cursor: isActive ? 'not-allowed' : 'pointer' }}
       >
         {zipLabel[zipStatus]}
       </button>
-      {errorMsg && <span className="text-xs text-destructive">{errorMsg}</span>}
+      {errorMsg && (
+        <span style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>{errorMsg}</span>
+      )}
       {(zipStatus === 'queued' || zipStatus === 'building') && (
-        <span className="text-xs text-muted-foreground animate-pulse">Polling every 2 s…</span>
+        <span style={{ fontSize: 12, color: 'var(--aurora-muted)' }} className="animate-pulse">
+          Polling every 2 s…
+        </span>
       )}
     </div>
   )
@@ -220,29 +350,36 @@ function PublicCatalogView({ token }: { token: string }) {
   const totalPages = data ? Math.ceil(data.total / PER_PAGE) : 1
 
   return (
-    <div className="flex flex-col gap-4">
-      <h1 className="text-2xl font-bold">Shared Catalog</h1>
-      <p className="text-sm text-muted-foreground">Read-only public view.</p>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div>
+        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: 'var(--aurora-text)', letterSpacing: '-0.02em' }}>
+          Shared Catalog
+        </h1>
+        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--aurora-muted)' }}>Read-only public view.</p>
+      </div>
 
-      {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
-      {isError && <p className="text-sm text-destructive">Failed to load catalog.</p>}
+      {isLoading && (
+        <p style={{ fontSize: 13, color: 'var(--aurora-muted)' }} className="animate-pulse">Loading…</p>
+      )}
+      {isError && (
+        <p style={{ fontSize: 13, color: 'var(--aurora-danger)' }}>Failed to load catalog.</p>
+      )}
 
       {data && data.items.length === 0 && (
-        <p className="text-sm text-muted-foreground italic">No items found.</p>
+        <p style={{ fontSize: 13, color: 'var(--aurora-muted)', fontStyle: 'italic' }}>No items found.</p>
       )}
 
       {data && data.items.length > 0 && (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {data.items.map((item) => (
-              <div
-                key={item.key}
-                className="rounded-lg border border-border bg-card p-4 flex flex-col gap-1"
-              >
-                <p className="font-medium text-sm">{item.title}</p>
-                <p className="font-mono text-xs text-muted-foreground">{item.key}</p>
+              <div key={item.key} style={{ ...CARD_STYLE, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--aurora-text)' }}>{item.title}</p>
+                <p style={{ margin: 0, fontFamily: 'monospace', fontSize: 11, color: 'var(--aurora-muted)' }}>{item.key}</p>
                 {item.description && (
-                  <p className="text-xs text-muted-foreground line-clamp-2 mt-1">
+                  <p
+                    style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--aurora-muted)', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
+                  >
                     {item.description}
                   </p>
                 )}
@@ -251,23 +388,23 @@ function PublicCatalogView({ token }: { token: string }) {
           </div>
 
           {totalPages > 1 && (
-            <div className="flex items-center justify-between text-sm">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <button
                 disabled={page === 1}
                 onClick={() => setPage((p) => p - 1)}
-                className="rounded-md border border-border px-3 py-1 hover:bg-accent disabled:opacity-40"
+                style={{ ...BTN_GHOST, opacity: page === 1 ? 0.4 : 1, cursor: page === 1 ? 'not-allowed' : 'pointer' }}
               >
-                Previous
+                ← Previous
               </button>
-              <span className="text-muted-foreground">
+              <span style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>
                 Page {page} of {totalPages}
               </span>
               <button
                 disabled={page === totalPages}
                 onClick={() => setPage((p) => p + 1)}
-                className="rounded-md border border-border px-3 py-1 hover:bg-accent disabled:opacity-40"
+                style={{ ...BTN_GHOST, opacity: page === totalPages ? 0.4 : 1, cursor: page === totalPages ? 'not-allowed' : 'pointer' }}
               >
-                Next
+                Next →
               </button>
             </div>
           )}
@@ -313,21 +450,29 @@ export function PublicSharePage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <p className="text-sm text-muted-foreground animate-pulse">Loading…</p>
+      <div style={PAGE_STYLE}>
+        <PublicBar />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 52px)' }}>
+          <p style={{ fontSize: 14, color: 'var(--aurora-muted)' }} className="animate-pulse">Loading…</p>
+        </div>
       </div>
     )
   }
 
   if (isUnavailable) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="max-w-sm text-center px-4">
-          <p className="text-3xl mb-4">🔗</p>
-          <h1 className="text-xl font-semibold mb-2">Link no longer available</h1>
-          <p className="text-sm text-muted-foreground">
-            This share link has expired, been revoked, or does not exist.
-          </p>
+      <div style={PAGE_STYLE}>
+        <PublicBar />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 52px)', padding: '32px 16px' }}>
+          <div style={{ ...CARD_STYLE, padding: '40px 32px', maxWidth: 400, textAlign: 'center' }}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>🔗</div>
+            <h1 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 700, color: 'var(--aurora-text)' }}>
+              Link no longer available
+            </h1>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--aurora-muted)', lineHeight: 1.6 }}>
+              This share link has expired, been revoked, or does not exist.
+            </p>
+          </div>
         </div>
       </div>
     )
@@ -336,13 +481,9 @@ export function PublicSharePage() {
   // Full-site share → render catalog view (no auth, no guards)
   if (isFullSite && token) {
     return (
-      <div className="min-h-screen bg-background">
-        <div className="container mx-auto px-4 py-8 max-w-5xl">
-          <div className="mb-6">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Public share
-            </span>
-          </div>
+      <div style={PAGE_STYLE}>
+        <PublicBar />
+        <div style={{ maxWidth: 1100, margin: '0 auto', padding: '28px 24px' }}>
           <PublicCatalogView token={token} />
         </div>
       </div>
@@ -351,8 +492,11 @@ export function PublicSharePage() {
 
   if (isError && !isFullSite) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <p className="text-sm text-destructive">Failed to load share.</p>
+      <div style={PAGE_STYLE}>
+        <PublicBar />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 52px)' }}>
+          <p style={{ fontSize: 13, color: 'var(--aurora-danger)' }}>Failed to load share.</p>
+        </div>
       </div>
     )
   }
@@ -360,93 +504,106 @@ export function PublicSharePage() {
   if (!data || !token) return null
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-4 py-8 max-w-4xl">
-        {/* Header */}
-        <div className="mb-6">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Public share
-          </span>
-        </div>
+    <div style={PAGE_STYLE}>
+      <PublicBar />
 
-        <div className="flex flex-col gap-8">
-          {/* Title + metadata */}
-          <div className="flex flex-col gap-3">
-            <h1 className="text-3xl font-bold">{data.title}</h1>
+      <div style={{ maxWidth: 860, margin: '0 auto', padding: '28px 24px', display: 'flex', flexDirection: 'column', gap: 24 }}>
+        {/* Title card */}
+        <div style={{ ...CARD_STYLE, padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: 'var(--aurora-text)', letterSpacing: '-0.02em' }}>
+            {data.title}
+          </h1>
 
-            {/* Tags */}
-            {data.tags.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {data.tags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="inline-flex items-center rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            )}
+          {/* Tags */}
+          {data.tags.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 6px' }}>
+              {data.tags.map((tag) => (
+                <span
+                  key={tag}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    background: 'var(--aurora-pill)',
+                    border: '1px solid var(--aurora-pill-border)',
+                    color: 'var(--aurora-accent)',
+                    borderRadius: 20,
+                    padding: '2px 10px',
+                  }}
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
 
-            {data.description && (
-              <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
-                {data.description}
-              </p>
-            )}
+          {data.description && (
+            <p style={{ margin: 0, fontSize: 14, color: 'var(--aurora-text-dim)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+              {data.description}
+            </p>
+          )}
 
-            {(data.source_url || data.license || data.source_site) && (
-              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
-                {data.source_url && (
-                  <>
-                    <dt className="text-muted-foreground font-medium">Source</dt>
-                    <dd>
-                      <a
-                        href={data.source_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-primary hover:underline truncate block"
-                      >
-                        {data.source_url}
-                      </a>
-                    </dd>
-                  </>
-                )}
-                {data.license && (
-                  <>
-                    <dt className="text-muted-foreground font-medium">License</dt>
-                    <dd>{data.license}</dd>
-                  </>
-                )}
-                {data.source_site && (
-                  <>
-                    <dt className="text-muted-foreground font-medium">Site</dt>
-                    <dd>{data.source_site}</dd>
-                  </>
-                )}
-              </dl>
-            )}
-          </div>
-
-          {/* Downloads */}
-          <section>
-            <h2 className="text-base font-semibold mb-3">Downloads</h2>
-            <PublicZipDownload token={token} />
-          </section>
-
-          {/* Public print records */}
-          {data.public_print_records.length > 0 && (
-            <section>
-              <h2 className="text-base font-semibold mb-3">
-                Print History ({data.public_print_records.length})
-              </h2>
-              <div className="flex flex-col gap-3">
-                {data.public_print_records.map((rec) => (
-                  <PublicPrintRecordCard key={rec.id} record={rec} />
-                ))}
-              </div>
-            </section>
+          {(data.source_url || data.license || data.source_site) && (
+            <dl
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'auto 1fr',
+                gap: '6px 12px',
+                fontSize: 13,
+                margin: 0,
+              }}
+            >
+              {data.source_url && (
+                <>
+                  <dt style={{ color: 'var(--aurora-muted)', fontWeight: 600 }}>Source</dt>
+                  <dd style={{ margin: 0 }}>
+                    <a
+                      href={data.source_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: 'var(--aurora-accent)', textDecoration: 'none', wordBreak: 'break-all' }}
+                    >
+                      {data.source_url}
+                    </a>
+                  </dd>
+                </>
+              )}
+              {data.license && (
+                <>
+                  <dt style={{ color: 'var(--aurora-muted)', fontWeight: 600 }}>License</dt>
+                  <dd style={{ margin: 0, color: 'var(--aurora-text)' }}>{data.license}</dd>
+                </>
+              )}
+              {data.source_site && (
+                <>
+                  <dt style={{ color: 'var(--aurora-muted)', fontWeight: 600 }}>Site</dt>
+                  <dd style={{ margin: 0, color: 'var(--aurora-text)' }}>{data.source_site}</dd>
+                </>
+              )}
+            </dl>
           )}
         </div>
+
+        {/* Downloads */}
+        <div style={{ ...CARD_STYLE, padding: '20px 24px' }}>
+          <h2 style={{ margin: '0 0 14px', fontSize: 14, fontWeight: 700, color: 'var(--aurora-text)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            Downloads
+          </h2>
+          <PublicZipDownload token={token} />
+        </div>
+
+        {/* Public print records */}
+        {data.public_print_records.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <h2 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: 'var(--aurora-text)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+              Print History ({data.public_print_records.length})
+            </h2>
+            {data.public_print_records.map((rec) => (
+              <PublicPrintRecordCard key={rec.id} record={rec} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

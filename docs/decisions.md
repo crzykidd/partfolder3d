@@ -2,6 +2,54 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-28 — UI B4 (final): Auth/public + remaining authenticated pages — Aurora revamp COMPLETE
+
+### UI revamp complete
+
+All real application pages are now on the Aurora aesthetic. The revamp series is done:
+- **A1** — Shell (SideNavShell, TopNavShell, StatStrip, QuickImportRail)
+- **B1** — Catalog + Item pages
+- **B2** — Import wizard
+- **B3a** — Admin ops (Jobs, ScheduledJobs, Issues, Changes, Reviews, ShareAudit, PrintStats, PendingTags, TagAdmin, SiteCapabilities)
+- **B3b** — Admin settings (Users, Invites, PasswordReset, AiProviders, Backups, Export, Libraries, SettingsPage)
+- **B4 (this pass)** — Auth/public pages + remaining authenticated pages
+
+The `frontend/src/pages/examples/` directory is retained as a reference/prototype.
+
+### Group 1 — standalone Aurora screens (public/auth, outside shell)
+
+`LoginPage`, `SetupPage`, `InviteAcceptPage`, `ResetPasswordPage`, `PublicSharePage` all use
+a full-viewport `linear-gradient(135deg, var(--aurora-bg-from), var(--aurora-bg-to))` background
+with a centered glass card (`var(--aurora-card)`, `backdropFilter: blur(20px)`, `borderRadius: 16`).
+A compact "PF" brand mark (teal accent square) appears above the card on auth pages.
+
+`PublicSharePage` gets a top bar with the PF wordmark and a "Public Share" badge, making it
+polished for first-impression public visitors.
+
+**LoginPage/SetupPage logic preserved byte-for-byte**: `setQueryData(['setupStatus'], …)` and
+`invalidateQueries({ queryKey: ['me'] })` calls are unchanged; only markup/styling changed.
+
+### Group 2 — authenticated pages (inside shell, using @/components/ui primitives)
+
+`ApiKeysPage` — `AdminPage + PageHeader + Card + DataTable/TableRow/Td + Button`. The copy-once
+`KeyCreatedDialog` is restyled as an aurora glass overlay (no Radix, same pattern as B3b dialogs).
+
+`CreatorPage` / `MyCreationsPage` — `AdminPage + PageHeader + EmptyState + Pagination`. Item cards
+use the B1 aurora catalog card pattern (glass bg, teal hover glow) and are `<Link>` elements.
+
+`VersionPage` — `AdminPage + PageHeader + Card + Card(accent)`. Displays the "PF" brand mark inline
+and shows the backend version as a monospace teal-tinted pill.
+
+### Tags and Favorites are CatalogPage routes (already done in B1)
+
+Tags browse and Favorites filter are URL params on `/catalog` (not standalone pages), so they were
+restyled as part of B1. No separate page needed.
+
+### No new dependencies added
+
+All pages use only the existing `@/components/ui` primitives, `lucide-react`, TanStack Query,
+and React Router. No Mantine, no toast, no new packages.
+
 ## 2026-06-28 — UI B3b: Remaining admin/settings pages Aurora restyle
 
 ### One new primitive: `AuroraToggle`
