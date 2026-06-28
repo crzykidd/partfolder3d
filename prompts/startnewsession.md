@@ -8,7 +8,7 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-06-28 (UI through B3b committed; B4 final restyle (auth/public + stragglers) in flight)
+**Last updated:** 2026-06-28 (UI REVAMP COMPLETE — A1/A2/B1-B4 + libraries on `dev`; final backend suite re-confirming; frontend green: tsc + 185 vitest)
 
 > **UI REVAMP underway (owner-directed, autonomous run).** Owner chose **Aurora** (`/example3`)
 > as the real look. Locked spec:
