@@ -7,6 +7,8 @@
  *
  * Per-user theme is handled by ThemeProvider + AuthContext (server-sync);
  * this page just renders the current ThemeToggle for context.
+ *
+ * Styling: Aurora aesthetic (B3b restyle — visual pass, all behavior preserved).
  */
 
 import React, { useState, useEffect } from 'react'
@@ -15,6 +17,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/context/AuthContext'
 import { useTheme } from '@/components/ThemeProvider'
 import * as api from '@/lib/api'
+import {
+  AdminPage, PageHeader,
+  Card, SectionHeader,
+  Button,
+  Field, AuroraInput,
+} from '@/components/ui'
 
 // ---------------------------------------------------------------------------
 // Path prefix section
@@ -49,71 +57,79 @@ function PathPrefixSection() {
   const currentValue = data?.path_prefix ?? ''
 
   return (
-    <section>
-      <h2 className="text-lg font-semibold mb-3">Path display</h2>
-      <div className="rounded-lg border border-border bg-card p-4">
-        <div className="flex flex-col gap-1 py-1">
-          <div className="text-sm font-medium">Path prefix</div>
-          <div className="text-xs text-muted-foreground">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--aurora-text)' }}>
+        Path display
+      </div>
+      <Card>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--aurora-text)' }}>Path prefix</div>
+          <div style={{ fontSize: 12, color: 'var(--aurora-muted)', lineHeight: 1.6 }}>
             Prefix prepended to the item directory path on item pages — useful when
             your library is mounted at a different path locally (e.g.{' '}
-            <code className="font-mono">C:\prints\</code> or{' '}
-            <code className="font-mono">/mnt/nas/</code>).
+            <code style={{ background: 'var(--aurora-glass)', borderRadius: 4, padding: '1px 5px', fontFamily: 'monospace', fontSize: 11 }}>C:\prints\</code>{' '}
+            or{' '}
+            <code style={{ background: 'var(--aurora-glass)', borderRadius: 4, padding: '1px 5px', fontFamily: 'monospace', fontSize: 11 }}>/mnt/nas/</code>).
           </div>
           {!editing && (
-            <div className="flex items-center gap-3 mt-2">
-              <span className="font-mono text-sm text-muted-foreground">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+              <span style={{ fontFamily: 'monospace', fontSize: 13, color: 'var(--aurora-muted)' }}>
                 {currentValue || <em>not set</em>}
               </span>
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => {
                   setDraft(currentValue)
                   setEditing(true)
                 }}
-                className="text-xs text-primary hover:underline"
               >
                 Edit
-              </button>
+              </Button>
             </div>
           )}
           {editing && (
-            <div className="flex items-center gap-2 mt-2">
-              <input
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+              <AuroraInput
                 type="text"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 placeholder="e.g. C:\prints\ or /mnt/nas/"
-                className="input-base flex-1 text-sm font-mono"
+                style={{ flex: 1, fontFamily: 'monospace' }}
                 autoFocus
               />
-              <button
+              <Button
                 onClick={() => mutation.mutate()}
                 disabled={mutation.isPending}
-                className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                size="sm"
               >
                 {mutation.isPending ? 'Saving…' : 'Save'}
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => {
                   setEditing(false)
                   setDraft(currentValue)
                 }}
-                className="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors"
               >
                 Cancel
-              </button>
+              </Button>
               {mutation.isError && (
-                <span className="text-xs text-destructive">Save failed</span>
+                <span style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>Save failed</span>
               )}
             </div>
           )}
         </div>
-      </div>
-    </section>
+      </Card>
+    </div>
   )
 }
 
-// Known instance settings with friendly labels.
+// ---------------------------------------------------------------------------
+// Known instance settings
+// ---------------------------------------------------------------------------
+
 const KNOWN_SETTINGS: { key: string; label: string; description: string }[] = [
   {
     key: 'instance.name',
@@ -156,62 +172,74 @@ function SettingRow({
     mutationFn: () => api.upsertSetting(settingKey, draft),
     onSuccess: () => {
       setEditing(false)
-      queryClient.invalidateQueries({ queryKey: ['settings'] })
+      void queryClient.invalidateQueries({ queryKey: ['settings'] })
     },
   })
 
   return (
-    <div className="flex flex-col gap-1 py-3 border-t border-border first:border-t-0">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex-1">
-          <div className="text-sm font-medium">{label}</div>
-          <div className="text-xs text-muted-foreground">{description}</div>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        paddingTop: 14,
+        paddingBottom: 14,
+        borderTop: '1px solid var(--aurora-divider)',
+      }}
+      className="first-of-type:border-t-0"
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--aurora-text)', marginBottom: 2 }}>{label}</div>
+          <div style={{ fontSize: 12, color: 'var(--aurora-muted)', lineHeight: 1.5 }}>{description}</div>
         </div>
         {!editing && (
-          <div className="flex items-center gap-3">
-            <span className="font-mono text-sm text-muted-foreground">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+            <span style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--aurora-muted)' }}>
               {currentValue || <em>not set</em>}
             </span>
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 setDraft(currentValue)
                 setEditing(true)
               }}
-              className="text-xs text-primary hover:underline"
             >
               Edit
-            </button>
+            </Button>
           </div>
         )}
       </div>
 
       {editing && (
-        <div className="flex items-center gap-2 mt-1">
-          <input
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+          <AuroraInput
             type="text"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            className="input-base flex-1 text-sm"
+            style={{ flex: 1 }}
             autoFocus
           />
-          <button
+          <Button
+            size="sm"
             onClick={() => mutation.mutate()}
             disabled={mutation.isPending}
-            className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
           >
             {mutation.isPending ? 'Saving…' : 'Save'}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => {
               setEditing(false)
               setDraft(currentValue)
             }}
-            className="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors"
           >
             Cancel
-          </button>
+          </Button>
           {mutation.isError && (
-            <span className="text-xs text-destructive">
+            <span style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>
               {mutation.error instanceof api.ApiError
                 ? mutation.error.message
                 : 'Save failed'}
@@ -222,6 +250,10 @@ function SettingRow({
     </div>
   )
 }
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
 
 export function SettingsPage() {
   const { user } = useAuth()
@@ -240,41 +272,43 @@ export function SettingsPage() {
   )
 
   return (
-    <div className="flex flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Configure your instance and personal preferences.
-        </p>
-      </div>
+    <AdminPage>
+      <PageHeader
+        title="Settings"
+        description="Configure your instance and personal preferences."
+      />
 
       {/* Per-user theme */}
-      <section>
-        <h2 className="text-lg font-semibold mb-3">Appearance</h2>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center justify-between">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--aurora-text)' }}>
+          Appearance
+        </div>
+        <Card>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <div className="text-sm font-medium">Theme</div>
-              <div className="text-xs text-muted-foreground">
-                Current: <strong>{theme}</strong>. Use the toggle in the header to change.
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--aurora-text)', marginBottom: 2 }}>Theme</div>
+              <div style={{ fontSize: 12, color: 'var(--aurora-muted)', lineHeight: 1.5 }}>
+                Current: <strong style={{ color: 'var(--aurora-text-dim)' }}>{theme}</strong>. Use the toggle in the header to change.
                 When signed in, your preference is saved to the server.
               </div>
             </div>
           </div>
-        </div>
-      </section>
+        </Card>
+      </div>
 
       {/* Per-user path prefix */}
       <PathPrefixSection />
 
       {/* Instance settings (admin only) */}
       {isAdmin && (
-        <section>
-          <h2 className="text-lg font-semibold mb-3">Instance settings</h2>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--aurora-text)' }}>
+            Instance settings
+          </div>
           {isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: 0 }}>Loading…</p>
           ) : (
-            <div className="rounded-lg border border-border bg-card p-4">
+            <Card>
               {KNOWN_SETTINGS.map((s) => (
                 <SettingRow
                   key={s.key}
@@ -284,10 +318,10 @@ export function SettingsPage() {
                   currentValue={settingMap.get(s.key) ?? ''}
                 />
               ))}
-            </div>
+            </Card>
           )}
-        </section>
+        </div>
       )}
-    </div>
+    </AdminPage>
   )
 }

@@ -14,13 +14,20 @@
  *
  * Tokens are NEVER shown back (API never returns plaintext). Only has_token is shown.
  *
- * UI: Tailwind + CSS-variable theme + TanStack Query + apiFetch CSRF wrapper.
- * No Mantine, no toast library, no new deps.
+ * Styling: Aurora aesthetic (B3b restyle — visual pass, all behavior preserved).
  */
 
 import React, { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as api from '@/lib/api'
+import {
+  AdminPage, PageHeader,
+  Badge,
+  Button,
+  AuroraToggle,
+  DataTable, TableRow, Td,
+  AuroraInput,
+} from '@/components/ui'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -31,31 +38,11 @@ function formatTs(ts: string | null): string {
   return new Date(ts).toLocaleString()
 }
 
-function BoolBadge({ value }: { value: boolean }) {
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-        value
-          ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-          : 'bg-muted text-muted-foreground'
-      }`}
-    >
-      {value ? 'Yes' : 'No'}
-    </span>
-  )
-}
-
 // ---------------------------------------------------------------------------
 // Token set panel (expanded below the row)
 // ---------------------------------------------------------------------------
 
-function SetTokenPanel({
-  domain,
-  onClose,
-}: {
-  domain: string
-  onClose: () => void
-}) {
+function SetTokenPanel({ domain, onClose }: { domain: string; onClose: () => void }) {
   const queryClient = useQueryClient()
   const [token, setToken] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -77,27 +64,27 @@ function SetTokenPanel({
   })
 
   return (
-    <tr className="border-b border-border bg-muted/10">
-      <td colSpan={8} className="px-4 py-4">
-        <div className="space-y-3 max-w-md">
-          <div className="flex items-center justify-between">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+    <tr style={{ borderTop: '1px solid var(--aurora-divider)', background: 'rgba(15,164,171,0.02)' }}>
+      <td colSpan={8} style={{ padding: '16px 18px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 480 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
               Set token for {domain}
-            </h4>
+            </span>
             <button
               type="button"
               onClick={onClose}
-              className="text-xs text-muted-foreground hover:text-foreground underline"
+              style={{ fontSize: 12, color: 'var(--aurora-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
             >
               Cancel
             </button>
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p style={{ fontSize: 12, color: 'var(--aurora-muted)', margin: 0, lineHeight: 1.5 }}>
             The token is stored encrypted server-side and never shown again.
             It is used for authenticated scraping of this domain.
           </p>
-          <div className="flex gap-2">
-            <input
+          <div style={{ display: 'flex', gap: 8 }}>
+            <AuroraInput
               type="password"
               value={token}
               onChange={(e) => {
@@ -106,23 +93,18 @@ function SetTokenPanel({
               }}
               placeholder="Enter token (write-only; stored encrypted)"
               autoComplete="new-password"
-              className="input-base flex-1 text-sm"
+              style={{ flex: 1 }}
             />
-            <button
-              type="button"
+            <Button
+              size="sm"
               disabled={setMutation.isPending || !token.trim()}
               onClick={() => setMutation.mutate()}
-              className="rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-colors"
             >
               {setMutation.isPending ? 'Saving…' : 'Save token'}
-            </button>
+            </Button>
           </div>
-          {saved && (
-            <p className="text-xs text-green-600 dark:text-green-400">Token saved.</p>
-          )}
-          {error && (
-            <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
-          )}
+          {saved && <p style={{ fontSize: 12, color: '#16A34A', margin: 0 }}>Token saved.</p>}
+          {error && <p style={{ fontSize: 12, color: 'var(--aurora-danger)', margin: 0 }}>{error}</p>}
         </div>
       </td>
     </tr>
@@ -133,13 +115,7 @@ function SetTokenPanel({
 // Notes inline edit
 // ---------------------------------------------------------------------------
 
-function NotesCell({
-  domain,
-  notes,
-}: {
-  domain: string
-  notes: string | null
-}) {
+function NotesCell({ domain, notes }: { domain: string; notes: string | null }) {
   const queryClient = useQueryClient()
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(notes ?? '')
@@ -158,41 +134,38 @@ function NotesCell({
 
   if (editing) {
     return (
-      <div className="flex flex-col gap-1 min-w-[160px]">
-        <input
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 160 }}>
+        <AuroraInput
           type="text"
           value={value}
           onChange={(e) => {
             setValue(e.target.value)
             setError(null)
           }}
-          className="input-base w-full text-xs"
           autoFocus
+          style={{ fontSize: 12 }}
         />
-        <div className="flex gap-1">
-          <button
-            type="button"
+        <div style={{ display: 'flex', gap: 4 }}>
+          <Button
+            size="sm"
             disabled={patchMutation.isPending}
-            onClick={() =>
-              patchMutation.mutate(value.trim() || null)
-            }
-            className="rounded px-2 py-0.5 text-xs bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
+            onClick={() => patchMutation.mutate(value.trim() || null)}
           >
             {patchMutation.isPending ? '…' : 'Save'}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => {
               setEditing(false)
               setValue(notes ?? '')
               setError(null)
             }}
-            className="rounded px-2 py-0.5 text-xs border border-border hover:bg-accent"
           >
             Cancel
-          </button>
+          </Button>
         </div>
-        {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+        {error && <p style={{ fontSize: 11, color: 'var(--aurora-danger)', margin: 0 }}>{error}</p>}
       </div>
     )
   }
@@ -204,14 +177,21 @@ function NotesCell({
         setEditing(true)
         setValue(notes ?? '')
       }}
-      className="text-sm text-muted-foreground hover:text-foreground text-left max-w-[200px] truncate"
+      style={{
+        fontSize: 13,
+        color: 'var(--aurora-muted)',
+        background: 'none',
+        border: 'none',
+        cursor: 'pointer',
+        textAlign: 'left',
+        maxWidth: 200,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}
       title={notes ?? 'Click to add notes'}
     >
-      {notes ? (
-        <span>{notes}</span>
-      ) : (
-        <span className="italic text-muted-foreground/60">—</span>
-      )}
+      {notes ?? <span style={{ fontStyle: 'italic', opacity: 0.5 }}>—</span>}
     </button>
   )
 }
@@ -264,168 +244,152 @@ function SiteCapRow({ cap }: { cap: api.AdminSiteCapabilityOut }) {
 
   return (
     <>
-      <tr className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors align-top">
+      <TableRow style={{ verticalAlign: 'top' }}>
         {/* Domain */}
-        <td className="px-4 py-3 font-mono text-xs font-medium">{cap.domain}</td>
+        <Td style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 600 }}>{cap.domain}</Td>
 
         {/* Booleans */}
-        <td className="px-4 py-3">
-          <BoolBadge value={cap.can_scrape_metadata} />
-        </td>
-        <td className="px-4 py-3">
-          <BoolBadge value={cap.can_scrape_images} />
-        </td>
-        <td className="px-4 py-3">
-          <BoolBadge value={cap.requires_token} />
-        </td>
+        <Td>
+          <Badge variant={cap.can_scrape_metadata ? 'success' : 'muted'}>
+            {cap.can_scrape_metadata ? 'Yes' : 'No'}
+          </Badge>
+        </Td>
+        <Td>
+          <Badge variant={cap.can_scrape_images ? 'success' : 'muted'}>
+            {cap.can_scrape_images ? 'Yes' : 'No'}
+          </Badge>
+        </Td>
+        <Td>
+          <Badge variant={cap.requires_token ? 'warning' : 'muted'}>
+            {cap.requires_token ? 'Yes' : 'No'}
+          </Badge>
+        </Td>
 
         {/* is_manual_only — inline toggle */}
-        <td className="px-4 py-3">
-          <button
-            type="button"
-            disabled={patchMutation.isPending}
-            onClick={() => {
+        <Td>
+          <AuroraToggle
+            checked={cap.is_manual_only}
+            onChange={() => {
               setError(null)
               patchMutation.mutate({ is_manual_only: !cap.is_manual_only })
             }}
-            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none disabled:opacity-50 ${
-              cap.is_manual_only ? 'bg-primary' : 'bg-muted'
-            }`}
-            aria-label={cap.is_manual_only ? 'Disable manual-only' : 'Enable manual-only'}
-            title={cap.is_manual_only ? 'Manual-only (click to disable)' : 'Not manual-only (click to enable)'}
-          >
-            <span
-              className={`pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-                cap.is_manual_only ? 'translate-x-4' : 'translate-x-0.5'
-              }`}
-            />
-          </button>
-        </td>
+            disabled={patchMutation.isPending}
+            ariaLabel={cap.is_manual_only ? 'Disable manual-only' : 'Enable manual-only'}
+          />
+        </Td>
 
         {/* Last probed */}
-        <td className="px-4 py-3 text-xs text-muted-foreground">
+        <Td style={{ fontSize: 11, color: 'var(--aurora-muted)', whiteSpace: 'nowrap' }}>
           {formatTs(cap.last_probed_at)}
-        </td>
+        </Td>
 
         {/* Notes */}
-        <td className="px-4 py-3">
+        <Td>
           <NotesCell domain={cap.domain} notes={cap.notes} />
-        </td>
+        </Td>
 
         {/* Actions */}
-        <td className="px-4 py-3">
-          <div className="flex flex-col gap-1.5">
+        <Td>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {/* Token actions */}
-            <div className="flex items-center gap-2 flex-wrap">
-              {cap.has_token && (
-                <span className="inline-flex items-center rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 px-2 py-0.5 text-xs font-medium">
-                  Token set
-                </span>
-              )}
-              <button
-                type="button"
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              {cap.has_token && <Badge variant="success">Token set</Badge>}
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => {
                   setShowTokenForm((v) => !v)
                   setError(null)
                 }}
-                className="text-xs text-muted-foreground hover:text-foreground underline"
               >
                 {cap.has_token ? 'Rotate token' : 'Set token'}
-              </button>
+              </Button>
               {cap.has_token && (
                 confirmClearToken ? (
-                  <span className="flex items-center gap-1 text-xs">
-                    <button
-                      type="button"
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+                    <Button
+                      variant="danger"
+                      size="sm"
                       disabled={clearTokenMutation.isPending}
                       onClick={() => clearTokenMutation.mutate()}
-                      className="text-red-600 hover:text-red-700 font-medium disabled:opacity-50"
                     >
                       {clearTokenMutation.isPending ? '…' : 'Confirm clear'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmClearToken(false)}
-                      className="text-muted-foreground hover:text-foreground"
-                    >
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setConfirmClearToken(false)}>
                       Cancel
-                    </button>
+                    </Button>
                   </span>
                 ) : (
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    extraStyle={{ color: '#D97706', borderColor: 'rgba(217,119,6,0.3)', background: 'rgba(217,119,6,0.06)' }}
                     onClick={() => {
                       setConfirmClearToken(true)
                       setError(null)
                     }}
-                    className="text-xs text-amber-600 hover:text-amber-700 underline"
                   >
                     Clear token
-                  </button>
+                  </Button>
                 )
               )}
             </div>
 
             {/* Re-probe */}
-            <button
-              type="button"
-              disabled={reprobeMutation.isPending}
-              onClick={() => {
-                setError(null)
-                reprobeMutation.mutate()
-              }}
-              className="text-xs text-muted-foreground hover:text-foreground underline text-left disabled:opacity-50"
-            >
-              {reprobeMutation.isPending ? 'Re-probing…' : 'Re-probe'}
-            </button>
+            <div>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={reprobeMutation.isPending}
+                onClick={() => {
+                  setError(null)
+                  reprobeMutation.mutate()
+                }}
+              >
+                {reprobeMutation.isPending ? 'Re-probing…' : 'Re-probe'}
+              </Button>
+              {reprobeMutation.isSuccess && (
+                <span style={{ marginLeft: 6, fontSize: 11, color: '#16A34A' }}>Probe reset.</span>
+              )}
+            </div>
 
             {/* Delete */}
             {confirmDelete ? (
-              <span className="flex items-center gap-1 text-xs">
-                <button
-                  type="button"
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Button
+                  variant="danger"
+                  size="sm"
                   disabled={deleteMutation.isPending}
                   onClick={() => deleteMutation.mutate()}
-                  className="text-red-600 hover:text-red-700 font-medium disabled:opacity-50"
                 >
                   {deleteMutation.isPending ? 'Deleting…' : 'Confirm delete'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirmDelete(false)}
-                  className="text-muted-foreground hover:text-foreground"
-                >
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(false)}>
                   Cancel
-                </button>
+                </Button>
               </span>
             ) : (
-              <button
-                type="button"
+              <Button
+                variant="danger"
+                size="sm"
                 onClick={() => {
                   setConfirmDelete(true)
                   setError(null)
                 }}
-                className="text-xs text-red-500 hover:text-red-700 underline text-left"
               >
                 Delete
-              </button>
+              </Button>
             )}
 
             {error && (
-              <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
-            )}
-            {reprobeMutation.isSuccess && (
-              <p className="text-xs text-green-600 dark:text-green-400">Probe reset.</p>
+              <p style={{ fontSize: 11, color: 'var(--aurora-danger)', margin: 0 }}>{error}</p>
             )}
           </div>
-        </td>
-      </tr>
+        </Td>
+      </TableRow>
 
       {showTokenForm && (
-        <SetTokenPanel
-          domain={cap.domain}
-          onClose={() => setShowTokenForm(false)}
-        />
+        <SetTokenPanel domain={cap.domain} onClose={() => setShowTokenForm(false)} />
       )}
     </>
   )
@@ -435,6 +399,8 @@ function SiteCapRow({ cap }: { cap: api.AdminSiteCapabilityOut }) {
 // Page
 // ---------------------------------------------------------------------------
 
+const COLUMNS = ['Domain', 'Metadata', 'Images', 'Token req.', 'Manual only', 'Last probed', 'Notes', 'Actions']
+
 export function SiteCapabilitiesPage() {
   const { data: caps = [], isLoading, isError, error } = useQuery({
     queryKey: ['admin-site-capabilities'],
@@ -442,65 +408,30 @@ export function SiteCapabilitiesPage() {
   })
 
   return (
-    <div className="space-y-5">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold">Site Capabilities</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Per-domain scraping capabilities, authentication tokens, and
-          manual-override settings used by the import wizard.
-        </p>
-      </div>
+    <AdminPage>
+      <PageHeader
+        title="Site Capabilities"
+        description="Per-domain scraping capabilities, authentication tokens, and manual-override settings used by the import wizard."
+        meta={isLoading ? undefined : `${caps.length} domain${caps.length === 1 ? '' : 's'}`}
+      />
 
-      {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
       {isError && (
-        <p className="text-sm text-red-600 dark:text-red-400">
+        <div style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>
           {error instanceof Error ? error.message : 'Failed to load site capabilities.'}
-        </p>
-      )}
-
-      {!isLoading && !isError && caps.length === 0 && (
-        <div className="rounded-lg border border-dashed border-border py-16 text-center">
-          <p className="text-muted-foreground">No site capability records.</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Records are created automatically when the import wizard probes a
-            new domain.
-          </p>
         </div>
       )}
 
-      {caps.length > 0 && (
-        <div className="overflow-x-auto overflow-hidden rounded-lg border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                {[
-                  'Domain',
-                  'Metadata',
-                  'Images',
-                  'Token req.',
-                  'Manual only',
-                  'Last probed',
-                  'Notes',
-                  'Actions',
-                ].map((h) => (
-                  <th
-                    key={h}
-                    className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {caps.map((cap) => (
-                <SiteCapRow key={cap.domain} cap={cap} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+      <DataTable
+        columns={COLUMNS}
+        isLoading={isLoading}
+        isEmpty={!isLoading && !isError && caps.length === 0}
+        emptyMessage="No site capability records. Records are created automatically when the import wizard probes a new domain."
+        style={{ overflowX: 'auto' }}
+      >
+        {caps.map((cap) => (
+          <SiteCapRow key={cap.domain} cap={cap} />
+        ))}
+      </DataTable>
+    </AdminPage>
   )
 }

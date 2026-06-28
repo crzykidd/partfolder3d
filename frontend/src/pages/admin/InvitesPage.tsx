@@ -5,38 +5,43 @@
  * History table: email, status, expires_at, created_at, revoke button.
  *
  * Note: the invite accept URL is /invites/{token}/accept (frontend route).
+ *
+ * Styling: Aurora aesthetic (B3b restyle — visual pass, all behavior preserved).
  */
 
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-
+import { Copy, Check } from 'lucide-react'
 import * as api from '@/lib/api'
+import {
+  AdminPage, PageHeader,
+  Card, SectionHeader,
+  Badge,
+  Button,
+  DataTable, TableRow, Td,
+  Field, AuroraInput,
+  CARD_STYLE,
+} from '@/components/ui'
+import type { BadgeVariant } from '@/components/ui'
 
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
-    accepted: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-    expired: 'bg-muted text-muted-foreground',
-    revoked: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+// ---------------------------------------------------------------------------
+// Badge helper
+// ---------------------------------------------------------------------------
+
+function inviteStatusVariant(status: string): BadgeVariant {
+  switch (status) {
+    case 'pending':  return 'warning'
+    case 'accepted': return 'success'
+    case 'revoked':  return 'danger'
+    default:         return 'muted'
   }
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-        colors[status] ?? 'bg-muted text-muted-foreground'
-      }`}
-    >
-      {status}
-    </span>
-  )
 }
 
-function CopyUrlDialog({
-  token,
-  onClose,
-}: {
-  token: string
-  onClose: () => void
-}) {
+// ---------------------------------------------------------------------------
+// Copy URL dialog (shown once after creation)
+// ---------------------------------------------------------------------------
+
+function CopyUrlDialog({ token, onClose }: { token: string; onClose: () => void }) {
   const url = `${window.location.origin}/invites/${token}/accept`
   const [copied, setCopied] = useState(false)
 
@@ -48,36 +53,71 @@ function CopyUrlDialog({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-      <div className="bg-card border border-border rounded-lg shadow-xl w-full max-w-md p-6 flex flex-col gap-4">
-        <h2 className="text-lg font-semibold">Invite link created</h2>
-        <p className="text-sm text-muted-foreground">
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.5)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 50,
+        padding: '0 16px',
+      }}
+    >
+      <div
+        style={{
+          ...CARD_STYLE,
+          padding: '24px',
+          maxWidth: 480,
+          width: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+        }}
+      >
+        <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--aurora-text)', margin: 0 }}>
+          Invite link created
+        </h2>
+        <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: 0, lineHeight: 1.6 }}>
           Copy this link and send it to the invitee. It is shown{' '}
-          <strong>once only</strong> and expires in 7 days.
+          <strong style={{ color: 'var(--aurora-text-dim)' }}>once only</strong> and expires in 7 days.
         </p>
 
-        <div className="rounded-md bg-muted px-3 py-2 font-mono text-xs break-all select-all">
+        <div
+          style={{
+            background: 'var(--aurora-glass)',
+            border: '1px solid var(--aurora-glass-border)',
+            borderRadius: 8,
+            padding: '8px 12px',
+            fontFamily: 'monospace',
+            fontSize: 12,
+            wordBreak: 'break-all',
+            userSelect: 'all',
+            color: 'var(--aurora-text)',
+          }}
+        >
           {url}
         </div>
 
-        <div className="flex gap-3">
-          <button
-            onClick={handleCopy}
-            className="flex-1 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            {copied ? 'Copied!' : 'Copy link'}
-          </button>
-          <button
-            onClick={onClose}
-            className="flex-1 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium hover:bg-accent transition-colors"
-          >
+        <div style={{ display: 'flex', gap: 10 }}>
+          <Button onClick={handleCopy} extraStyle={{ flex: 1, justifyContent: 'center' }}>
+            {copied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy link</>}
+          </Button>
+          <Button variant="ghost" onClick={onClose} extraStyle={{ flex: 1, justifyContent: 'center' }}>
             Done
-          </button>
+          </Button>
         </div>
       </div>
     </div>
   )
 }
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
+const COLUMNS = ['Email', 'Status', 'Expires', 'Created', '']
 
 export function InvitesPage() {
   const queryClient = useQueryClient()
@@ -94,15 +134,13 @@ export function InvitesPage() {
     onSuccess: (data) => {
       if (data.token) setPendingToken(data.token)
       setEmail('')
-      queryClient.invalidateQueries({ queryKey: ['invites'] })
+      void queryClient.invalidateQueries({ queryKey: ['invites'] })
     },
   })
 
   const revokeMutation = useMutation({
     mutationFn: (id: number) => api.revokeInvite(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['invites'] })
-    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['invites'] }),
   })
 
   const handleCreate = (e: React.FormEvent) => {
@@ -112,111 +150,77 @@ export function InvitesPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold">Invites</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Generate invite links to onboard new users. Links expire after 7 days.
-        </p>
-      </div>
+    <AdminPage>
+      <PageHeader
+        title="Invites"
+        description="Generate invite links to onboard new users. Links expire after 7 days."
+        meta={isLoading ? undefined : `${invites.length} invite${invites.length === 1 ? '' : 's'}`}
+      />
 
       {/* Create form */}
-      <div className="rounded-lg border border-border bg-card p-4">
-        <h2 className="text-sm font-semibold mb-3">Create invite</h2>
-        <form onSubmit={handleCreate} className="flex gap-3">
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="user@example.com"
-            className="input-base flex-1"
-            required
-          />
-          <button
-            type="submit"
-            disabled={createMutation.isPending}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-          >
+      <Card>
+        <SectionHeader>Create invite</SectionHeader>
+        <form onSubmit={handleCreate} style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+          <div style={{ flex: 1 }}>
+            <Field label="Email">
+              <AuroraInput
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="user@example.com"
+                required
+              />
+            </Field>
+          </div>
+          <Button type="submit" disabled={createMutation.isPending} extraStyle={{ marginBottom: 4 }}>
             {createMutation.isPending ? 'Creating…' : 'Create'}
-          </button>
+          </Button>
         </form>
         {createMutation.isError && (
-          <p className="mt-2 text-sm text-destructive">
+          <p style={{ marginTop: 8, fontSize: 12, color: 'var(--aurora-danger)' }}>
             {createMutation.error instanceof api.ApiError
               ? createMutation.error.message
               : 'Failed to create invite.'}
           </p>
         )}
-      </div>
+      </Card>
 
       {/* History table */}
-      {isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                {['Email', 'Status', 'Expires', 'Created', ''].map((h) => (
-                  <th
-                    key={h}
-                    className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {invites.map((inv) => (
-                <tr
-                  key={inv.id}
-                  className="border-t border-border hover:bg-muted/30 transition-colors"
+      <DataTable
+        columns={COLUMNS}
+        isLoading={isLoading}
+        isEmpty={!isLoading && invites.length === 0}
+        emptyMessage="No invites yet."
+      >
+        {invites.map((inv) => (
+          <TableRow key={inv.id}>
+            <Td style={{ fontFamily: 'monospace', fontSize: 12 }}>{inv.email}</Td>
+            <Td><Badge variant={inviteStatusVariant(inv.status)}>{inv.status}</Badge></Td>
+            <Td style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>
+              {new Date(inv.expires_at).toLocaleDateString()}
+            </Td>
+            <Td style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>
+              {new Date(inv.created_at).toLocaleDateString()}
+            </Td>
+            <Td>
+              {inv.status === 'pending' && (
+                <Button
+                  variant="danger"
+                  size="sm"
+                  disabled={revokeMutation.isPending}
+                  onClick={() => revokeMutation.mutate(inv.id)}
                 >
-                  <td className="px-4 py-3 font-mono">{inv.email}</td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={inv.status} />
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {new Date(inv.expires_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {new Date(inv.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-4 py-3">
-                    {inv.status === 'pending' && (
-                      <button
-                        onClick={() => revokeMutation.mutate(inv.id)}
-                        disabled={revokeMutation.isPending}
-                        className="text-xs text-destructive hover:underline disabled:opacity-50"
-                      >
-                        Revoke
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {invites.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={5}
-                    className="px-4 py-8 text-center text-sm text-muted-foreground"
-                  >
-                    No invites yet.
-                  </td>
-                </tr>
+                  Revoke
+                </Button>
               )}
-            </tbody>
-          </table>
-        </div>
-      )}
+            </Td>
+          </TableRow>
+        ))}
+      </DataTable>
 
       {pendingToken && (
-        <CopyUrlDialog
-          token={pendingToken}
-          onClose={() => setPendingToken(null)}
-        />
+        <CopyUrlDialog token={pendingToken} onClose={() => setPendingToken(null)} />
       )}
-    </div>
+    </AdminPage>
   )
 }

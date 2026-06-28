@@ -2,6 +2,42 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-28 — UI B3b: Remaining admin/settings pages Aurora restyle
+
+### One new primitive: `AuroraToggle`
+
+Added `AuroraToggle` to `frontend/src/components/ui/Button.tsx` (exported from `index.ts`) because
+two pages (`AiProvidersPage`, `SiteCapabilitiesPage`) need a visual boolean toggle for "enabled" /
+"is_manual_only" states. The `AuroraToggle` is a `role="switch"` button that uses `--aurora-accent`
+when checked and `--aurora-glass` when unchecked, matching the overall aurora theme. It replaces the
+original CSS-class-based Tailwind toggle pattern.
+
+### Dialogs styled inline (no Radix)
+
+`InvitesPage` and `PasswordResetPage` both use a `CopyUrlDialog` overlay. Styled with CARD_STYLE
+inline — no Radix `Dialog`, no external dep. The overlay + card approach matches the existing
+site-capabilities token panel pattern.
+
+### `@tanstack/react-table` removed from `UsersPage`
+
+The original `UsersPage` used `@tanstack/react-table` for its table, which was unnecessary
+given the `DataTable`/`TableRow`/`Td` primitives from B3a. B3b removes the `react-table` usage
+and renders the 5-column user table directly via the shared primitives.
+
+### `BackupsPage` warning callout: custom amber inline style (not Card accent)
+
+The `Card accent` variant is teal-tinted (for info callouts). The backup warning requires amber/
+orange to convey danger. Used a custom inline style with `rgba(245,158,11,…)` amber tones + a
+border width of 2px (slightly thicker than normal 1px cards) to ensure the callout stays visually
+loud. The `AlertTriangle` (lucide) icon reinforces urgency.
+
+### `SettingsPage`: section headers as plain divs (not `SectionHeader`)
+
+The `SectionHeader` primitive is designed for within-card section labels (small uppercase, 11px).
+The settings page uses larger section groupings that sit above cards (like h2). These are styled
+as plain 15px/700-weight divs to match the B3a `IssuesPage` / `ShareAuditPage` page-level
+section approach, keeping `SectionHeader` for inside-card use only.
+
 ## 2026-06-28 — UI B3a: Operations admin pages Aurora restyle + shared primitives
 
 ### Shared Aurora admin primitives introduced (reuse in B3b)

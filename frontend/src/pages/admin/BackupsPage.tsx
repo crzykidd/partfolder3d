@@ -14,13 +14,21 @@
  *  - "Run Backup Now" button → POST /api/admin/backups/run.
  *  - Retention count setting: inline form → PUT /api/admin/backups/settings.
  *
- * UI: Tailwind + CSS-variable theme + TanStack Query + apiFetch CSRF wrapper.
- * No Mantine, no toast library, no new deps.
+ * Styling: Aurora aesthetic (B3b restyle — visual pass, all behavior preserved).
  */
 
 import React, { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { AlertTriangle, RefreshCw } from 'lucide-react'
 import * as api from '@/lib/api'
+import {
+  AdminPage, PageHeader,
+  Card, SectionHeader,
+  Badge,
+  Button,
+  DataTable, TableRow, Td,
+  AuroraInput,
+} from '@/components/ui'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -37,20 +45,13 @@ function formatTs(ts: string): string {
   return new Date(ts).toLocaleString()
 }
 
-function statusBadge(status: string) {
-  const cls: Record<string, string> = {
-    ready: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-    failed: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
-    running: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
-    pending: 'bg-muted text-muted-foreground',
+function backupStatusVariant(status: string): 'success' | 'danger' | 'info' | 'muted' {
+  switch (status) {
+    case 'ready':   return 'success'
+    case 'failed':  return 'danger'
+    case 'running': return 'info'
+    default:        return 'muted'
   }
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${cls[status] ?? 'bg-muted text-muted-foreground'}`}
-    >
-      {status}
-    </span>
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -86,9 +87,9 @@ function RetentionForm({ current }: { current: number }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-2">
-      <label className="text-sm text-muted-foreground">Keep last</label>
-      <input
+    <form onSubmit={handleSubmit} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <span style={{ fontSize: 13, color: 'var(--aurora-muted)' }}>Keep last</span>
+      <AuroraInput
         type="number"
         min={1}
         value={value}
@@ -97,18 +98,14 @@ function RetentionForm({ current }: { current: number }) {
           setError(null)
           setSaved(false)
         }}
-        className="input-base w-20 text-sm"
+        style={{ width: 70 }}
       />
-      <label className="text-sm text-muted-foreground">backups</label>
-      <button
-        type="submit"
-        disabled={mutation.isPending}
-        className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50 transition-colors"
-      >
+      <span style={{ fontSize: 13, color: 'var(--aurora-muted)' }}>backups</span>
+      <Button variant="ghost" size="sm" type="submit" disabled={mutation.isPending}>
         {mutation.isPending ? 'Saving…' : 'Save'}
-      </button>
-      {saved && <span className="text-xs text-green-600 dark:text-green-400">Saved</span>}
-      {error && <span className="text-xs text-red-600 dark:text-red-400">{error}</span>}
+      </Button>
+      {saved && <span style={{ fontSize: 12, color: '#16A34A' }}>Saved</span>}
+      {error && <span style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>{error}</span>}
     </form>
   )
 }
@@ -124,85 +121,82 @@ function BackupRow({ record }: { record: api.BackupRecordOut }) {
 
   const deleteMutation = useMutation({
     mutationFn: () => api.deleteBackup(record.id),
-    onSuccess: () =>
-      void queryClient.invalidateQueries({ queryKey: ['backups'] }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['backups'] }),
     onError: (err) =>
       setDeleteError(err instanceof Error ? err.message : 'Delete failed.'),
   })
 
   return (
-    <tr className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
-      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+    <TableRow>
+      <Td style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--aurora-muted)' }}>
         {record.filename}
-      </td>
-      <td className="px-4 py-3 text-sm text-muted-foreground">
-        {formatBytes(record.size_bytes)}
-      </td>
-      <td className="px-4 py-3">{statusBadge(record.status)}</td>
-      <td className="px-4 py-3 text-sm text-muted-foreground">
+      </Td>
+      <Td style={{ color: 'var(--aurora-muted)' }}>{formatBytes(record.size_bytes)}</Td>
+      <Td>
+        <Badge variant={backupStatusVariant(record.status)}>{record.status}</Badge>
+      </Td>
+      <Td style={{ fontSize: 12, color: 'var(--aurora-muted)', whiteSpace: 'nowrap' }}>
         {formatTs(record.created_at)}
-      </td>
-      <td className="px-4 py-3">
+      </Td>
+      <Td>
         {record.status === 'ready' ? (
           <a
             href={api.backupDownloadUrl(record.id)}
             download={record.filename}
-            className="text-xs text-primary underline hover:opacity-80"
+            style={{ fontSize: 12, color: 'var(--aurora-accent)', textDecoration: 'underline' }}
           >
             Download
           </a>
         ) : (
-          <span className="text-xs text-muted-foreground">—</span>
+          <span style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>—</span>
         )}
-      </td>
-      <td className="px-4 py-3">
+      </Td>
+      <Td>
         {record.error && (
-          <p className="mb-1 text-xs text-red-600 dark:text-red-400 max-w-xs truncate" title={record.error}>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: 'var(--aurora-danger)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={record.error}>
             {record.error}
           </p>
         )}
         {confirmDelete ? (
-          <span className="flex items-center gap-1.5 text-xs">
-            <span className="text-muted-foreground">Sure?</span>
-            <button
-              type="button"
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>Sure?</span>
+            <Button
+              variant="danger"
+              size="sm"
               disabled={deleteMutation.isPending}
               onClick={() => deleteMutation.mutate()}
-              className="text-red-600 hover:text-red-700 font-medium disabled:opacity-50"
             >
               {deleteMutation.isPending ? 'Deleting…' : 'Confirm'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirmDelete(false)}
-              className="text-muted-foreground hover:text-foreground"
-            >
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(false)}>
               Cancel
-            </button>
+            </Button>
           </span>
         ) : (
-          <button
-            type="button"
+          <Button
+            variant="danger"
+            size="sm"
             onClick={() => {
               setDeleteError(null)
               setConfirmDelete(true)
             }}
-            className="text-xs text-red-500 hover:text-red-700 underline"
           >
             Delete
-          </button>
+          </Button>
         )}
         {deleteError && (
-          <p className="mt-1 text-xs text-red-600 dark:text-red-400">{deleteError}</p>
+          <p style={{ marginTop: 4, fontSize: 11, color: 'var(--aurora-danger)' }}>{deleteError}</p>
         )}
-      </td>
-    </tr>
+      </Td>
+    </TableRow>
   )
 }
 
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
+
+const COLUMNS = ['Filename', 'Size', 'Status', 'Created', 'Download', 'Actions']
 
 export function BackupsPage() {
   const queryClient = useQueryClient()
@@ -243,121 +237,107 @@ export function BackupsPage() {
   })
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Backups</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Database and configuration backups. Use the download link to
-            retrieve an archive; use the scheduled job to run backups on a
-            schedule.
-          </p>
-        </div>
-        <button
-          type="button"
-          disabled={runMutation.isPending}
-          onClick={() => {
-            setRunError(null)
-            runMutation.mutate()
-          }}
-          className="shrink-0 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-colors"
-        >
-          {runMutation.isPending ? 'Enqueueing…' : 'Run Backup Now'}
-        </button>
-      </div>
+    <AdminPage>
+      <PageHeader
+        title="Backups"
+        description="Database and configuration backups. Use the download link to retrieve an archive; use the scheduled job to run backups on a schedule."
+        meta={backupsLoading ? undefined : `${backups.length} backup${backups.length === 1 ? '' : 's'}`}
+        actions={
+          <Button
+            disabled={runMutation.isPending}
+            onClick={() => {
+              setRunError(null)
+              runMutation.mutate()
+            }}
+          >
+            {runMutation.isPending ? 'Enqueueing…' : 'Run Backup Now'}
+          </Button>
+        }
+      />
 
       {/* Run feedback */}
       {runMessage && (
-        <p className="text-sm text-green-700 dark:text-green-400">{runMessage}</p>
+        <div style={{ fontSize: 13, color: '#16A34A' }}>{runMessage}</div>
       )}
       {runError && (
-        <p className="text-sm text-red-600 dark:text-red-400">{runError}</p>
+        <div style={{ fontSize: 13, color: 'var(--aurora-danger)' }}>{runError}</div>
       )}
 
-      {/* LOUD warning callout */}
-      <div className="rounded-lg border border-amber-400 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-500 p-4">
-        <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
-          Library files are NOT backed up.
-        </p>
-        <p className="mt-1 text-sm text-amber-700 dark:text-amber-400">
-          These backups contain only the <strong>database</strong> and{' '}
-          <strong>config (encryption key)</strong>. Your 3D model files,
-          images, and other library files are <strong>not included</strong>.
-          You are responsible for backing up your library files separately
-          (e.g. via filesystem snapshots, cloud sync, or your own backup
-          solution).
-        </p>
+      {/* LOUD warning callout — keep prominent */}
+      <div
+        style={{
+          background: 'rgba(245,158,11,0.08)',
+          border: '2px solid rgba(245,158,11,0.5)',
+          borderRadius: 12,
+          padding: '16px 20px',
+          display: 'flex',
+          gap: 12,
+          alignItems: 'flex-start',
+        }}
+      >
+        <AlertTriangle size={18} style={{ color: '#D97706', flexShrink: 0, marginTop: 1 }} />
+        <div>
+          <p style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: '#D97706' }}>
+            Library files are NOT backed up.
+          </p>
+          <p style={{ margin: 0, fontSize: 13, color: '#92400E', lineHeight: 1.6 }}>
+            These backups contain only the <strong>database</strong> and{' '}
+            <strong>config (encryption key)</strong>. Your 3D model files,
+            images, and other library files are <strong>not included</strong>.
+            You are responsible for backing up your library files separately
+            (e.g. via filesystem snapshots, cloud sync, or your own backup
+            solution).
+          </p>
+        </div>
       </div>
 
       {/* Retention settings */}
-      <div className="rounded-lg border border-border bg-card p-4">
-        <h2 className="mb-3 text-sm font-semibold">Retention</h2>
+      <Card>
+        <SectionHeader>Retention</SectionHeader>
         {settingsLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: 0 }}>Loading…</p>
         ) : settings ? (
           <RetentionForm current={settings.retention_count} />
         ) : null}
-      </div>
+      </Card>
 
       {/* Backup list */}
-      {backupsLoading && (
-        <p className="text-sm text-muted-foreground">Loading…</p>
-      )}
       {backupsError && (
-        <p className="text-sm text-red-600 dark:text-red-400">
+        <div style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>
           {backupsErr instanceof Error ? backupsErr.message : 'Failed to load backups.'}
-        </p>
-      )}
-
-      {!backupsLoading && !backupsError && backups.length === 0 && (
-        <div className="rounded-lg border border-dashed border-border py-16 text-center">
-          <p className="text-muted-foreground">No backups yet.</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Click "Run Backup Now" or wait for the scheduled backup job to run.
-          </p>
         </div>
       )}
 
-      {backups.length > 0 && (
-        <div className="overflow-hidden rounded-lg border border-border">
-          <div className="flex items-center justify-between px-4 py-2 bg-muted/50 border-b border-border">
-            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              {backups.length} backup{backups.length !== 1 ? 's' : ''}
-            </span>
-            <button
-              type="button"
-              onClick={() =>
-                void queryClient.invalidateQueries({ queryKey: ['backups'] })
-              }
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Refresh
-            </button>
-          </div>
-          <table className="w-full text-sm">
-            <thead className="bg-muted/30">
-              <tr>
-                {['Filename', 'Size', 'Status', 'Created', 'Download', 'Actions'].map(
-                  (h) => (
-                    <th
-                      key={h}
-                      className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                    >
-                      {h}
-                    </th>
-                  ),
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {backups.map((b) => (
-                <BackupRow key={b.id} record={b} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={() => void queryClient.invalidateQueries({ queryKey: ['backups'] })}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            fontSize: 12,
+            color: 'var(--aurora-muted)',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+          }}
+        >
+          <RefreshCw size={12} />
+          Refresh
+        </button>
+      </div>
+
+      <DataTable
+        columns={COLUMNS}
+        isLoading={backupsLoading}
+        isEmpty={!backupsLoading && !backupsError && backups.length === 0}
+        emptyMessage="No backups yet. Click "Run Backup Now" or wait for the scheduled backup job to run."
+      >
+        {backups.map((b) => (
+          <BackupRow key={b.id} record={b} />
+        ))}
+      </DataTable>
+    </AdminPage>
   )
 }

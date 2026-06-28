@@ -10,43 +10,64 @@
  * Implementation: a plain anchor tag pointing at GET /api/admin/export/catalog.
  * The backend streams a JSON attachment. No polling or state needed.
  *
- * UI: Tailwind + CSS-variable theme. No TanStack Query needed (direct link).
+ * Styling: Aurora aesthetic (B3b restyle — visual pass, all behavior preserved).
  */
+
+import { Download } from 'lucide-react'
+import {
+  AdminPage, PageHeader,
+  Card, SectionHeader,
+} from '@/components/ui'
 
 export function ExportPage() {
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold">Export</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Download a full snapshot of your catalog as a JSON file.
-        </p>
-      </div>
+    <AdminPage>
+      <PageHeader
+        title="Export"
+        description="Download a full snapshot of your catalog as a JSON file."
+      />
 
-      {/* Export card */}
-      <div className="rounded-lg border border-border bg-card p-6 space-y-4 max-w-lg">
-        <div>
-          <h2 className="text-base font-semibold">Catalog JSON export</h2>
-          <p className="mt-1.5 text-sm text-muted-foreground">
+      <Card style={{ maxWidth: 520 }}>
+        <SectionHeader>Catalog JSON export</SectionHeader>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: 0, lineHeight: 1.6 }}>
             Downloads the complete catalog metadata as a single JSON file —
             items, tags, creators, tag aliases, and print records. The export
             is generated on demand and may take a moment for large catalogs.
           </p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            <strong>Binary files are not included.</strong> STL files, images,
-            and other library assets are not part of this export.
+          <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: 0, lineHeight: 1.6 }}>
+            <strong style={{ color: 'var(--aurora-text-dim)' }}>Binary files are not included.</strong>{' '}
+            STL files, images, and other library assets are not part of this export.
           </p>
-        </div>
 
-        <a
-          href="/api/admin/export/catalog"
-          download
-          className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-colors"
-        >
-          Download Catalog JSON
-        </a>
-      </div>
-    </div>
+          <div>
+            <a
+              href="/api/admin/export/catalog"
+              download
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                background: 'var(--aurora-accent)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                padding: '8px 16px',
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
+                textDecoration: 'none',
+                transition: 'opacity 0.15s',
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.opacity = '0.85')}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.opacity = '1')}
+            >
+              <Download size={14} />
+              Download Catalog JSON
+            </a>
+          </div>
+        </div>
+      </Card>
+    </AdminPage>
   )
 }

@@ -132,3 +132,54 @@ export function FilterPill({ active, onClick, children, disabled }: FilterPillPr
     </button>
   )
 }
+
+// ---------------------------------------------------------------------------
+// AuroraToggle — visual on/off switch for boolean settings
+// ---------------------------------------------------------------------------
+
+interface AuroraToggleProps {
+  checked: boolean
+  onChange: (checked: boolean) => void
+  disabled?: boolean
+  ariaLabel?: string
+}
+
+export function AuroraToggle({ checked, onChange, disabled, ariaLabel }: AuroraToggleProps) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={ariaLabel ?? (checked ? 'Enabled' : 'Disabled')}
+      disabled={disabled}
+      onClick={() => !disabled && onChange(!checked)}
+      style={{
+        position: 'relative',
+        display: 'inline-flex',
+        width: 36,
+        height: 20,
+        borderRadius: 10,
+        background: checked ? 'var(--aurora-accent)' : 'var(--aurora-glass)',
+        border: checked ? '1px solid var(--aurora-accent)' : '1px solid var(--aurora-glass-border)',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+        transition: 'background 0.2s, border-color 0.2s',
+        flexShrink: 0,
+      }}
+    >
+      <span
+        style={{
+          position: 'absolute',
+          top: 2,
+          left: checked ? 16 : 2,
+          width: 14,
+          height: 14,
+          borderRadius: '50%',
+          background: '#fff',
+          transition: 'left 0.2s',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
+        }}
+      />
+    </button>
+  )
+}

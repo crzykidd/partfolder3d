@@ -1,176 +1,112 @@
 /**
  * UsersPage — admin user management.
  *
- * GET /api/users → TanStack Table with email, name, role, active badge.
+ * GET /api/users → paginated table with email, name, role, active badge.
  * Row actions: disable/enable (PATCH is_active), promote to admin (PATCH role).
+ *
+ * Styling: Aurora aesthetic (B3b restyle — visual pass, all behavior preserved).
  */
 
-import {
-  useReactTable,
-  getCoreRowModel,
-  flexRender,
-  createColumnHelper,
-} from '@tanstack/react-table'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-
 import * as api from '@/lib/api'
+import {
+  AdminPage, PageHeader,
+  Badge,
+  Button,
+  DataTable, TableRow, Td,
+} from '@/components/ui'
 
-const col = createColumnHelper<api.UserSummary>()
+// ---------------------------------------------------------------------------
+// Row component
+// ---------------------------------------------------------------------------
 
-function RoleBadge({ role }: { role: string }) {
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-        role === 'admin'
-          ? 'bg-primary/10 text-primary'
-          : 'bg-muted text-muted-foreground'
-      }`}
-    >
-      {role}
-    </span>
-  )
-}
-
-function ActiveBadge({ active }: { active: boolean }) {
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-        active ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-      }`}
-    >
-      {active ? 'Active' : 'Disabled'}
-    </span>
-  )
-}
-
-function RowActions({ user }: { user: api.UserSummary }) {
+function UserRow({ user }: { user: api.UserSummary }) {
   const queryClient = useQueryClient()
   const mutation = useMutation({
-    mutationFn: (update: api.UpdateUserRequest) =>
-      api.updateUser(user.id, update),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-    },
+    mutationFn: (update: api.UpdateUserRequest) => api.updateUser(user.id, update),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['users'] }),
   })
 
+  const roleVariant = user.role === 'admin' ? 'accent' : 'muted'
+  const activeVariant = user.is_active ? 'success' : 'danger'
+
   return (
-    <div className="flex items-center gap-2">
-      <button
-        onClick={() => mutation.mutate({ is_active: !user.is_active })}
-        disabled={mutation.isPending}
-        className="text-xs text-muted-foreground hover:text-foreground underline disabled:opacity-50"
-      >
-        {user.is_active ? 'Disable' : 'Enable'}
-      </button>
-      {user.role !== 'admin' && (
-        <button
-          onClick={() => mutation.mutate({ role: 'admin' })}
-          disabled={mutation.isPending}
-          className="text-xs text-muted-foreground hover:text-foreground underline disabled:opacity-50"
-        >
-          Make admin
-        </button>
-      )}
-    </div>
+    <TableRow>
+      <Td style={{ fontFamily: 'monospace', fontSize: 12 }}>{user.email}</Td>
+      <Td>{user.name ?? <span style={{ color: 'var(--aurora-muted)' }}>—</span>}</Td>
+      <Td><Badge variant={roleVariant}>{user.role}</Badge></Td>
+      <Td><Badge variant={activeVariant}>{user.is_active ? 'Active' : 'Disabled'}</Badge></Td>
+      <Td>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={mutation.isPending}
+            onClick={() => mutation.mutate({ is_active: !user.is_active })}
+            extraStyle={user.is_active
+              ? { color: 'var(--aurora-danger)', borderColor: 'rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)' }
+              : { color: 'var(--aurora-accent)', borderColor: 'rgba(15,164,171,0.3)', background: 'rgba(15,164,171,0.08)' }
+            }
+          >
+            {user.is_active ? 'Disable' : 'Enable'}
+          </Button>
+          {user.role !== 'admin' && (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={mutation.isPending}
+              onClick={() => mutation.mutate({ role: 'admin' })}
+            >
+              Make admin
+            </Button>
+          )}
+        </div>
+        {mutation.isError && (
+          <span style={{ fontSize: 11, color: 'var(--aurora-danger)', display: 'block', marginTop: 4 }}>
+            {mutation.error instanceof Error ? mutation.error.message : 'Action failed'}
+          </span>
+        )}
+      </Td>
+    </TableRow>
   )
 }
 
-const columns = [
-  col.accessor('email', {
-    header: 'Email',
-    cell: (info) => (
-      <span className="font-mono text-sm">{info.getValue()}</span>
-    ),
-  }),
-  col.accessor('name', { header: 'Name' }),
-  col.accessor('role', {
-    header: 'Role',
-    cell: (info) => <RoleBadge role={info.getValue()} />,
-  }),
-  col.accessor('is_active', {
-    header: 'Status',
-    cell: (info) => <ActiveBadge active={info.getValue()} />,
-  }),
-  col.display({
-    id: 'actions',
-    header: 'Actions',
-    cell: (info) => <RowActions user={info.row.original} />,
-  }),
-]
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
+const COLUMNS = ['Email', 'Name', 'Role', 'Status', 'Actions']
 
 export function UsersPage() {
-  const { data: users = [], isLoading, isError } = useQuery({
+  const { data: users = [], isLoading, isError, error } = useQuery({
     queryKey: ['users'],
     queryFn: api.listUsers,
   })
 
-  const table = useReactTable({
-    data: users,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-  })
-
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold">Users</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Manage user accounts and roles.
-        </p>
-      </div>
+    <AdminPage>
+      <PageHeader
+        title="Users"
+        description="Manage user accounts and roles."
+        meta={isLoading ? undefined : `${users.length} user${users.length === 1 ? '' : 's'}`}
+      />
 
-      {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
       {isError && (
-        <p className="text-sm text-destructive">Failed to load users.</p>
-      )}
-
-      {!isLoading && !isError && (
-        <div className="overflow-x-auto rounded-lg border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              {table.getHeaderGroups().map((hg) => (
-                <tr key={hg.id}>
-                  {hg.headers.map((header) => (
-                    <th
-                      key={header.id}
-                      className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                    >
-                      {flexRender(
-                        header.column.columnDef.header,
-                        header.getContext(),
-                      )}
-                    </th>
-                  ))}
-                </tr>
-              ))}
-            </thead>
-            <tbody>
-              {table.getRowModel().rows.map((row) => (
-                <tr
-                  key={row.id}
-                  className="border-t border-border hover:bg-muted/30 transition-colors"
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-4 py-3">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-              {users.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={columns.length}
-                    className="px-4 py-8 text-center text-sm text-muted-foreground"
-                  >
-                    No users found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        <div style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>
+          {error instanceof Error ? error.message : 'Failed to load users.'}
         </div>
       )}
-    </div>
+
+      <DataTable
+        columns={COLUMNS}
+        isLoading={isLoading}
+        isEmpty={!isLoading && users.length === 0}
+        emptyMessage="No users found."
+      >
+        {users.map((user) => (
+          <UserRow key={user.id} user={user} />
+        ))}
+      </DataTable>
+    </AdminPage>
   )
 }

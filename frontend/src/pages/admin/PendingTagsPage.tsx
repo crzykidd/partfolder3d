@@ -13,12 +13,21 @@
  * the matching is entirely client-side.
  *
  * Uses GET /api/tags?active_only=false and filters client-side for status=pending.
+ *
+ * Styling: Aurora aesthetic (B3b restyle — visual pass, all behavior preserved).
  */
 
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as api from '@/lib/api'
 import { fuzzyMatchTags } from '@/lib/import-utils'
+import {
+  AdminPage, PageHeader,
+  Card, SectionHeader,
+  Button,
+  DataTable, TableRow, Td,
+  INPUT_STYLE,
+} from '@/components/ui'
 
 // ---------------------------------------------------------------------------
 // AI-assist: duplicate detection (client-side fuzzy matching)
@@ -41,9 +50,7 @@ function DuplicateDetectSection({ allTags }: DuplicateDetectSectionProps) {
   )
 
   const [tagInput, setTagInput] = useState(() => pendingLikeTags.join(', '))
-  const [results, setResults] = useState<{ pending: string; closest: string }[] | null>(
-    null,
-  )
+  const [results, setResults] = useState<{ pending: string; closest: string }[] | null>(null)
 
   const runMatch = () => {
     const names = tagInput
@@ -62,74 +69,63 @@ function DuplicateDetectSection({ allTags }: DuplicateDetectSectionProps) {
   if (pendingLikeTags.length === 0 || canonicalTags.length === 0) return null
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-      <div>
-        <h2 className="text-sm font-semibold">
-          AI-assist: possible duplicates (client-side matching)
-        </h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">
+    <Card>
+      <SectionHeader>AI-assist: possible duplicates (client-side matching)</SectionHeader>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <p style={{ fontSize: 12, color: 'var(--aurora-muted)', margin: 0, lineHeight: 1.6 }}>
           Compares pending tag names against existing canonical tags using
           Levenshtein distance (≤ 3 edits). No AI endpoint is called — this is
           client-side only. Edit the list below and click{' '}
-          <span className="font-medium">Find duplicates</span> to re-run.
+          <strong style={{ color: 'var(--aurora-text-dim)' }}>Find duplicates</strong> to re-run.
         </p>
+
+        <textarea
+          value={tagInput}
+          onChange={(e) => {
+            setTagInput(e.target.value)
+            setResults(null)
+          }}
+          rows={3}
+          placeholder="Comma-separated tag names to check…"
+          style={{
+            ...INPUT_STYLE,
+            resize: 'vertical',
+            fontFamily: 'inherit',
+          }}
+        />
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={runMatch}
+          disabled={!tagInput.trim()}
+          extraStyle={{ alignSelf: 'flex-start' }}
+        >
+          Find duplicates
+        </Button>
+
+        {results !== null && (
+          results.length === 0 ? (
+            <p style={{ fontSize: 12, color: 'var(--aurora-muted)', margin: 0 }}>
+              No near-duplicates found (all tags differ by more than 3 edits from
+              existing canonical tags).
+            </p>
+          ) : (
+            <DataTable
+              columns={['Pending tag', 'Possible duplicate of']}
+              isEmpty={false}
+            >
+              {results.map((r) => (
+                <TableRow key={r.pending}>
+                  <Td style={{ fontWeight: 600 }}>{r.pending}</Td>
+                  <Td style={{ color: 'var(--aurora-muted)' }}>{r.closest}</Td>
+                </TableRow>
+              ))}
+            </DataTable>
+          )
+        )}
       </div>
-
-      <textarea
-        value={tagInput}
-        onChange={(e) => {
-          setTagInput(e.target.value)
-          setResults(null)
-        }}
-        rows={3}
-        className="input-base w-full resize-y text-sm"
-        placeholder="Comma-separated tag names to check…"
-      />
-
-      <button
-        type="button"
-        onClick={runMatch}
-        disabled={!tagInput.trim()}
-        className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50 transition-colors"
-      >
-        Find duplicates
-      </button>
-
-      {results !== null && (
-        results.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
-            No near-duplicates found (all tags differ by more than 3 edits from
-            existing canonical tags).
-          </p>
-        ) : (
-          <div className="overflow-hidden rounded-md border border-border">
-            <table className="w-full text-xs">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase tracking-wide">
-                    Pending tag
-                  </th>
-                  <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase tracking-wide">
-                    Possible duplicate of
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {results.map((r) => (
-                  <tr
-                    key={r.pending}
-                    className="border-t border-border hover:bg-muted/30 transition-colors"
-                  >
-                    <td className="px-3 py-2 font-medium">{r.pending}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{r.closest}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )
-      )}
-    </div>
+    </Card>
   )
 }
 
@@ -167,90 +163,54 @@ export function PendingTagsPage() {
   })
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">Pending Tags</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Tags added by the import wizard that haven't been approved yet.
-          Approving a tag makes it canonical and visible in the tag cloud.
-        </p>
-      </div>
+    <AdminPage>
+      <PageHeader
+        title="Pending Tags"
+        description="Tags added by the import wizard that haven't been approved yet. Approving a tag makes it canonical and visible in the tag cloud."
+        meta={isLoading ? undefined : `${pendingTags.length} tag${pendingTags.length === 1 ? '' : 's'}`}
+      />
 
       {/* Phase 8b: AI-assist duplicate detection (client-side only) */}
       {data && <DuplicateDetectSection allTags={data.tags} />}
 
-      {isLoading && (
-        <p className="text-sm text-muted-foreground">Loading…</p>
-      )}
-
       {isError && (
-        <p className="text-sm text-red-600">
+        <div style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>
           {error instanceof Error ? error.message : 'Failed to load tags.'}
-        </p>
-      )}
-
-      {data && pendingTags.length === 0 && (
-        <div className="py-16 text-center">
-          <p className="text-muted-foreground">No pending tags.</p>
-        </div>
-      )}
-
-      {pendingTags.length > 0 && (
-        <div className="rounded-lg border border-border overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Tag name
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Category
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Uses
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Action
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {pendingTags.map((tag) => (
-                <tr
-                  key={tag.id}
-                  className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors"
-                >
-                  <td className="px-4 py-3 font-medium">{tag.name}</td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {tag.category ?? '—'}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {tag.popularity_count}
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      type="button"
-                      disabled={approveMutation.isPending}
-                      onClick={() => approveMutation.mutate(tag.id)}
-                      className="rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-colors"
-                    >
-                      Approve
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       )}
 
       {approveMutation.isError && (
-        <p className="text-sm text-red-600">
+        <div style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>
           {approveMutation.error instanceof Error
             ? approveMutation.error.message
             : 'Failed to approve tag.'}
-        </p>
+        </div>
       )}
-    </div>
+
+      <DataTable
+        columns={['Tag name', 'Category', 'Uses', 'Action']}
+        isLoading={isLoading}
+        isEmpty={!isLoading && pendingTags.length === 0}
+        emptyMessage="No pending tags."
+      >
+        {pendingTags.map((tag) => (
+          <TableRow key={tag.id}>
+            <Td style={{ fontWeight: 600 }}>{tag.name}</Td>
+            <Td style={{ color: 'var(--aurora-muted)' }}>{tag.category ?? '—'}</Td>
+            <Td style={{ color: 'var(--aurora-muted)' }}>{tag.popularity_count}</Td>
+            <Td>
+              <Button
+                size="sm"
+                disabled={approveMutation.isPending}
+                onClick={() => approveMutation.mutate(tag.id)}
+                extraStyle={{ background: 'rgba(22,163,74,0.1)', border: '1px solid rgba(22,163,74,0.3)', color: '#16A34A' }}
+              >
+                Approve
+              </Button>
+            </Td>
+          </TableRow>
+        ))}
+      </DataTable>
+    </AdminPage>
   )
 }

@@ -16,13 +16,18 @@
  *    - View Aliases (expand row → GET + POST/DELETE for aliases).
  *    - Merge Into (inline select → POST /api/admin/tags/{id}/merge-into/{target_id}).
  *
- * UI: Tailwind + CSS-variable theme + TanStack Query + apiFetch CSRF wrapper.
- * No Mantine, no toast library, no new deps.
+ * Styling: Aurora aesthetic (B3b restyle — visual pass, all behavior preserved).
  */
 
 import React, { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as api from '@/lib/api'
+import {
+  AdminPage, PageHeader,
+  Button,
+  DataTable, TableRow, Td, Pagination,
+  AuroraInput, AuroraSelect,
+} from '@/components/ui'
 
 // ---------------------------------------------------------------------------
 // Pending tags section
@@ -35,83 +40,73 @@ function PendingTagRow({ tag }: { tag: api.TagAdminOut }) {
 
   const approveMutation = useMutation({
     mutationFn: () => api.adminApproveTag(tag.id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['admin-tags-pending'] })
-    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['admin-tags-pending'] }),
     onError: (err) =>
       setError(err instanceof Error ? err.message : 'Approve failed.'),
   })
 
   const rejectMutation = useMutation({
     mutationFn: () => api.adminRejectTag(tag.id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['admin-tags-pending'] })
-    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['admin-tags-pending'] }),
     onError: (err) =>
       setError(err instanceof Error ? err.message : 'Reject failed.'),
   })
 
+  const busy = approveMutation.isPending || rejectMutation.isPending
+
   return (
-    <tr className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
-      <td className="px-4 py-3 font-medium">{tag.name}</td>
-      <td className="px-4 py-3 text-sm text-muted-foreground">
-        {tag.category ?? '—'}
-      </td>
-      <td className="px-4 py-3 text-sm text-muted-foreground">
-        {tag.popularity_count}
-      </td>
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            type="button"
-            disabled={approveMutation.isPending || rejectMutation.isPending}
+    <TableRow>
+      <Td style={{ fontWeight: 600 }}>{tag.name}</Td>
+      <Td style={{ color: 'var(--aurora-muted)' }}>{tag.category ?? '—'}</Td>
+      <Td style={{ color: 'var(--aurora-muted)' }}>{tag.popularity_count}</Td>
+      <Td>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <Button
+            size="sm"
+            disabled={busy}
             onClick={() => {
               setError(null)
               approveMutation.mutate()
             }}
-            className="rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-colors"
+            extraStyle={{ background: 'rgba(22,163,74,0.1)', border: '1px solid rgba(22,163,74,0.3)', color: '#16A34A' }}
           >
             {approveMutation.isPending ? 'Approving…' : 'Approve'}
-          </button>
+          </Button>
 
           {confirmReject ? (
-            <span className="flex items-center gap-1.5 text-xs">
-              <span className="text-muted-foreground">Sure?</span>
-              <button
-                type="button"
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>Sure?</span>
+              <Button
+                variant="danger"
+                size="sm"
                 disabled={rejectMutation.isPending}
                 onClick={() => {
                   setError(null)
                   rejectMutation.mutate()
                 }}
-                className="text-red-600 hover:text-red-700 font-medium disabled:opacity-50"
               >
                 {rejectMutation.isPending ? 'Rejecting…' : 'Confirm reject'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmReject(false)}
-                className="text-muted-foreground hover:text-foreground"
-              >
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setConfirmReject(false)}>
                 Cancel
-              </button>
+              </Button>
             </span>
           ) : (
-            <button
-              type="button"
+            <Button
+              variant="danger"
+              size="sm"
               disabled={approveMutation.isPending}
               onClick={() => setConfirmReject(true)}
-              className="text-xs text-red-500 hover:text-red-700 underline"
             >
               Reject
-            </button>
+            </Button>
           )}
         </div>
         {error && (
-          <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>
+          <p style={{ marginTop: 4, fontSize: 11, color: 'var(--aurora-danger)', margin: '4px 0 0' }}>{error}</p>
         )}
-      </td>
-    </tr>
+      </Td>
+    </TableRow>
   )
 }
 
@@ -122,51 +117,33 @@ function PendingTagsSection() {
   })
 
   return (
-    <div className="space-y-3">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div>
-        <h2 className="text-lg font-semibold">Pending tags</h2>
-        <p className="text-sm text-muted-foreground">
+        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--aurora-text)', marginBottom: 4 }}>
+          Pending tags
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: 0 }}>
           Tags submitted by the import wizard that need approval before they
           appear in the catalog tag cloud.
         </p>
       </div>
 
-      {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
       {isError && (
-        <p className="text-sm text-red-600 dark:text-red-400">
+        <div style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>
           {error instanceof Error ? error.message : 'Failed to load pending tags.'}
-        </p>
-      )}
-
-      {!isLoading && !isError && pending.length === 0 && (
-        <div className="rounded-lg border border-dashed border-border py-8 text-center">
-          <p className="text-sm text-muted-foreground">No pending tags.</p>
         </div>
       )}
 
-      {pending.length > 0 && (
-        <div className="overflow-hidden rounded-lg border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                {['Tag name', 'Category', 'Uses', 'Actions'].map((h) => (
-                  <th
-                    key={h}
-                    className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {pending.map((tag) => (
-                <PendingTagRow key={tag.id} tag={tag} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        columns={['Tag name', 'Category', 'Uses', 'Actions']}
+        isLoading={isLoading}
+        isEmpty={!isLoading && pending.length === 0}
+        emptyMessage="No pending tags."
+      >
+        {pending.map((tag) => (
+          <PendingTagRow key={tag.id} tag={tag} />
+        ))}
+      </DataTable>
     </div>
   )
 }
@@ -203,47 +180,47 @@ function AliasesPanel({ tagId, onClose }: { tagId: number; onClose: () => void }
   })
 
   return (
-    <tr className="border-b border-border bg-muted/10">
-      <td colSpan={5} className="px-4 py-4">
-        <div className="space-y-3 max-w-lg">
-          <div className="flex items-center justify-between">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+    <tr style={{ borderTop: '1px solid var(--aurora-divider)', background: 'rgba(15,164,171,0.02)' }}>
+      <td colSpan={5} style={{ padding: '16px 18px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 480 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
               Aliases
-            </h4>
+            </span>
             <button
               type="button"
               onClick={onClose}
-              className="text-xs text-muted-foreground hover:text-foreground underline"
+              style={{ fontSize: 12, color: 'var(--aurora-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
             >
               Close
             </button>
           </div>
 
           {isLoading ? (
-            <p className="text-xs text-muted-foreground">Loading…</p>
+            <p style={{ fontSize: 12, color: 'var(--aurora-muted)', margin: 0 }}>Loading…</p>
           ) : aliases.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No aliases yet.</p>
+            <p style={{ fontSize: 12, color: 'var(--aurora-muted)', margin: 0 }}>No aliases yet.</p>
           ) : (
-            <ul className="space-y-1">
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
               {aliases.map((a) => (
-                <li key={a.id} className="flex items-center justify-between text-sm">
-                  <span className="font-mono text-xs">{a.alias}</span>
-                  <button
-                    type="button"
+                <li key={a.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--aurora-text)' }}>{a.alias}</span>
+                  <Button
+                    variant="danger"
+                    size="sm"
                     disabled={deleteMutation.isPending}
                     onClick={() => deleteMutation.mutate(a.id)}
-                    className="text-xs text-red-500 hover:text-red-700 underline disabled:opacity-50"
                   >
                     Delete
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>
           )}
 
           {/* Add alias */}
-          <div className="flex gap-2">
-            <input
+          <div style={{ display: 'flex', gap: 8 }}>
+            <AuroraInput
               type="text"
               value={newAlias}
               onChange={(e) => {
@@ -251,19 +228,18 @@ function AliasesPanel({ tagId, onClose }: { tagId: number; onClose: () => void }
                 setAddError(null)
               }}
               placeholder="New alias…"
-              className="input-base flex-1 text-sm"
+              style={{ flex: 1 }}
             />
-            <button
-              type="button"
+            <Button
+              size="sm"
               disabled={addMutation.isPending || !newAlias.trim()}
               onClick={() => addMutation.mutate()}
-              className="rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-colors"
             >
               {addMutation.isPending ? 'Adding…' : 'Add'}
-            </button>
+            </Button>
           </div>
           {addError && (
-            <p className="text-xs text-red-600 dark:text-red-400">{addError}</p>
+            <p style={{ fontSize: 12, color: 'var(--aurora-danger)', margin: 0 }}>{addError}</p>
           )}
         </div>
       </td>
@@ -288,7 +264,6 @@ function MergePanel({ tag, allTags, onClose }: MergePanelProps) {
   const [result, setResult] = useState<string | null>(null)
   const [mergeError, setMergeError] = useState<string | null>(null)
 
-  // Filter out the current tag from options
   const options = allTags.filter((t) => t.id !== tag.id)
 
   const mergeMutation = useMutation({
@@ -309,13 +284,13 @@ function MergePanel({ tag, allTags, onClose }: MergePanelProps) {
 
   if (result) {
     return (
-      <tr className="border-b border-border bg-muted/10">
-        <td colSpan={5} className="px-4 py-4">
-          <p className="text-xs text-green-700 dark:text-green-400">{result}</p>
+      <tr style={{ borderTop: '1px solid var(--aurora-divider)', background: 'rgba(15,164,171,0.02)' }}>
+        <td colSpan={5} style={{ padding: '16px 18px' }}>
+          <p style={{ fontSize: 12, color: '#16A34A', margin: '0 0 8px' }}>{result}</p>
           <button
             type="button"
             onClick={onClose}
-            className="mt-2 text-xs text-muted-foreground underline hover:text-foreground"
+            style={{ fontSize: 12, color: 'var(--aurora-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
           >
             Close
           </button>
@@ -325,82 +300,76 @@ function MergePanel({ tag, allTags, onClose }: MergePanelProps) {
   }
 
   return (
-    <tr className="border-b border-border bg-muted/10">
-      <td colSpan={5} className="px-4 py-4">
-        <div className="space-y-3 max-w-lg">
-          <div className="flex items-center justify-between">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+    <tr style={{ borderTop: '1px solid var(--aurora-divider)', background: 'rgba(15,164,171,0.02)' }}>
+      <td colSpan={5} style={{ padding: '16px 18px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 480 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
               Merge "{tag.name}" into another tag
-            </h4>
+            </span>
             <button
               type="button"
               onClick={onClose}
-              className="text-xs text-muted-foreground hover:text-foreground underline"
+              style={{ fontSize: 12, color: 'var(--aurora-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
             >
               Cancel
             </button>
           </div>
 
-          <p className="text-xs text-muted-foreground">
+          <p style={{ fontSize: 12, color: 'var(--aurora-muted)', margin: 0, lineHeight: 1.5 }}>
             All items using "{tag.name}" will be re-tagged to the target.
             The source tag will be deleted and its name will become an alias of the target.
             This operation cannot be undone.
           </p>
 
-          <div className="flex gap-2 items-center">
-            <select
-              value={targetId}
-              onChange={(e) => {
-                setTargetId(e.target.value === '' ? '' : Number(e.target.value))
-                setConfirm(false)
-                setMergeError(null)
-              }}
-              className="input-base flex-1 text-sm"
-            >
-              <option value="">— select target tag —</option>
-              {options.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name} ({t.popularity_count} uses)
-                </option>
-              ))}
-            </select>
-          </div>
+          <AuroraSelect
+            value={targetId}
+            onChange={(e) => {
+              setTargetId(e.target.value === '' ? '' : Number(e.target.value))
+              setConfirm(false)
+              setMergeError(null)
+            }}
+          >
+            <option value="">— select target tag —</option>
+            {options.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name} ({t.popularity_count} uses)
+              </option>
+            ))}
+          </AuroraSelect>
 
           {targetId !== '' && !confirm && (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setConfirm(true)}
-              className="rounded-md border border-amber-400 bg-amber-50 dark:bg-amber-950/30 px-3 py-1.5 text-xs text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-950/50 transition-colors"
+              extraStyle={{ color: '#D97706', borderColor: 'rgba(245,158,11,0.4)', background: 'rgba(245,158,11,0.07)', alignSelf: 'flex-start' }}
             >
               Merge — confirm required
-            </button>
+            </Button>
           )}
 
           {confirm && targetId !== '' && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>
                 This will permanently delete "{tag.name}". Are you sure?
               </span>
-              <button
-                type="button"
+              <Button
+                variant="danger"
+                size="sm"
                 disabled={mergeMutation.isPending}
                 onClick={() => mergeMutation.mutate()}
-                className="rounded-md bg-red-600 px-3 py-1.5 text-xs text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
               >
                 {mergeMutation.isPending ? 'Merging…' : 'Yes, merge'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirm(false)}
-                className="text-xs text-muted-foreground underline hover:text-foreground"
-              >
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setConfirm(false)}>
                 Cancel
-              </button>
+              </Button>
             </div>
           )}
 
           {mergeError && (
-            <p className="text-xs text-red-600 dark:text-red-400">{mergeError}</p>
+            <p style={{ fontSize: 12, color: 'var(--aurora-danger)', margin: 0 }}>{mergeError}</p>
           )}
         </div>
       </td>
@@ -446,14 +415,14 @@ function AllTagRow({ tag, allTags }: AllTagRowProps) {
 
   return (
     <>
-      <tr className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
-        <td className="px-4 py-3 font-medium">{tag.name}</td>
+      <TableRow>
+        <Td style={{ fontWeight: 600 }}>{tag.name}</Td>
 
         {/* Category cell */}
-        <td className="px-4 py-3">
+        <Td>
           {editingCategory ? (
-            <div className="flex items-center gap-1.5">
-              <input
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <AuroraInput
                 type="text"
                 value={categoryInput}
                 onChange={(e) => {
@@ -461,28 +430,27 @@ function AllTagRow({ tag, allTags }: AllTagRowProps) {
                   setCategoryError(null)
                 }}
                 placeholder="e.g. material"
-                className="input-base w-28 text-xs"
+                style={{ width: 110, fontSize: 12 }}
                 autoFocus
               />
-              <button
-                type="button"
+              <Button
+                size="sm"
                 disabled={categoryMutation.isPending}
                 onClick={handleCategorySave}
-                className="rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-colors"
               >
                 {categoryMutation.isPending ? '…' : 'Save'}
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => {
                   setEditingCategory(false)
                   setCategoryInput(tag.category ?? '')
                   setCategoryError(null)
                 }}
-                className="text-xs text-muted-foreground hover:text-foreground"
               >
                 ×
-              </button>
+              </Button>
             </div>
           ) : (
             <button
@@ -491,60 +459,61 @@ function AllTagRow({ tag, allTags }: AllTagRowProps) {
                 setEditingCategory(true)
                 setCategoryInput(tag.category ?? '')
               }}
-              className="text-sm text-muted-foreground hover:text-foreground text-left"
+              style={{
+                fontSize: 13,
+                color: 'var(--aurora-muted)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
               title="Click to edit category"
             >
-              {tag.category ?? <span className="italic text-muted-foreground/60">none</span>}
+              {tag.category ?? <span style={{ fontStyle: 'italic', opacity: 0.5 }}>none</span>}
             </button>
           )}
           {categoryError && (
-            <p className="mt-0.5 text-xs text-red-600 dark:text-red-400">{categoryError}</p>
+            <p style={{ marginTop: 2, fontSize: 11, color: 'var(--aurora-danger)', margin: '2px 0 0' }}>{categoryError}</p>
           )}
           {categorySaved && (
-            <p className="mt-0.5 text-xs text-green-600 dark:text-green-400">Saved</p>
+            <p style={{ marginTop: 2, fontSize: 11, color: '#16A34A', margin: '2px 0 0' }}>Saved</p>
           )}
-        </td>
+        </Td>
 
-        <td className="px-4 py-3 text-sm text-muted-foreground">
-          {tag.popularity_count}
-        </td>
+        <Td style={{ color: 'var(--aurora-muted)' }}>{tag.popularity_count}</Td>
 
         {/* Actions */}
-        <td className="px-4 py-3">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
+        <Td>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 setShowAliases((v) => !v)
                 setShowMerge(false)
               }}
-              className="text-xs text-muted-foreground hover:text-foreground underline"
             >
               {showAliases ? 'Hide aliases' : 'Aliases'}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 setShowMerge((v) => !v)
                 setShowAliases(false)
               }}
-              className="text-xs text-muted-foreground hover:text-foreground underline"
             >
               {showMerge ? 'Cancel merge' : 'Merge into…'}
-            </button>
+            </Button>
           </div>
-        </td>
-      </tr>
+        </Td>
+      </TableRow>
 
       {showAliases && (
         <AliasesPanel tagId={tag.id} onClose={() => setShowAliases(false)} />
       )}
       {showMerge && (
-        <MergePanel
-          tag={tag}
-          allTags={allTags}
-          onClose={() => setShowMerge(false)}
-        />
+        <MergePanel tag={tag} allTags={allTags} onClose={() => setShowMerge(false)} />
       )}
     </>
   )
@@ -584,16 +553,18 @@ function AllTagsSection() {
   const mergeList = allTagsForMerge?.tags ?? []
 
   return (
-    <div className="space-y-3">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div>
-        <h2 className="text-lg font-semibold">All tags</h2>
-        <p className="text-sm text-muted-foreground">
+        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--aurora-text)', marginBottom: 4 }}>
+          All tags
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: 0 }}>
           Search, set categories, manage aliases, or merge duplicate tags.
         </p>
       </div>
 
       {/* Search */}
-      <input
+      <AuroraInput
         type="text"
         value={search}
         onChange={(e) => {
@@ -601,71 +572,36 @@ function AllTagsSection() {
           setPage(1)
         }}
         placeholder="Search tags…"
-        className="input-base w-full max-w-sm text-sm"
+        style={{ maxWidth: 320 }}
       />
 
-      {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
       {isError && (
-        <p className="text-sm text-red-600 dark:text-red-400">
+        <div style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>
           {error instanceof Error ? error.message : 'Failed to load tags.'}
-        </p>
-      )}
-
-      {!isLoading && !isError && tags.length === 0 && (
-        <div className="rounded-lg border border-dashed border-border py-8 text-center">
-          <p className="text-sm text-muted-foreground">No tags found.</p>
         </div>
       )}
 
-      {tags.length > 0 && (
-        <>
-          <div className="overflow-hidden rounded-lg border border-border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  {['Name', 'Category', 'Uses', 'Actions'].map((h) => (
-                    <th
-                      key={h}
-                      className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {tags.map((tag) => (
-                  <AllTagRow key={tag.id} tag={tag} allTags={mergeList} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+      <DataTable
+        columns={['Name', 'Category', 'Uses', 'Actions']}
+        isLoading={isLoading}
+        isEmpty={!isLoading && tags.length === 0}
+        emptyMessage="No tags found."
+      >
+        {tags.map((tag) => (
+          <AllTagRow key={tag.id} tag={tag} allTags={mergeList} />
+        ))}
+      </DataTable>
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center gap-2 text-sm">
-              <button
-                type="button"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => p - 1)}
-                className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50 transition-colors"
-              >
-                Previous
-              </button>
-              <span className="text-muted-foreground text-xs">
-                Page {page} of {totalPages} ({total} total)
-              </span>
-              <button
-                type="button"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => p + 1)}
-                className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50 transition-colors"
-              >
-                Next
-              </button>
-            </div>
-          )}
-        </>
+      {total > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>{total} total</span>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            onPrev={() => setPage((p) => p - 1)}
+            onNext={() => setPage((p) => p + 1)}
+          />
+        </div>
       )}
     </div>
   )
@@ -677,24 +613,17 @@ function AllTagsSection() {
 
 export function TagAdminPage() {
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold">Tag Administration</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Approve or reject pending tags, manage categories and aliases, and
-          merge duplicate tags into canonical forms.
-        </p>
-      </div>
+    <AdminPage>
+      <PageHeader
+        title="Tag Administration"
+        description="Approve or reject pending tags, manage categories and aliases, and merge duplicate tags into canonical forms."
+      />
 
-      {/* Pending tags */}
       <PendingTagsSection />
 
-      {/* Divider */}
-      <hr className="border-border" />
+      <div style={{ borderTop: '1px solid var(--aurora-divider)', margin: '4px 0' }} />
 
-      {/* All tags */}
       <AllTagsSection />
-    </div>
+    </AdminPage>
   )
 }

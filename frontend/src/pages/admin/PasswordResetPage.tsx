@@ -6,12 +6,27 @@
  *
  * Note: the backend has no "list active tokens" endpoint in Phase 1.
  * We track created tokens in local state (per session) and allow revoking them.
+ *
+ * Styling: Aurora aesthetic (B3b restyle — visual pass, all behavior preserved).
  */
 
 import React, { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-
+import { Copy, Check } from 'lucide-react'
 import * as api from '@/lib/api'
+import {
+  AdminPage, PageHeader,
+  Card, SectionHeader,
+  Badge,
+  Button,
+  DataTable, TableRow, Td,
+  Field, AuroraInput,
+  CARD_STYLE,
+} from '@/components/ui'
+
+// ---------------------------------------------------------------------------
+// Local reset record
+// ---------------------------------------------------------------------------
 
 interface LocalReset {
   id: number
@@ -21,13 +36,11 @@ interface LocalReset {
   revoked: boolean
 }
 
-function CopyUrlDialog({
-  token,
-  onClose,
-}: {
-  token: string
-  onClose: () => void
-}) {
+// ---------------------------------------------------------------------------
+// Copy URL dialog (shown once)
+// ---------------------------------------------------------------------------
+
+function CopyUrlDialog({ token, onClose }: { token: string; onClose: () => void }) {
   const url = `${window.location.origin}/password-reset/${token}`
   const [copied, setCopied] = useState(false)
 
@@ -39,36 +52,71 @@ function CopyUrlDialog({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-      <div className="bg-card border border-border rounded-lg shadow-xl w-full max-w-md p-6 flex flex-col gap-4">
-        <h2 className="text-lg font-semibold">Reset link created</h2>
-        <p className="text-sm text-muted-foreground">
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.5)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 50,
+        padding: '0 16px',
+      }}
+    >
+      <div
+        style={{
+          ...CARD_STYLE,
+          padding: '24px',
+          maxWidth: 480,
+          width: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+        }}
+      >
+        <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--aurora-text)', margin: 0 }}>
+          Reset link created
+        </h2>
+        <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: 0, lineHeight: 1.6 }}>
           Copy this link and send it to the user. It is shown{' '}
-          <strong>once only</strong> and expires in 24 hours.
+          <strong style={{ color: 'var(--aurora-text-dim)' }}>once only</strong> and expires in 24 hours.
         </p>
 
-        <div className="rounded-md bg-muted px-3 py-2 font-mono text-xs break-all select-all">
+        <div
+          style={{
+            background: 'var(--aurora-glass)',
+            border: '1px solid var(--aurora-glass-border)',
+            borderRadius: 8,
+            padding: '8px 12px',
+            fontFamily: 'monospace',
+            fontSize: 12,
+            wordBreak: 'break-all',
+            userSelect: 'all',
+            color: 'var(--aurora-text)',
+          }}
+        >
           {url}
         </div>
 
-        <div className="flex gap-3">
-          <button
-            onClick={handleCopy}
-            className="flex-1 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            {copied ? 'Copied!' : 'Copy link'}
-          </button>
-          <button
-            onClick={onClose}
-            className="flex-1 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium hover:bg-accent transition-colors"
-          >
+        <div style={{ display: 'flex', gap: 10 }}>
+          <Button onClick={handleCopy} extraStyle={{ flex: 1, justifyContent: 'center' }}>
+            {copied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy link</>}
+          </Button>
+          <Button variant="ghost" onClick={onClose} extraStyle={{ flex: 1, justifyContent: 'center' }}>
             Done
-          </button>
+          </Button>
         </div>
       </div>
     </div>
   )
 }
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
+const COLUMNS = ['Email', 'Expires', 'Status', '']
 
 export function PasswordResetPage() {
   const [email, setEmail] = useState('')
@@ -90,9 +138,7 @@ export function PasswordResetPage() {
   const revokeMutation = useMutation({
     mutationFn: (id: number) => api.revokePasswordReset(id),
     onSuccess: (_, id) => {
-      setResets((prev) =>
-        prev.map((r) => (r.id === id ? { ...r, revoked: true } : r)),
-      )
+      setResets((prev) => prev.map((r) => (r.id === id ? { ...r, revoked: true } : r)))
     },
   })
 
@@ -103,107 +149,82 @@ export function PasswordResetPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold">Password reset</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Generate a one-time reset link for a user. Links expire after 24 hours.
-        </p>
-      </div>
+    <AdminPage>
+      <PageHeader
+        title="Password Reset"
+        description="Generate a one-time reset link for a user. Links expire after 24 hours."
+      />
 
       {/* Create form */}
-      <div className="rounded-lg border border-border bg-card p-4">
-        <h2 className="text-sm font-semibold mb-3">Generate reset link</h2>
-        <form onSubmit={handleCreate} className="flex gap-3">
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="user@example.com"
-            className="input-base flex-1"
-            required
-          />
-          <button
-            type="submit"
-            disabled={createMutation.isPending}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-          >
+      <Card>
+        <SectionHeader>Generate reset link</SectionHeader>
+        <form onSubmit={handleCreate} style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+          <div style={{ flex: 1 }}>
+            <Field label="Email">
+              <AuroraInput
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="user@example.com"
+                required
+              />
+            </Field>
+          </div>
+          <Button type="submit" disabled={createMutation.isPending} extraStyle={{ marginBottom: 4 }}>
             {createMutation.isPending ? 'Creating…' : 'Generate'}
-          </button>
+          </Button>
         </form>
         {createMutation.isError && (
-          <p className="mt-2 text-sm text-destructive">
+          <p style={{ marginTop: 8, fontSize: 12, color: 'var(--aurora-danger)' }}>
             {createMutation.error instanceof api.ApiError
               ? createMutation.error.message
               : 'Failed to generate reset link.'}
           </p>
         )}
-      </div>
+      </Card>
 
       {/* Session history */}
       {resets.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <h2 className="text-sm font-semibold">Generated this session</h2>
-          <div className="overflow-x-auto rounded-lg border border-border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  {['Email', 'Expires', 'Status', ''].map((h) => (
-                    <th
-                      key={h}
-                      className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {resets.map((r) => (
-                  <tr
-                    key={r.id}
-                    className="border-t border-border hover:bg-muted/30 transition-colors"
-                  >
-                    <td className="px-4 py-3 font-mono">{r.email}</td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {new Date(r.expires_at).toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                          r.revoked
-                            ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                            : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-                        }`}
-                      >
-                        {r.revoked ? 'Revoked' : 'Active'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {!r.revoked && (
-                        <button
-                          onClick={() => revokeMutation.mutate(r.id)}
-                          disabled={revokeMutation.isPending}
-                          className="text-xs text-destructive hover:underline disabled:opacity-50"
-                        >
-                          Revoke
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            Generated this session
           </div>
+          <DataTable
+            columns={COLUMNS}
+            isEmpty={false}
+          >
+            {resets.map((r) => (
+              <TableRow key={r.id}>
+                <Td style={{ fontFamily: 'monospace', fontSize: 12 }}>{r.email}</Td>
+                <Td style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>
+                  {new Date(r.expires_at).toLocaleString()}
+                </Td>
+                <Td>
+                  <Badge variant={r.revoked ? 'danger' : 'warning'}>
+                    {r.revoked ? 'Revoked' : 'Active'}
+                  </Badge>
+                </Td>
+                <Td>
+                  {!r.revoked && (
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      disabled={revokeMutation.isPending}
+                      onClick={() => revokeMutation.mutate(r.id)}
+                    >
+                      Revoke
+                    </Button>
+                  )}
+                </Td>
+              </TableRow>
+            ))}
+          </DataTable>
         </div>
       )}
 
       {pendingToken && (
-        <CopyUrlDialog
-          token={pendingToken}
-          onClose={() => setPendingToken(null)}
-        />
+        <CopyUrlDialog token={pendingToken} onClose={() => setPendingToken(null)} />
       )}
-    </div>
+    </AdminPage>
   )
 }

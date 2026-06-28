@@ -29,7 +29,7 @@ export {
 } from './Badge'
 export type { BadgeVariant } from './Badge'
 
-export { Button, FilterPill } from './Button'
+export { Button, FilterPill, AuroraToggle } from './Button'
 export type { ButtonProps } from './Button'
 
 export {
