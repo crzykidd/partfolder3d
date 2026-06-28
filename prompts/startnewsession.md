@@ -8,7 +8,13 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-06-27 (Phase 9a + UI prototypes committed; 9b in flight; autonomous run to v1)
+**Last updated:** 2026-06-27 (Phase 9 done; Phase 10a hardening in flight; autonomous run to v1)
+
+> **Release machinery still UNFILLED (Phase 10b, orchestrator to do after 10a):** version
+> source-of-truth (only `frontend/package.json`=0.1.0 today; no bare VERSION file), the
+> `.claude/commands/release-{prep,cut}.md` placeholders (36 + 17), and there's no `CHANGELOG.md`.
+> Fill these to make `/release-prep` + `/release-cut` functional. **Do NOT cut the release**
+> until after the UI revamp + explicit owner go.
 
 > **UI prototypes for owner review** are live at `/examples`, `/example1` (Mission Control —
 > dense dark left rail), `/example2` (Atelier — airy light top-nav + Radix dropdowns),
