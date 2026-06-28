@@ -14,7 +14,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from '@/components/ThemeProvider'
 import { AuthProvider } from '@/context/AuthContext'
 import { AuthGuard, AdminGuard } from '@/components/AuthGuard'
-import { AppShell } from '@/components/AppShell'
+import { AuroraShell } from '@/components/shell/AuroraShell'
 
 import { VersionPage } from '@/pages/VersionPage'
 import { SetupPage } from '@/pages/SetupPage'
@@ -90,7 +90,7 @@ function App() {
 
               {/* Protected routes — must be authenticated */}
               <Route element={<AuthGuard />}>
-                <Route element={<AppShell />}>
+                <Route element={<AuroraShell />}>
                   <Route index element={<VersionPage />} />
 
                   {/* Catalog */}

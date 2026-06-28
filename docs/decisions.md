@@ -2,6 +2,58 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-28 — UI revamp A1: Aurora AppShell
+
+### Aesthetic locked: Aurora (Example3) with CSS variable tokens
+
+The owner selected the Aurora prototype (`frontend/src/pages/examples/Example3.tsx`) as
+the real app's look. Aurora tokens (`--aurora-*`) are now declared in `index.css` for
+both light and dark modes; the shell components reference them via `var()` in inline
+styles. `frontend/src/pages/examples/` is kept untouched as the reference prototype.
+
+### Two shells, one navConfig source of truth
+
+All authenticated navigation is defined in `frontend/src/lib/navConfig.ts` (groups →
+items with real App.tsx routes and lucide icons, role-gated). Two shells consume it:
+
+- **SideNavShell** — collapsible glass sidebar (full ↔ icon-rail), grouped with animated
+  collapse, pill active state with teal glow, version + release notes in the footer.
+- **TopNavShell** — sticky top bar, Radix `react-dropdown-menu` per group, Aurora skin.
+
+Both include the stat strip and the collapsible Quick Import right rail.
+
+### nav_layout: per-user server preference, role default, graceful fallback
+
+`users.nav_layout` (nullable `VARCHAR(16)`, migration 0011) holds `'top'` or `'side'`.
+Resolution order: server value → localStorage (`partfolder3d-nav-layout`) → role default
+(admin → `side`, user → `top`). The `useNavLayout()` hook wraps this; errors on
+`GET/PUT /api/me/nav-layout` are swallowed so the app never hard-breaks when the
+migration is not yet applied on a running container (graceful degradation to
+localStorage + role default). The user-menu toggle in both shells calls `setLayout()`
+which updates optimistically and PUTs to the server fire-and-forget.
+
+**Migration-restart note:** containers running before migration 0011 is applied need
+recreation (`docker compose up -d --force-recreate`) or an alembic upgrade to pick up
+the column. The frontend falls back gracefully until then.
+
+### Stat strip: real data, fixed tile set for A1
+
+Five tiles fetch real data (items count, prints done, filament weight, success rate,
+jobs running) via TanStack Query. Graceful dash shown on any error. The tile set is
+fixed for A1; A2 will make it customizable.
+
+### Quick Import rail: wraps real AddAssetModal
+
+The collapsible right rail contains the production `AddAssetModal` (upload + URL tabs →
+`/import/:sessionId` flow). No mock. Collapsed state persisted to localStorage.
+
+### `AuroraShell` router component
+
+`AuroraShell` (mounted in App.tsx where `AppShell` was) calls `useNavLayout()` and
+renders `SideNavShell` or `TopNavShell` accordingly. The old `AppShell.tsx` is kept but
+not wired into any route. All existing routes, `AuthGuard`, `AdminGuard`, and public
+routes are unchanged.
+
 ## 2026-06-28 — Phase 10b release machinery decisions
 
 ### Version source-of-truth: `backend/app/version.py` (already existed from Phase 0)

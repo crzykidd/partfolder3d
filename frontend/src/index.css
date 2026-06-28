@@ -47,6 +47,75 @@
   }
 }
 
+/* ── Aurora shell theme tokens ─────────────────────────────────────────────
+   Used by SideNavShell / TopNavShell / StatStrip / QuickImportRail.
+   Pages keep the existing shadcn variables above; only the shell references these.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Light aurora */
+  --aurora-bg-from: #E8F4F5;
+  --aurora-bg-to:   #F0F7FF;
+  --aurora-glass:          rgba(255,255,255,0.72);
+  --aurora-glass-border:   rgba(0,0,0,0.08);
+  --aurora-glass-hover:    rgba(255,255,255,0.88);
+  --aurora-pill:           rgba(15,164,171,0.10);
+  --aurora-pill-border:    rgba(15,164,171,0.35);
+  --aurora-glow:           0 0 16px rgba(15,164,171,0.20);
+  --aurora-text:           #0F1E2D;
+  --aurora-text-dim:       #2D4A62;
+  --aurora-muted:          #7A9EB5;
+  --aurora-accent:         #0FA4AB;
+  --aurora-accent-fg:      #FFFFFF;
+  --aurora-accent-glow:    rgba(15,164,171,0.30);
+  --aurora-divider:        rgba(0,0,0,0.07);
+  --aurora-input-bg:       rgba(255,255,255,0.80);
+  --aurora-input-border:   rgba(0,0,0,0.10);
+  --aurora-card:           rgba(255,255,255,0.75);
+  --aurora-card-border:    rgba(0,0,0,0.07);
+  --aurora-danger:         #DC2626;
+  --aurora-stat1:          #0FA4AB;
+  --aurora-stat2:          #16A34A;
+  --aurora-stat3:          #D97706;
+  --aurora-stat4:          #7C3AED;
+  --aurora-stat5:          #DB2777;
+  --aurora-palette-bg:     rgba(255,255,255,0.97);
+  --aurora-palette-border: rgba(0,0,0,0.10);
+  --aurora-palette-hover:  rgba(15,164,171,0.08);
+}
+
+.dark {
+  /* Dark aurora */
+  --aurora-bg-from: #050D1C;
+  --aurora-bg-to:   #081728;
+  --aurora-glass:          rgba(255,255,255,0.04);
+  --aurora-glass-border:   rgba(255,255,255,0.08);
+  --aurora-glass-hover:    rgba(255,255,255,0.07);
+  --aurora-pill:           rgba(15,164,171,0.18);
+  --aurora-pill-border:    rgba(15,164,171,0.45);
+  --aurora-glow:           0 0 18px rgba(15,164,171,0.28);
+  --aurora-text:           #E0EAF4;
+  --aurora-text-dim:       #8BAFC7;
+  --aurora-muted:          #4A6B84;
+  --aurora-accent:         #0FA4AB;
+  --aurora-accent-fg:      #FFFFFF;
+  --aurora-accent-glow:    rgba(15,164,171,0.40);
+  --aurora-divider:        rgba(255,255,255,0.07);
+  --aurora-input-bg:       rgba(255,255,255,0.06);
+  --aurora-input-border:   rgba(255,255,255,0.10);
+  --aurora-card:           rgba(255,255,255,0.03);
+  --aurora-card-border:    rgba(255,255,255,0.07);
+  --aurora-danger:         #EF4444;
+  --aurora-stat1:          #0FA4AB;
+  --aurora-stat2:          #22C55E;
+  --aurora-stat3:          #F59E0B;
+  --aurora-stat4:          #8B5CF6;
+  --aurora-stat5:          #EC4899;
+  --aurora-palette-bg:     rgba(10,20,38,0.97);
+  --aurora-palette-border: rgba(255,255,255,0.12);
+  --aurora-palette-hover:  rgba(15,164,171,0.12);
+}
+
 @layer base {
   * {
     border-color: hsl(var(--border));

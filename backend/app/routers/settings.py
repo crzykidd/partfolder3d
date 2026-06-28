@@ -7,6 +7,10 @@ Admin:
 Per-user theme:
   GET   /api/me/theme        → get current user's theme
   PUT   /api/me/theme        → update current user's theme
+
+Per-user nav layout:
+  GET   /api/me/nav-layout   → get nav layout preference (resolved by role when unset)
+  PUT   /api/me/nav-layout   → set nav layout preference ('top' | 'side')
 """
 
 import json
@@ -24,6 +28,7 @@ from ..models.user import User
 router = APIRouter(tags=["settings"])
 
 _VALID_THEMES = {"system", "light", "dark"}
+_VALID_LAYOUTS = {"top", "side"}
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +51,14 @@ class ThemeResponse(BaseModel):
 
 class ThemeUpdateRequest(BaseModel):
     theme_pref: str
+
+
+class NavLayoutResponse(BaseModel):
+    nav_layout: str  # always resolved: 'top' | 'side'
+
+
+class NavLayoutUpdateRequest(BaseModel):
+    nav_layout: str | None = None  # null = reset to role default
 
 
 # ---------------------------------------------------------------------------
@@ -115,3 +128,56 @@ async def update_theme(
     db_user.theme_pref = body.theme_pref
     await db.flush()
     return ThemeResponse(theme_pref=db_user.theme_pref)
+
+
+# ---------------------------------------------------------------------------
+# Per-user nav layout
+# ---------------------------------------------------------------------------
+
+
+def _resolve_nav_layout(db_user: User) -> str:
+    """Return the effective nav layout, falling back to role default when unset."""
+    if db_user.nav_layout:
+        return db_user.nav_layout
+    return "side" if db_user.role.value == "admin" else "top"
+
+
+@router.get("/api/me/nav-layout", response_model=NavLayoutResponse)
+async def get_nav_layout(
+    user: Annotated[User, Depends(get_current_user)],
+) -> NavLayoutResponse:
+    """Get the current user's nav layout preference (resolved: 'top' | 'side').
+
+    When unset (null), the default is resolved by role:
+      admin → 'side'
+      user  → 'top'
+    """
+    return NavLayoutResponse(nav_layout=_resolve_nav_layout(user))
+
+
+@router.put("/api/me/nav-layout", response_model=NavLayoutResponse)
+async def update_nav_layout(
+    body: NavLayoutUpdateRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> NavLayoutResponse:
+    """Set the current user's nav layout preference.
+
+    Pass nav_layout='top' or 'side' to set, or null to reset to the role default.
+    """
+    from sqlalchemy import select as sa_select
+
+    if body.nav_layout is not None and body.nav_layout not in _VALID_LAYOUTS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Invalid nav_layout: {body.nav_layout!r}. "
+                f"Must be one of {sorted(_VALID_LAYOUTS)} or null."
+            ),
+        )
+    result = await db.execute(sa_select(User).where(User.id == user.id))
+    db_user = result.scalar_one()
+    db_user.nav_layout = body.nav_layout
+    await db.flush()
+    return NavLayoutResponse(nav_layout=_resolve_nav_layout(db_user))

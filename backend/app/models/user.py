@@ -26,6 +26,8 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(1024), nullable=False)
     # theme_pref: "system" | "light" | "dark"
     theme_pref: Mapped[str] = mapped_column(String(16), nullable=False, default="system")
+    # nav_layout: 'top' | 'side' | None (None → role default: admin→side, user→top)
+    nav_layout: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # Per-user path prefix for path display rewrite (PRD §3.3). e.g. "C:\prints\"
     # The API returns the canonical dir_path; the UI rewrites it using this prefix.
     path_prefix: Mapped[str | None] = mapped_column(String(1024), nullable=True)
