@@ -13,8 +13,10 @@ from .file import File, FileRole
 from .image import Image, ImageSource
 from .invite import Invite, InviteStatus
 from .item import Item
+from .job import Job
 from .library import Library
 from .password_reset import PasswordResetToken
+from .scheduled_job import ScheduledJob
 from .session import UserSession
 from .setting import Setting
 from .tag import ItemTag, Tag, TagAlias, TagStatus
@@ -47,4 +49,7 @@ __all__ = [
     # Phase 3
     "Favorite",
     "DownloadBundle",
+    # Phase 4
+    "Job",
+    "ScheduledJob",
 ]

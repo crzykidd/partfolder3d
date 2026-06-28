@@ -607,3 +607,69 @@ export const fileDownloadUrl = (key: string, filePath: string): string =>
 /** URL for streaming the ready ZIP bundle (use as href or window.open). */
 export const zipDownloadUrl = (key: string, bundleId: string): string =>
   `/api/items/${key}/zip/${bundleId}?download=true`
+
+// ---------------------------------------------------------------------------
+// Phase 4 — Jobs
+// ---------------------------------------------------------------------------
+
+export interface JobOut {
+  id: string
+  type: string
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | string
+  progress: number
+  payload: Record<string, unknown>
+  log: string | null
+  error: string | null
+  item_id: number | null
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+
+export interface PaginatedJobs {
+  total: number
+  page: number
+  per_page: number
+  jobs: JobOut[]
+}
+
+export const listJobs = (params: {
+  status?: string
+  type?: string
+  page?: number
+  per_page?: number
+} = {}): Promise<PaginatedJobs> => {
+  const sp = new URLSearchParams()
+  if (params.status) sp.set('status', params.status)
+  if (params.type) sp.set('type', params.type)
+  if (params.page != null) sp.set('page', String(params.page))
+  if (params.per_page != null) sp.set('per_page', String(params.per_page))
+  const qs = sp.toString()
+  return apiFetch<PaginatedJobs>(`/api/jobs${qs ? `?${qs}` : ''}`)
+}
+
+export const getJob = (jobId: string): Promise<JobOut> =>
+  apiFetch<JobOut>(`/api/jobs/${jobId}`)
+
+// ---------------------------------------------------------------------------
+// Phase 4 — Scheduled Jobs
+// ---------------------------------------------------------------------------
+
+export interface ScheduledJobOut {
+  name: string
+  description: string
+  schedule: string
+  last_run_at: string | null
+  last_run_status: 'succeeded' | 'failed' | null
+  last_run_error: string | null
+  next_run_at: string | null
+  is_running: boolean
+}
+
+export const listScheduledJobs = (): Promise<ScheduledJobOut[]> =>
+  apiFetch<ScheduledJobOut[]>('/api/scheduled-jobs')
+
+export const runScheduledJobNow = (name: string): Promise<{ enqueued: boolean; message: string }> =>
+  apiFetch<{ enqueued: boolean; message: string }>(`/api/scheduled-jobs/${name}/run`, {
+    method: 'POST',
+  })

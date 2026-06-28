@@ -36,9 +36,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..auth.deps import csrf_protect, get_current_user, get_db, get_optional_user
+from ..config import settings
 from ..models.creator import Creator
 from ..models.favorite import Favorite
-from ..models.file import File
+from ..models.file import File, FileRole
 from ..models.image import Image
 from ..models.item import Item
 from ..models.library import Library
@@ -49,6 +50,7 @@ from ..storage.journal import MoveError, atomic_rename, move_to_trash
 from ..storage.keys import generate_unique_key
 from ..storage.paths import item_dir_path, item_slug, sidecar_name
 from ..storage.sidecar import SidecarFile, SidecarImage, build_sidecar, write_sidecar
+from ..worker.render_mesh import MESH_EXTENSIONS
 
 log = logging.getLogger(__name__)
 
@@ -328,6 +330,24 @@ def _apply_file_records(
     return to_upsert, to_delete
 
 
+async def _enqueue_render(item_id: int) -> None:
+    """Fire-and-forget: enqueue a render_item arq task for an item.
+
+    Failure to enqueue (e.g. Redis not available) is logged but does NOT
+    propagate — it must never block item creation or rescan.
+    """
+    try:
+        from arq import create_pool  # noqa: PLC0415
+        from arq.connections import RedisSettings  # noqa: PLC0415
+
+        redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
+        await redis.enqueue_job("render_item", item_id)
+        await redis.aclose()
+        log.debug("_enqueue_render: render_item enqueued for item %s", item_id)
+    except Exception:
+        log.exception("_enqueue_render: failed to enqueue render for item %s", item_id)
+
+
 def _build_item_detail(
     item: Item,
     tags: list[Tag],
@@ -465,6 +485,9 @@ async def create_item(
     await _update_search_vector(
         db, item.id, item.title, item.description, [t.name for t in tags]
     )
+
+    # Phase 4: enqueue render job (fire-and-forget; never blocks item creation)
+    await _enqueue_render(item.id)
 
     return _build_item_detail(item, tags, file_objs, images)
 
@@ -893,6 +916,15 @@ async def rescan_item(
         select(Image).where(Image.item_id == item.id).order_by(Image.order)
     )
     images = list(img_result.scalars().all())
+
+    # Phase 4: enqueue render job if any mesh files exist (fire-and-forget)
+    mesh_files = [
+        f for f in files
+        if f.role == FileRole.model
+        and Path(f.path).suffix.lower() in MESH_EXTENSIONS
+    ]
+    if mesh_files:
+        await _enqueue_render(item.id)
 
     return _build_item_detail(item, tags, files, images)
 

@@ -2,6 +2,76 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Phase 4 worker + rendering decisions
+
+### Render backend that actually works: pyrender + OSMesa (not VTK)
+The build plan said "VTK offscreen — Mesa software rasterizer built into the VTK wheel;
+always works on a CPU-only host." This was **incorrect**: the PyPI `vtk==9.3.1` wheel on
+Linux uses `vtkXOpenGLRenderWindow` which calls `Abort()` (SIGABRT) when there is no X11
+display and no EGL. It does not ship with a true software (OSMesa) rasterizer. The crash
+is not catchable by Python's exception system.
+
+The working path on this host (and expected in Docker) is **pyrender + OSMesa**: the
+system has `libosmesa6` (Mesa 25.1.7) which provides `OSMesaCreateContextAttribs`, and
+`PyOpenGL>=3.1.7` exposes that function. `pyrender` 0.1.45 uses it via its
+`OSMesaPlatform`. A real 256×256 PNG was rendered from a test STL using this path.
+
+EGL (`pyrender+EGL`) is the preferred path when EGL libraries are present (faster, same
+pyrender code path). This host has no EGL; Docker with `libegl1`+`libgbm1` is expected
+to try EGL first.
+
+### VTK detection fixed: subprocess probe, not just importability
+The original `_try_vtk()` returned `True` if `import vtk` succeeded, but `import vtk`
+succeeds even when VTK offscreen rendering will SIGABRT. Fixed to run a minimal
+offscreen render probe in a subprocess (returncode 0 = confirmed; any other code = False).
+The VTK backend remains in the detection chain as a fallback for environments where VTK
+is built with EGL/OSMesa support (e.g. certain CI images).
+
+### OpenGL platform module cache: _try_egl() clears OpenGL on failure
+PyOpenGL initialises a global platform singleton (EGL, OSMesa, X11) on first import.
+If `_try_egl()` fails after importing OpenGL, the singleton is stuck as `EGLPlatform`,
+causing `_try_osmesa()` to fail with `AttributeError: 'EGLPlatform' has no attribute
+'OSMesa'`. Fixed: `_try_egl()` now removes all `OpenGL.*` entries from `sys.modules`
+in its except block so that `_try_osmesa()` starts with a clean module state.
+
+### PyOpenGL version pin relaxed to >=3.1.0
+`requirements.txt` originally pinned `PyOpenGL==3.1.0`. `OSMesaCreateContextAttribs` is
+only exposed by PyOpenGL ≥ 3.1.7. `pyrender 0.1.45` declares `==3.1.0` in its own
+metadata but is functionally compatible with 3.1.x; we tested 3.1.10. Changed to
+`PyOpenGL>=3.1.0`.
+
+### Dockerfile GL libs added (Phase 4)
+The root `Dockerfile` now installs (in the `deps` stage):
+  - `libgl1` — Mesa OpenGL (required by pyrender's GL context)
+  - `libegl1`, `libgbm1` — EGL (pyrender+EGL path, tried first in Docker)
+  - `libosmesa6` — Mesa OSMesa (pyrender+OSMesa fallback)
+  - `libglib2.0-0`, `libfreetype6` — Mesa transitive deps
+CPU-only; no GPU drivers.
+
+### Job model shape
+`jobs` table: UUID PK (`gen_random_uuid()`), `type VARCHAR(64)` (e.g. "render",
+"zip_bundle"), `status VARCHAR(16)` (`queued → running → succeeded | failed`),
+`progress INTEGER` (0–100), `payload JSONB`, `log TEXT`, `error TEXT`, optional
+`item_id FK → items.id (ON DELETE SET NULL)`, timestamps `created_at / started_at /
+finished_at`. Worker tasks call `create_job` (→ "running") then `finish_job`
+(→ succeeded/failed) from `app.worker.job_tracker`.
+
+### Scheduled-jobs mechanism
+`scheduled_jobs` table: `name VARCHAR(64) PK` (matches a registry key in `worker.py`),
+`description`, `schedule` (human-readable string), `last_run_at / last_run_status /
+last_run_error / next_run_at`, `is_running BOOL`. The worker's `on_startup` hook seeds
+one row per entry in `SCHEDULED_JOB_REGISTRY`. arq cron wrappers (one per job) call
+`exec_scheduled_job(name)` which dispatches the real function and updates the row.
+`POST /api/scheduled-jobs/{name}/run` enqueues `exec_scheduled_job` immediately for
+on-demand "run now" outside the normal schedule.
+
+### Render cache key: file SHA-256 hex
+Rendered thumbnails are stored at `<item_dir>/renders/<sha256>.png` where `<sha256>` is
+the SHA-256 hex digest of the mesh file. The worker uses the cached `File.sha256` column
+when available (set at inventory time) and recomputes it only when the column is NULL.
+A file whose hash changes (edited, replaced) gets a different cache key and is
+automatically re-rendered on the next render job.
+
 ## 2026-06-27 — Phase 3b frontend implementation decisions
 
 ### Tag-tree endpoint removed from backend (Phase 3b section 0)

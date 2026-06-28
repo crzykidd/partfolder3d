@@ -30,6 +30,8 @@ import { MyCreationsPage } from '@/pages/MyCreationsPage'
 import { UsersPage } from '@/pages/admin/UsersPage'
 import { InvitesPage } from '@/pages/admin/InvitesPage'
 import { PasswordResetPage } from '@/pages/admin/PasswordResetPage'
+import { JobsPage } from '@/pages/admin/JobsPage'
+import { ScheduledJobsPage } from '@/pages/admin/ScheduledJobsPage'
 
 import { SettingsPage } from '@/pages/settings/SettingsPage'
 import { ApiKeysPage } from '@/pages/settings/ApiKeysPage'
@@ -93,6 +95,22 @@ function App() {
                     element={
                       <AdminGuard>
                         <PasswordResetPage />
+                      </AdminGuard>
+                    }
+                  />
+                  <Route
+                    path="/admin/jobs"
+                    element={
+                      <AdminGuard>
+                        <JobsPage />
+                      </AdminGuard>
+                    }
+                  />
+                  <Route
+                    path="/admin/scheduled-jobs"
+                    element={
+                      <AdminGuard>
+                        <ScheduledJobsPage />
                       </AdminGuard>
                     }
                   />

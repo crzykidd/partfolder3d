@@ -13,8 +13,25 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# ---- deps: install Python packages (cached layer) ----
+# ---- deps: system libraries + Python packages (cached layer) ----
 FROM base AS deps
+
+# GL/rendering libraries for headless mesh thumbnail generation (Phase 4).
+# Priority order tried by render_mesh.py:
+#   1. pyrender + EGL   (libgl1, libegl1, libgbm1)
+#   2. pyrender + OSMesa (libosmesa6 — Mesa 22+ has OSMesaCreateContextAttribs)
+#   3. VTK offscreen    (Mesa software rasterizer built into the VTK wheel; no extra libs needed)
+# libglib2.0-0 and libfreetype6 are transitive deps of Mesa / Pillow.
+# All are CPU-only — no GPU drivers installed.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 \
+        libegl1 \
+        libgbm1 \
+        libosmesa6 \
+        libglib2.0-0 \
+        libfreetype6 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 

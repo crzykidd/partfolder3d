@@ -5,6 +5,7 @@ Phase 1: identity layer added (encryption key, models, auth, sessions, CSRF,
 Phase 2: libraries, storage, sidecar, item core added.
 Phase 3: catalog UI backend — search, favorites, tag browse, creator browse,
          downloads (single file + queued ZIP), set-default-image, path-prefix.
+Phase 4: job monitor + scheduled-jobs API.
 """
 
 import logging
@@ -74,6 +75,7 @@ from .routers import (  # noqa: E402  # noqa: E402
     downloads,
     invites,
     items,
+    jobs,
     libraries,
     me,
     password_reset,
@@ -81,6 +83,7 @@ from .routers import (  # noqa: E402  # noqa: E402
     tags,
     users,
 )
+from .routers import scheduled_jobs as scheduled_jobs_router  # noqa: E402
 from .routers import settings as settings_router  # noqa: E402
 
 app.include_router(setup.router)
@@ -97,6 +100,9 @@ app.include_router(tags.router)
 app.include_router(creators.router)
 app.include_router(me.router)
 app.include_router(downloads.router)
+# Phase 4
+app.include_router(jobs.router)
+app.include_router(scheduled_jobs_router.router)
 
 
 # ---------------------------------------------------------------------------

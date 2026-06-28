@@ -112,6 +112,8 @@ export function AppShell() {
                 <NavItem to="/admin/users">Users</NavItem>
                 <NavItem to="/admin/invites">Invites</NavItem>
                 <NavItem to="/admin/password-reset">Reset</NavItem>
+                <NavItem to="/admin/jobs">Jobs</NavItem>
+                <NavItem to="/admin/scheduled-jobs">Schedules</NavItem>
               </>
             )}
           </nav>

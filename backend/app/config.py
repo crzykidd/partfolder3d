@@ -38,5 +38,12 @@ class Settings(BaseSettings):
     # ---- Debug ----
     DEBUG: bool = False
 
+    # ---- Rendering (Phase 4) ----
+    # Square resolution for mesh thumbnail PNGs (pixels per side).
+    RENDER_RESOLUTION: int = 512
+    # Rendering backend: "auto" tries EGL → OSMesa → VTK in order.
+    # Override with "egl", "osmesa", or "vtk" to force a specific backend.
+    RENDER_BACKEND: str = "auto"
+
 
 settings = Settings()
