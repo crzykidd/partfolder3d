@@ -13,6 +13,9 @@ Phase 7: print history (PrintRecord + gcode parse + stats) + sharing
          (ShareLink + public endpoints + audit + share-link import).
 Phase 8: optional AI assist — provider CRUD, tag suggestions, description
          cleanup, scrape summarization. Manual-only always works with zero AI.
+Phase 9: admin — backup (DB + config, retention), catalog JSON export, reindex
+         trigger, tag admin (aliases/categories/merge/approve), site-capabilities
+         CRUD, full REST API parity check.
 """
 
 import logging
@@ -80,9 +83,11 @@ from .routers import (  # noqa: E402  # noqa: E402
     ai_providers,
     api_keys,
     auth,
+    backup,
     changes,
     creators,
     downloads,
+    export,
     import_sessions,
     invites,
     issues,
@@ -95,6 +100,8 @@ from .routers import (  # noqa: E402  # noqa: E402
     reviews,
     setup,
     shares,
+    site_capabilities,
+    tag_admin,
     tags,
     users,
 )
@@ -130,6 +137,11 @@ app.include_router(shares.router)
 # Phase 8
 app.include_router(ai_providers.router)
 app.include_router(ai_actions.router)
+# Phase 9
+app.include_router(backup.router)
+app.include_router(export.router)
+app.include_router(site_capabilities.router)
+app.include_router(tag_admin.router)
 
 
 # ---------------------------------------------------------------------------

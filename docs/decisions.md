@@ -2,6 +2,122 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — UI prototype examples (`/examples`, `/example1..3`)
+
+Three standalone mock-data prototypes added under `frontend/src/pages/examples/` for
+the owner to pick a design direction from. All routes are registered outside `<AuthGuard>`
+(siblings of `/share/:token`) so they render with no backend. Delete the losers after a
+direction is selected.
+
+- **`/example1` — "Mission Control":** Collapsible left rail, dark navy (#091D35) +
+  teal (#0FA4AB), dense compact spacing à la Linear/Vercel, icon-only rail mode,
+  grouped nav, stats bar, tabbed catalog + jobs + tags panel, inline import wizard.
+- **`/example2` — "Atelier":** Top nav with `@radix-ui/react-dropdown-menu` grouped
+  dropdowns, light-first warm neutrals, rounded cards with soft shadows, large generous
+  whitespace, stepped import wizard card, creator directory + tag cloud.
+- **`/example3` — "Aurora":** Deep gradient canvas, frosted-glass sidebar with
+  backdrop-filter blur + animated `max-height` group collapse, pill nav items with
+  teal glow, fully functional `⌘K` command palette overlay (keyboard: Ctrl/Cmd+K,
+  arrow keys, Enter to select, Esc to close), glass catalog cards.
+
+All three share `mockData.ts` (16 items, rich stats, jobs, creators, tag cloud) and
+`useLocalStorage.ts` (sidebar collapsed/expanded + group open/closed states persisted
+per-browser). `tsc --noEmit` clean; all 131 tests green.
+
+## 2026-06-27 — Phase 9a backend decisions (backup, export, tag admin, site-caps, API parity)
+
+### Backup: in-process JSON dump (no pg_dump)
+
+Chose `asyncpg`-based in-process table dump over `pg_dump` for deployment safety.
+`pg_dump` is not in `python:3.12-slim`; adding it from the PGDG apt repo requires
+pinning the major version (Debian default is v15, may refuse to dump a v16 server),
+adds ~15 MB to the image, and introduces a subprocess call with shell-injection risk.
+The in-process approach uses the same `asyncpg` driver already in the image, exports
+all table rows as gzip-compressed JSON (`db.json.gz`), and bundles the instance
+`secret.key`. Trade-off: restore requires `alembic upgrade head` first, then a future
+`restore` tool to re-import the JSON. Acceptable for a personal/team asset manager;
+a large-scale SaaS would prefer binary pg_dump. Decision recorded in
+`backend/app/worker/backup.py` docstring.
+
+### Backup archive format: `.tar.gz` with `metadata.json + db.json.gz + config/secret.key`
+
+Timestamped archive: `backup_YYYY-MM-DDTHH-MM-SS.tar.gz`. Contents:
+- `metadata.json` — timestamp, app version, table list, "library files not included" note
+- `db.json.gz` — gzip-compressed JSON of all table rows (dict of {table: [rows]})
+- `config/secret.key` — instance Fernet key (critical for decrypting secrets at restore)
+
+Library binary files (STL, OBJ, images) are explicitly NOT included. A loud callout
+in the admin UI (Phase 9b) will make this clear to the admin.
+
+### Backup retention: DB setting `backup.retention_count` (default 10)
+
+Retention count is stored in the `settings` table (key `backup.retention_count`) so
+admins can change it without redeploying. Pruning happens at the end of each successful
+backup run; `BackupRecord` rows + archive files are both deleted.
+
+### Backup scheduling: `db_backup` at 04:00 UTC
+
+Registered in `SCHEDULED_JOB_REGISTRY` and `_SCHED_FUNCS` alongside the existing four
+scheduled jobs. Runs via `exec_scheduled_job("db_backup")` so it's also run-now-able
+from the admin UI / API.
+
+### JSON catalog export: in-memory collection, non-streaming
+
+`GET /api/admin/export/catalog` loads all items (with eager-loaded tags, files, images,
+creator), tags, aliases, creators, and print records into memory, serializes to JSON,
+and returns a single `StreamingResponse`. For a personal/team library (hundreds to low
+thousands of items) this is well within memory limits. For very large catalogs a proper
+chunked streaming approach would be needed. A `StreamingResponse` is used so
+Content-Disposition is honored and the file downloads correctly in browsers.
+
+### Tag administration: new router `/api/admin/tags/*`
+
+Public tag browsing + Phase-5 approval (`POST /api/tags/{id}/approve`) remain in
+`routers/tags.py`. Phase 9 admin operations (list pending, approve, reject, set
+category, alias CRUD, merge) live in `routers/tag_admin.py` at `/api/admin/tags/*`
+to keep the public-API router uncluttered.
+
+Tag merge semantics: (1) repoint ItemTag rows from source → target using SQLAlchemy
+UPDATE + handle ON CONFLICT via pre-filtering; (2) repoint TagAlias rows; (3) add
+source.name as a new alias of target so old alias lookups keep resolving; (4) add
+source.popularity_count to target; (5) DELETE source. Idempotent on alias creation.
+
+### Site capabilities admin: `/api/admin/site-capabilities/*`
+
+Phase 5 created the `SiteCapability` + `SiteToken` models but only populated them
+from the import-session scraper — no admin API existed. Phase 9 adds full CRUD.
+Tokens are stored Fernet-encrypted (existing `crypto.encrypt`); the admin endpoint
+accepts a plaintext token over HTTPS and encrypts it. The `has_token` flag in the
+response indicates existence without exposing the value.
+
+### `from __future__ import annotations` + FastAPI 204 routes
+
+FastAPI's `APIRoute.__init__` asserts `response_model is None` for 204 status codes.
+With `from __future__ import annotations` (PEP 563), `-> None:` is stored as the
+string `"None"` and resolved to `NoneType` (the class) by
+`get_typed_return_annotation`. `bool(NoneType)` is `True`, so FastAPI sees a non-None
+response model and the assertion fires. Fix: pass `response_model=None` explicitly on
+all 204 routes in files that use `from __future__ import annotations`. This is a
+known FastAPI footgun documented as an edge case in their migration guide.
+
+### API-parity audit result
+
+All UI-facing actions now have REST endpoints:
+- Backup: list / trigger / settings / download / delete (`/api/admin/backups/*`)
+- Export: catalog JSON (`/api/admin/export/catalog`)
+- Reindex: via existing `POST /api/scheduled-jobs/library_reconcile_scan/run`
+- Tag admin: pending list / approve / reject / category / aliases / merge (`/api/admin/tags/*`)
+- Site capabilities: list / get / patch / delete / token / reprobe (`/api/admin/site-capabilities/*`)
+- API keys: create / list / revoke (existing `/api/api-keys/*`)
+- Bearer API-key auth: confirmed working across all admin endpoints (test `test_api_key_bearer_auth_on_admin_endpoint` passes)
+
+### Reindex: no new code
+
+`library_reconcile_scan` is already a scheduled job with a run-now endpoint
+(`POST /api/scheduled-jobs/library_reconcile_scan/run`). The frontend 9b handoff
+will add a "Reindex" button that calls this existing endpoint — no backend changes
+needed.
+
 ## 2026-06-27 — Auto-migration via entrypoint + self-contained dev compose + host-visible dev storage (deployment readiness)
 
 A scaffolding gap carried since Phase 0: nothing ran `alembic upgrade head` on

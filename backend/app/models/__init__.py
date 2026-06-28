@@ -5,6 +5,7 @@ All models import from this package.  Alembic env.py imports Base.metadata here.
 
 from .ai_provider import AiProvider, AiProviderType
 from .api_key import ApiKey
+from .backup import BackupRecord
 from .base import Base
 from .change_log import ChangeLog, ChangeSource
 from .creator import Creator
@@ -38,6 +39,7 @@ from .user import User, UserRole
 
 __all__ = [
     "Base",
+    "BackupRecord",
     "User",
     "UserRole",
     "ApiKey",
