@@ -8,7 +8,13 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-06-27 (Phase 9 done; Phase 10a hardening in flight; autonomous run to v1)
+**Last updated:** 2026-06-28 (Phase 10a hardening done; 10b release-machinery in flight)
+
+> **Phase 10a hardening landed** (`a2b612b`): fixed **2 HIGH SSRF holes** (scraper + instance
+> import now block internal/link-local/metadata IPs via `backend/app/storage/ssrf_guard.py`);
+> verified path-traversal/admin-gating/share-privacy/key-masking (tests added); migration **0010**
+> adds 8 hot-path indexes; **356 pytest** (DNS-rebinding SSRF variant deferred + documented;
+> 100k load-test deferred — needs a seed harness).
 
 > **Release machinery still UNFILLED (Phase 10b, orchestrator to do after 10a):** version
 > source-of-truth (only `frontend/package.json`=0.1.0 today; no bare VERSION file), the
