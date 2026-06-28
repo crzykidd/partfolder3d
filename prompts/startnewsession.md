@@ -8,7 +8,7 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-06-27 (Phase 8a committed; 8b frontend in flight)
+**Last updated:** 2026-06-27 (Phase 8 complete; deploy-readiness fix landed)
 
 ---
 
@@ -31,10 +31,23 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 
 ## Current status
 
-- **Phase:** 8a (backend) **done** (committed `21080ea` on `dev`); **8b frontend in flight**
-  (`prompts/2026-06-27-phase-8b-ai-frontend.md`, model: sonnet). After 8: **Phase 9 (admin/
+- **Phase:** 8 **complete** (8a `21080ea` + 8b `a773538` on `dev`). Next = **Phase 9 (admin/
   backup/export/API)** + **Phase 10 (hardening & v1 release)** — Phase 10 fills the
-  `release-prep`/`release-cut` placeholders.
+  `release-prep`/`release-cut` placeholders. **Phase 9 not yet dispatched** (user is running the
+  app locally first).
+- **Deploy-readiness fix (committed):** scaffolding gap (since Phase 0) — nothing ran migrations
+  on startup, so a fresh stack came up on an empty DB and the wizard failed. Fixed by **bundling
+  migrations into the backend's image entrypoint** (`backend/docker-entrypoint.sh`:
+  `RUN_MIGRATIONS=true` → `alembic upgrade head` → `exec "$@"`). **No separate `migrate`
+  container** (a one-shot exits and reads as a broken stack in Portainer). Worker + nginx gate on
+  `backend: service_healthy` (backend has a `/health` healthcheck), so migrations run exactly once
+  before anything touches the DB. Also: **`docker-compose.dev.yml` is self-contained** (all
+  services + build, one file) and **dev storage is bind-mounted under `./private_data/data/
+  {postgres,redis,app}`** (gitignored, host-visible — no named volumes); prod keeps named volumes.
+  **Run:** `cp .env.example .env` then `docker compose -f docker-compose.dev.yml up --build`
+  (dev) or `docker compose up -d --build` (prod) → http://localhost:8973 first-run wizard.
+- **⚠️ Deployment-readiness is an open audit item for Phase 10** — the migration gap was a miss;
+  re-check the whole runnable-stack story (entrypoints, healthchecks, first-run, env) at hardening.
 - **Phase 8 agent died mid-run** on an internal API error (oversized tool call in its transcript)
   after building most of 8a. Recovered via a fresh finish/verify agent (did NOT resume the dead
   one — replaying its transcript would re-hit the 400). 299 pytest on real PG, ruff, alembic
@@ -70,7 +83,10 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
   - **8a** AI-tagging **backend** — `app/ai/client.py` provider abstraction (anthropic SDK for
     Claude default `claude-opus-4-8`; openai SDK for OpenAI + Ollama-via-`base_url`; test-injectable
     callers), `ai_providers` CRUD + `ai_actions` (suggest-tags/cleanup/summarize) routers, Fernet
-    key encryption. Best-effort: no-AI manual path proven by tests; no real provider calls in tests.
+    key encryption. Best-effort: no-AI manual path proven by tests; no real provider calls in tests;
+  - **8b** AI **frontend** — `/admin/ai-providers` CRUD page, wizard AI actions (suggest tags /
+    cleanup / summarize, opt-in, graceful when no provider), client-side fuzzy duplicate detection
+    on PendingTagsPage (tsc clean, 131 vitest). Phase 8 done.
 
 ## Phase 5 follow-ups (small; fold into a later phase)
 
