@@ -13,8 +13,8 @@
  */
 
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { Link, useNavigate } from 'react-router-dom'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import { useAuth } from '@/context/AuthContext'
 import * as api from '@/lib/api'
 
@@ -156,6 +156,166 @@ function SessionRow({ session }: { session: api.ImportSession }) {
 }
 
 // ---------------------------------------------------------------------------
+// From-share-link import panel (Phase 7b)
+// ---------------------------------------------------------------------------
+
+function FromShareLinkPanel() {
+  const navigate = useNavigate()
+  const [shareUrl, setShareUrl] = useState('')
+  const [libraryId, setLibraryId] = useState<number | null>(null)
+  const [includePublicNotes, setIncludePublicNotes] = useState(true)
+  const [includeGcode, setIncludeGcode] = useState(false)
+  const [includePhotos, setIncludePhotos] = useState(true)
+  const [includeSettings, setIncludeSettings] = useState(true)
+  const [open, setOpen] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
+  const { data: libraries = [] } = useQuery({
+    queryKey: ['libraries'],
+    queryFn: api.listLibraries,
+    staleTime: 60_000,
+  })
+
+  const importMutation = useMutation({
+    mutationFn: () =>
+      api.importFromShareLink({
+        share_url: shareUrl.trim(),
+        library_id: libraryId,
+        include_public_notes: includePublicNotes,
+        include_gcode: includeGcode,
+        include_photos: includePhotos,
+        include_settings: includeSettings,
+      }),
+    onSuccess: (session) => {
+      navigate(`/import/${session.id}`)
+    },
+    onError: (e) => {
+      setSubmitError(e instanceof Error ? e.message : 'Import failed.')
+    },
+  })
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-accent transition-colors"
+      >
+        Import from share link
+      </button>
+    )
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/20 p-5 flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-semibold">Import from share link</h2>
+        <button
+          onClick={() => { setOpen(false); setSubmitError(null) }}
+          className="text-sm text-muted-foreground hover:text-foreground"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-muted-foreground">Share URL</label>
+        <input
+          type="url"
+          value={shareUrl}
+          onChange={(e) => setShareUrl(e.target.value)}
+          placeholder="https://otherinstance.example.com/share/<token>"
+          className="input-base py-2 text-sm"
+        />
+        <p className="text-xs text-muted-foreground">
+          Paste a share link from another PartFolder 3D instance.
+        </p>
+      </div>
+
+      {libraries.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-muted-foreground">
+            Destination library (optional)
+          </label>
+          <select
+            value={libraryId ?? ''}
+            onChange={(e) => setLibraryId(e.target.value === '' ? null : Number(e.target.value))}
+            className="input-base py-1.5 text-sm"
+          >
+            <option value="">Auto-select (first enabled)</option>
+            {libraries.map((lib) => (
+              <option key={lib.id} value={lib.id}>
+                {lib.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-2">
+        <p className="text-xs font-medium text-muted-foreground">Include from public print history:</p>
+        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={includePublicNotes}
+            onChange={(e) => setIncludePublicNotes(e.target.checked)}
+            className="h-4 w-4 rounded border-border accent-primary"
+          />
+          Notes &amp; ratings
+        </label>
+        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={includeSettings}
+            onChange={(e) => setIncludeSettings(e.target.checked)}
+            className="h-4 w-4 rounded border-border accent-primary"
+          />
+          Structured settings (printer, material, nozzle, etc.)
+        </label>
+        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={includePhotos}
+            onChange={(e) => setIncludePhotos(e.target.checked)}
+            className="h-4 w-4 rounded border-border accent-primary"
+          />
+          Print photos
+        </label>
+        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={includeGcode}
+            onChange={(e) => setIncludeGcode(e.target.checked)}
+            className="h-4 w-4 rounded border-border accent-primary"
+          />
+          Gcode files{' '}
+          <span className="text-xs text-muted-foreground">(can be large)</span>
+        </label>
+      </div>
+
+      {submitError && (
+        <p className="text-sm text-destructive">{submitError}</p>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          onClick={() => importMutation.mutate()}
+          disabled={!shareUrl.trim() || importMutation.isPending}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+        >
+          {importMutation.isPending ? 'Importing…' : 'Import'}
+        </button>
+        <button
+          onClick={() => { setOpen(false); setSubmitError(null) }}
+          className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -195,17 +355,20 @@ export function ImportsPage() {
           </p>
         </div>
 
-        {isAdmin && (
-          <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={allUsers}
-              onChange={(e) => { setAllUsers(e.target.checked); setPage(1) }}
-              className="h-4 w-4 rounded border-border accent-primary"
-            />
-            Show all users' sessions
-          </label>
-        )}
+        <div className="flex items-center gap-3">
+          {isAdmin && (
+            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={allUsers}
+                onChange={(e) => { setAllUsers(e.target.checked); setPage(1) }}
+                className="h-4 w-4 rounded border-border accent-primary"
+              />
+              Show all users' sessions
+            </label>
+          )}
+          <FromShareLinkPanel />
+        </div>
       </div>
 
       {isLoading && (

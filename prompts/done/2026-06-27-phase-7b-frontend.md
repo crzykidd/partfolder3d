@@ -1,10 +1,10 @@
 ---
 name: 2026-06-27-phase-7b-frontend
-status: pending          # pending | completed | failed
+status: completed
 created: 2026-06-27
 model: sonnet            # coding
-completed:
-result:
+completed: 2026-06-27
+result: All Phase 7b frontend work implemented: api.ts Phase 7 types+functions, ItemPage print history + share controls + include-history ZIP checkbox, PublicSharePage (outside AuthGuard), PrintStatsPage, ShareAuditPage, ImportsPage from-share-link panel, App.tsx + AppShell.tsx routes/nav; tsc clean; 109 vitest tests pass (13 new).
 ---
 
 # Task: Phase 7b — Print history + sharing frontend
@@ -173,14 +173,26 @@ sessions), add a **"From share link"** button/section:
 
 ## Conventions to honor
 
-- Match existing component style: Mantine UI components, TanStack Query `useQuery` /
-  `useMutation`, `apiFetch` wrapper from `api.ts`, CSRF header via `useCsrf()` hook or
-  `getCsrfToken()`.
-- Admin routes follow the `<Route element={<AdminGuard />}>` pattern already in App.tsx.
-- Public pages are registered **outside** `<AuthGuard>`.
-- Toasts use the existing notification pattern (Mantine `notifications.show`).
-- No hardcoded colors — use Mantine theme vars.
-- The public share page must NOT import anything that would trigger auth redirects.
+> **IMPORTANT — the stack is NOT Mantine.** This project uses **Tailwind CSS + a
+> CSS-variable theme** (the shadcn-style `bg-primary`/`text-muted-foreground` etc. tokens),
+> minimal Radix (`@radix-ui/react-dropdown-menu`, `@radix-ui/react-slot` only — no Dialog/
+> Tabs packages), and **`lucide-react`** icons. **Do not add Mantine or any new UI library.**
+> Read existing pages (`ItemPage.tsx`, the `pages/admin/*` pages, `AddAssetModal.tsx`) and
+> replicate their exact patterns — custom Tailwind overlay modals, tab bars, badges, tables.
+
+- TanStack Query (`useQuery` / `useMutation`) for all server state.
+- **All requests go through the `apiFetch` wrapper from `api.ts`** (and `apiFetchForm` for
+  multipart) — it already injects the `X-CSRF-Token` header. Do **not** invent a `useCsrf()`
+  hook or `getCsrfToken()`; follow how existing mutations call `apiFetch`/`apiFetchForm`.
+- Admin routes follow the existing `<AdminGuard>` pattern in `App.tsx`; protected routes use
+  `<AuthGuard>`. **Public pages are registered OUTSIDE both guards.**
+- **No toast library exists** (`notifications.show` is NOT available). For user feedback after
+  an action (e.g. copy-link), use the lightweight inline pattern already used in the codebase
+  (e.g. the ZIP-download/copy-path feedback on existing pages) — a transient inline message /
+  button-label swap — rather than a global toast. Match what the item/catalog pages already do.
+- **No hardcoded colors** — use the existing Tailwind theme tokens / CSS variables.
+- The public share page must NOT import anything that would trigger auth redirects (no
+  AuthGuard, no calls to authenticated-only endpoints, no auth-context dependency).
 
 ## When done
 

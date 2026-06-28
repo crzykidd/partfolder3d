@@ -36,6 +36,10 @@ import { PendingTagsPage } from '@/pages/admin/PendingTagsPage'
 import { IssuesPage } from '@/pages/admin/IssuesPage'
 import { ChangesPage } from '@/pages/admin/ChangesPage'
 import { ReviewsPage } from '@/pages/admin/ReviewsPage'
+import { PrintStatsPage } from '@/pages/admin/PrintStatsPage'
+import { ShareAuditPage } from '@/pages/admin/ShareAuditPage'
+
+import { PublicSharePage } from '@/pages/PublicSharePage'
 
 import { ImportsPage } from '@/pages/ImportsPage'
 import { ImportWizardPage } from '@/pages/ImportWizardPage'
@@ -64,6 +68,8 @@ function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/invites/:token/accept" element={<InviteAcceptPage />} />
               <Route path="/password-reset/:token" element={<ResetPasswordPage />} />
+              {/* Public share page — unauthenticated, outside all guards */}
+              <Route path="/share/:token" element={<PublicSharePage />} />
 
               {/* Protected routes — must be authenticated */}
               <Route element={<AuthGuard />}>
@@ -154,6 +160,22 @@ function App() {
                     element={
                       <AdminGuard>
                         <ReviewsPage />
+                      </AdminGuard>
+                    }
+                  />
+                  <Route
+                    path="/admin/print-stats"
+                    element={
+                      <AdminGuard>
+                        <PrintStatsPage />
+                      </AdminGuard>
+                    }
+                  />
+                  <Route
+                    path="/admin/shares"
+                    element={
+                      <AdminGuard>
+                        <ShareAuditPage />
                       </AdminGuard>
                     }
                   />

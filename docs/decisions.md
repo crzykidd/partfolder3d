@@ -2,6 +2,45 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Phase 7b frontend decisions
+
+### print-utils.ts extracted as standalone module (not inlined in pages)
+
+`formatPrintTime`, `formatFilamentLength`, `formatFilamentWeight`, and `renderStars`
+live in `src/lib/print-utils.ts` rather than being inlined in `ItemPage.tsx` or
+`PublicSharePage.tsx`. Rationale: both pages need the same helpers; extracting them
+makes them independently unit-testable with vitest without any DOM/React setup.
+
+### PublicSharePage: 400 "full-site" disambiguation via error message substring
+
+The backend returns HTTP 400 with a body containing "full-site" when a full_site share
+token is passed to `/api/public/share/{token}` (which only handles item_design). The
+frontend detects this specific 400 by substring-matching `error.message.includes('full-site')`
+to activate the catalog view. This is fragile against backend message changes, but the
+alternative (a separate probe endpoint) adds a round-trip. If the backend ever adds a
+scope field to the 400 response, switch to that instead.
+
+### ShareSection (ItemPage): "copy on mint" using clipboard API (no toast library)
+
+When a share link is minted, the new URL is immediately copied to clipboard and a
+transient inline "✓ Copied!" label appears on the row for 3 seconds. This matches
+the existing inline feedback pattern (copy-path button on PathDisplay). No toast
+library was added — the project stack explicitly has no global toast system.
+
+### DownloadsSection: includeHistory checkbox resets ZIP state on toggle
+
+When the user toggles "Include print history", any in-flight or ready bundle is
+discarded (state reset to idle) so the next click starts a fresh ZIP request with
+the correct `include_history` param. Reusing an old bundle id after the flag changes
+would silently serve a stale ZIP without the expected content.
+
+### queueZip API: include_history passed as query param (not body)
+
+The backend `POST /api/items/{key}/zip` accepts `include_history` as a query param
+(FastAPI `Query(...)`), not in the JSON body. The `apiFetch` wrapper used for this
+endpoint sets `Content-Type: application/json` only when body is present, so we
+append `?include_history=true` to the URL string.
+
 ## 2026-06-27 — Phase 7 print history + sharing decisions
 
 ### PrintRecord shape: normalized with structured settings fields
