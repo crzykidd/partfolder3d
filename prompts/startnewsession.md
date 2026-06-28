@@ -8,7 +8,14 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-06-27 (Phase 8 done + 4 runtime fixes; Phase 9 in flight; autonomous run to v1)
+**Last updated:** 2026-06-27 (Phase 9a + UI prototypes committed; 9b in flight; autonomous run to v1)
+
+> **UI prototypes for owner review** are live at `/examples`, `/example1` (Mission Control —
+> dense dark left rail), `/example2` (Atelier — airy light top-nav + Radix dropdowns),
+> `/example3` (Aurora — glassy dark + ⌘K palette). Public mock routes (no auth), under
+> `frontend/src/pages/examples/`. Owner picks one → revamp real pages to match, then delete the
+> losers. Requirements captured: collapsible localStorage sidebar, expand/collapse groups,
+> role-based menus, version + release-notes bottom-left.
 
 ---
 
