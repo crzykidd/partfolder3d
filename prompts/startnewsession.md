@@ -8,7 +8,7 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-06-28 (A1 Aurora shell committed `3ca51e2`; A2 widget framework in flight)
+**Last updated:** 2026-06-28 (UI A1+A2 committed `3ca51e2`,`3915af7`; B1 catalog/item restyle in flight)
 
 > **UI REVAMP underway (owner-directed, autonomous run).** Owner chose **Aurora** (`/example3`)
 > as the real look. Locked spec:
