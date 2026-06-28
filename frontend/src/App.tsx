@@ -42,6 +42,12 @@ import { AiProvidersPage } from '@/pages/admin/AiProvidersPage'
 
 import { PublicSharePage } from '@/pages/PublicSharePage'
 
+// UI prototype examples — no auth required, standalone mock pages
+import { ExamplesIndex } from '@/pages/examples/ExamplesIndex'
+import { Example1 } from '@/pages/examples/Example1'
+import { Example2 } from '@/pages/examples/Example2'
+import { Example3 } from '@/pages/examples/Example3'
+
 import { ImportsPage } from '@/pages/ImportsPage'
 import { ImportWizardPage } from '@/pages/ImportWizardPage'
 
@@ -71,6 +77,12 @@ function App() {
               <Route path="/password-reset/:token" element={<ResetPasswordPage />} />
               {/* Public share page — unauthenticated, outside all guards */}
               <Route path="/share/:token" element={<PublicSharePage />} />
+
+              {/* UI prototype examples — no auth, standalone mock pages */}
+              <Route path="/examples" element={<ExamplesIndex />} />
+              <Route path="/example1" element={<Example1 />} />
+              <Route path="/example2" element={<Example2 />} />
+              <Route path="/example3" element={<Example3 />} />
 
               {/* Protected routes — must be authenticated */}
               <Route element={<AuthGuard />}>
