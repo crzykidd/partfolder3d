@@ -1361,3 +1361,125 @@ export const approveReview = (id: number): Promise<ReviewItemOut> =>
 
 export const rejectReview = (id: number): Promise<ReviewItemOut> =>
   apiFetch<ReviewItemOut>(`/api/reviews/${id}/reject`, { method: 'POST' })
+
+// ---------------------------------------------------------------------------
+// Phase 8 — AI Providers (admin)
+// ---------------------------------------------------------------------------
+
+export interface AiProviderOut {
+  id: number
+  provider: 'claude' | 'openai' | 'ollama'
+  endpoint: string | null
+  model: string | null
+  has_key: boolean // true when a key is set — key itself is NEVER returned
+  enabled: boolean
+}
+
+export interface CreateAiProviderRequest {
+  provider: string
+  endpoint?: string | null
+  model?: string | null
+  api_key?: string | null // plaintext — encrypted before storage; write-only
+  enabled?: boolean
+}
+
+export interface PatchAiProviderRequest {
+  endpoint?: string | null
+  model?: string | null
+  api_key?: string | null // if provided, rotates the stored key
+  enabled?: boolean | null
+}
+
+export interface EnableAiProviderRequest {
+  enabled: boolean
+}
+
+export interface TestAiConnectionRequest {
+  provider: string
+  endpoint?: string | null
+  model?: string | null
+  api_key?: string | null // plaintext — NOT persisted; used for the test call only
+}
+
+export interface TestAiConnectionResponse {
+  ok: boolean
+  error: string | null
+}
+
+export const listAiProviders = (): Promise<AiProviderOut[]> =>
+  apiFetch<AiProviderOut[]>('/api/ai-providers')
+
+export const createAiProvider = (
+  body: CreateAiProviderRequest,
+): Promise<AiProviderOut> =>
+  apiFetch<AiProviderOut>('/api/ai-providers', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+
+export const getAiProvider = (id: number): Promise<AiProviderOut> =>
+  apiFetch<AiProviderOut>(`/api/ai-providers/${id}`)
+
+export const patchAiProvider = (
+  id: number,
+  body: PatchAiProviderRequest,
+): Promise<AiProviderOut> =>
+  apiFetch<AiProviderOut>(`/api/ai-providers/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+
+export const deleteAiProvider = (id: number): Promise<void> =>
+  apiFetch<void>(`/api/ai-providers/${id}`, { method: 'DELETE' })
+
+export const enableAiProvider = (
+  id: number,
+  body: EnableAiProviderRequest,
+): Promise<AiProviderOut> =>
+  apiFetch<AiProviderOut>(`/api/ai-providers/${id}/enable`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+
+export const testAiConnection = (
+  body: TestAiConnectionRequest,
+): Promise<TestAiConnectionResponse> =>
+  apiFetch<TestAiConnectionResponse>('/api/ai-providers/test', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+
+// ---------------------------------------------------------------------------
+// Phase 8 — AI Actions for import sessions
+// ---------------------------------------------------------------------------
+
+export interface AiTagSuggestionOut {
+  canonical: string[]
+  new_suggestions: string[]
+  provider_available: boolean
+  error: string | null
+}
+
+export interface AiTextOut {
+  text: string | null
+  provider_available: boolean
+  error: string | null
+}
+
+export const aiSuggestTags = (sessionId: string): Promise<AiTagSuggestionOut> =>
+  apiFetch<AiTagSuggestionOut>(
+    `/api/import-sessions/${sessionId}/ai/suggest-tags`,
+    { method: 'POST' },
+  )
+
+export const aiCleanupDescription = (sessionId: string): Promise<AiTextOut> =>
+  apiFetch<AiTextOut>(
+    `/api/import-sessions/${sessionId}/ai/cleanup-description`,
+    { method: 'POST' },
+  )
+
+export const aiSummarize = (sessionId: string): Promise<AiTextOut> =>
+  apiFetch<AiTextOut>(
+    `/api/import-sessions/${sessionId}/ai/summarize`,
+    { method: 'POST' },
+  )

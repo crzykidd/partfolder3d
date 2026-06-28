@@ -2,6 +2,51 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-27 — Phase 8b AI tagging frontend decisions
+
+### Description editing added to TitleStep (not a new wizard step)
+
+The handoff prompt described a "description step" for the AI cleanup/summarize
+buttons, but the existing wizard has no description-editing step and adding one
+would break all existing step-navigation vitest tests (nextStep/prevStep/stepIndex
+assertions hardcode the 5-step sequence). Adding description editing to the
+existing TitleStep was the minimal-impact choice: it preserves all step tests,
+keeps title and description together as primary text metadata, and satisfies the
+spec (AI buttons appear where users edit the description). The TitleStep now saves
+both `confirmed_title` and `description` in a single PATCH on "Next →".
+
+### AI availability probe fires on TitleStep mount (description path only)
+
+The spec says "probe by calling the endpoint once on fresh page load". The probe
+calls `aiCleanupDescription` (POST) in a `useEffect` with an empty dependency
+array so it fires exactly once per mount. It only fires if the session already
+has a non-empty description (to avoid making an AI call when there is nothing to
+clean). The response `provider_available` field is cached in component state.
+If the probe itself triggers an AI call (provider configured, description exists),
+the returned text is intentionally discarded — the probe is only for availability
+detection; the user still explicitly clicks "Clean up" or "Summarize" to get a
+usable preview. Buttons remain enabled when provider state is null (unknown) and
+become disabled only after confirmed `provider_available: false`.
+
+### Surface 3 (PendingTagsPage): client-side fuzzy matching, not an AI call
+
+The prompt noted that the AI suggest-tags endpoint requires an import session ID,
+which is not available on PendingTagsPage. The implemented feature is therefore
+a client-side Levenshtein fuzzy match (≤ 3 edits, case-insensitive) using a new
+`fuzzyMatchTags` function in `import-utils.ts`. Tags with `popularity_count > 0`
+are treated as canonical; tags with `popularity_count === 0` are treated as
+potentially pending. This heuristic is consistent with the comment already in
+the existing PendingTagsPage code. The textarea pre-populated with pending tag
+names lets the admin refine the list before running the client-side match.
+
+### Levenshtein implementation: row-only DP (O(n) space)
+
+`levenshtein(a, b)` in import-utils.ts uses two 1D arrays (`prev`/`curr`) instead
+of a 2D matrix to keep memory O(n). This is the standard optimization for cases
+where only the final distance is needed (not the edit path). Correctness is
+verified by 7 unit tests; edge cases (empty string, same string, no common chars)
+are all covered.
+
 ## 2026-06-27 — Phase 8a AI tagging backend decisions
 
 ### Provider dispatch: anthropic SDK for Claude; openai SDK for OpenAI + Ollama

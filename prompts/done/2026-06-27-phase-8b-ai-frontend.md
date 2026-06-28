@@ -1,10 +1,15 @@
 ---
 name: 2026-06-27-phase-8b-ai-frontend
-status: pending          # pending | completed | failed
+status: completed
 created: 2026-06-27
 model: sonnet            # React/TS UI wiring against a locked backend
-completed:
-result:
+completed: 2026-06-27
+result: >
+  Phase 8b frontend complete. Three surfaces: AiProvidersPage (/admin/ai-providers,
+  full CRUD with inline forms, test-connection, enabled toggle, delete confirm),
+  ImportWizardPage AI actions (description AI buttons in TitleStep, AI tag
+  suggestions in TagsStep), PendingTagsPage fuzzy duplicate detection (client-side
+  Levenshtein). tsc clean, 131 tests pass (22 new).
 ---
 
 # Task: Phase 8b — AI tagging frontend

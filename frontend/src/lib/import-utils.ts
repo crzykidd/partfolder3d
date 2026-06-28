@@ -139,3 +139,54 @@ export function extractDomain(url: string): string | null {
     return null
   }
 }
+
+// ---------------------------------------------------------------------------
+// Fuzzy tag matching (Phase 8b — PendingTagsPage duplicate detection)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the Levenshtein edit distance between two strings.
+ * Case-sensitive — normalise to lower-case before calling if needed.
+ */
+export function levenshtein(a: string, b: string): number {
+  const m = a.length
+  const n = b.length
+  // Row-only DP to save memory
+  let prev = Array.from({ length: n + 1 }, (_, j) => j)
+  for (let i = 1; i <= m; i++) {
+    const curr = new Array<number>(n + 1)
+    curr[0] = i
+    for (let j = 1; j <= n; j++) {
+      if (a[i - 1] === b[j - 1]) {
+        curr[j] = prev[j - 1]
+      } else {
+        curr[j] = 1 + Math.min(prev[j], curr[j - 1], prev[j - 1])
+      }
+    }
+    prev = curr
+  }
+  return prev[n]
+}
+
+/**
+ * Find the closest canonical tag to `pendingTag` within `maxDistance` edits
+ * (case-insensitive). Returns the closest tag name, or null if none is within
+ * the threshold.
+ */
+export function fuzzyMatchTags(
+  pendingTag: string,
+  canonicalTags: string[],
+  maxDistance = 3,
+): string | null {
+  const lower = pendingTag.toLowerCase()
+  let bestMatch: string | null = null
+  let bestDist = maxDistance + 1
+  for (const tag of canonicalTags) {
+    const dist = levenshtein(lower, tag.toLowerCase())
+    if (dist < bestDist) {
+      bestDist = dist
+      bestMatch = tag
+    }
+  }
+  return bestDist <= maxDistance ? bestMatch : null
+}

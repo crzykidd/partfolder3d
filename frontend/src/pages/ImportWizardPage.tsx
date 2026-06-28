@@ -13,7 +13,7 @@
  * Polls GET /api/import-sessions/{id} every 3 s while status=processing.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as api from '@/lib/api'
@@ -23,8 +23,6 @@ import {
   type WizardStep,
   nextStep,
   prevStep,
-  isFirstStep,
-  isLastStep,
   stepIndex,
   acceptPendingTag,
   rejectPendingTag,
@@ -158,7 +156,46 @@ function SiteSetupBanner({ domain, cap, sessionId }: SiteSetupBannerProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 1: Title
+// Shared: AI text preview panel (cleanup / summarize result)
+// ---------------------------------------------------------------------------
+
+function AiTextPreview({
+  text,
+  onUse,
+  onDiscard,
+}: {
+  text: string
+  onUse: () => void
+  onDiscard: () => void
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-2">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        AI suggestion — preview
+      </p>
+      <p className="text-sm whitespace-pre-wrap">{text}</p>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onUse}
+          className="rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground hover:opacity-90 transition-colors"
+        >
+          Use this
+        </button>
+        <button
+          type="button"
+          onClick={onDiscard}
+          className="rounded-md border border-border px-3 py-1 text-xs hover:bg-accent transition-colors"
+        >
+          Discard
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Step 1: Title (+ description editing + AI description assistance)
 // ---------------------------------------------------------------------------
 
 interface TitleStepProps {
@@ -171,7 +208,14 @@ function TitleStep({ session, onNext }: TitleStepProps) {
   const [title, setTitle] = useState(
     session.confirmed_title ?? session.suggested_title ?? '',
   )
+  const [description, setDescription] = useState(session.description ?? '')
   const [error, setError] = useState<string | null>(null)
+
+  // AI-assist state: null = unknown (optimistic), false = no provider, true = available
+  const [providerAvailable, setProviderAvailable] = useState<boolean | null>(null)
+  // Pending AI suggestion — null until user triggers a button, then set to text
+  const [aiDescText, setAiDescText] = useState<string | null>(null)
+  const [aiStatus, setAiStatus] = useState<string | null>(null)
 
   const domain = session.source_url ? extractDomain(session.source_url) : null
 
@@ -182,10 +226,22 @@ function TitleStep({ session, onNext }: TitleStepProps) {
     retry: false,
   })
 
+  // Probe AI availability once on mount (only when there is something to process)
+  useEffect(() => {
+    if (!session.description?.trim()) return
+    api
+      .aiCleanupDescription(session.id)
+      .then((r) => setProviderAvailable(r.provider_available))
+      .catch(() => {}) // network error → leave as null (buttons stay enabled)
+    // Intentionally fire once on mount only; session.id stable for a given route.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const patchMutation = useMutation({
     mutationFn: () =>
       api.patchImportSession(session.id, {
         confirmed_title: title.trim() || null,
+        description: description.trim() || null,
       }),
     onSuccess: (updated) => {
       queryClient.setQueryData(['import-session', session.id], updated)
@@ -193,6 +249,42 @@ function TitleStep({ session, onNext }: TitleStepProps) {
     },
     onError: (err) =>
       setError(err instanceof Error ? err.message : 'Failed to save title.'),
+  })
+
+  const cleanupMutation = useMutation({
+    mutationFn: () => api.aiCleanupDescription(session.id),
+    onSuccess: (result) => {
+      setProviderAvailable(result.provider_available)
+      if (!result.provider_available) return
+      if (result.error) {
+        setAiStatus(`Error: ${result.error}`)
+        setTimeout(() => setAiStatus(null), 3000)
+        return
+      }
+      if (result.text) setAiDescText(result.text)
+    },
+    onError: (err) => {
+      setAiStatus(`Error: ${err instanceof Error ? err.message : 'Request failed'}`)
+      setTimeout(() => setAiStatus(null), 3000)
+    },
+  })
+
+  const summarizeMutation = useMutation({
+    mutationFn: () => api.aiSummarize(session.id),
+    onSuccess: (result) => {
+      setProviderAvailable(result.provider_available)
+      if (!result.provider_available) return
+      if (result.error) {
+        setAiStatus(`Error: ${result.error}`)
+        setTimeout(() => setAiStatus(null), 3000)
+        return
+      }
+      if (result.text) setAiDescText(result.text)
+    },
+    onError: (err) => {
+      setAiStatus(`Error: ${err instanceof Error ? err.message : 'Request failed'}`)
+      setTimeout(() => setAiStatus(null), 3000)
+    },
   })
 
   const handleNext = () => {
@@ -204,8 +296,12 @@ function TitleStep({ session, onNext }: TitleStepProps) {
     patchMutation.mutate()
   }
 
+  const noProvider = providerAvailable === false
+  const aiPending = cleanupMutation.isPending || summarizeMutation.isPending
+
   return (
     <div className="space-y-4">
+      {/* Title */}
       <div>
         <label className="mb-1 block text-sm font-medium">Title</label>
         <input
@@ -224,6 +320,77 @@ function TitleStep({ session, onNext }: TitleStepProps) {
           >
             Reset to suggested: "{session.suggested_title}"
           </button>
+        )}
+      </div>
+
+      {/* Description */}
+      <div>
+        <label className="mb-1 block text-sm font-medium">
+          Description{' '}
+          <span className="font-normal text-muted-foreground">(optional)</span>
+        </label>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={4}
+          className="input-base w-full resize-y text-sm"
+          placeholder="Describe this item…"
+        />
+
+        {/* AI description buttons — only shown when there is text to process */}
+        {description.trim() && (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={aiPending || noProvider}
+              title={noProvider ? 'No AI provider configured' : undefined}
+              onClick={() => {
+                setAiStatus(null)
+                setAiDescText(null)
+                cleanupMutation.mutate()
+              }}
+              className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+            >
+              {cleanupMutation.isPending ? 'Cleaning…' : 'Clean up (AI)'}
+            </button>
+            <button
+              type="button"
+              disabled={aiPending || noProvider}
+              title={noProvider ? 'No AI provider configured' : undefined}
+              onClick={() => {
+                setAiStatus(null)
+                setAiDescText(null)
+                summarizeMutation.mutate()
+              }}
+              className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+            >
+              {summarizeMutation.isPending ? 'Summarizing…' : 'Summarize scrape (AI)'}
+            </button>
+            {noProvider && (
+              <span className="text-xs text-muted-foreground/70">
+                No AI provider configured
+              </span>
+            )}
+            {aiStatus && (
+              <span className="text-xs text-red-600 dark:text-red-400">
+                {aiStatus}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* AI text preview */}
+        {aiDescText && (
+          <div className="mt-2">
+            <AiTextPreview
+              text={aiDescText}
+              onUse={() => {
+                setDescription(aiDescText)
+                setAiDescText(null)
+              }}
+              onDiscard={() => setAiDescText(null)}
+            />
+          </div>
         )}
       </div>
 
@@ -432,6 +599,11 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
 
+  // AI tag suggestion state
+  const [tagProviderAvailable, setTagProviderAvailable] = useState<boolean | null>(null)
+  const [aiTagSuggestions, setAiTagSuggestions] = useState<api.AiTagSuggestionOut | null>(null)
+  const [tagAiStatus, setTagAiStatus] = useState<string | null>(null)
+
   const patchMutation = useMutation({
     mutationFn: (tags: string[]) =>
       api.patchImportSession(session.id, { confirmed_tags: tags }),
@@ -441,6 +613,29 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
     },
     onError: (err) =>
       setError(err instanceof Error ? err.message : 'Failed to save tags.'),
+  })
+
+  const suggestTagsMutation = useMutation({
+    mutationFn: () => api.aiSuggestTags(session.id),
+    onSuccess: (result) => {
+      setTagProviderAvailable(result.provider_available)
+      if (!result.provider_available) return // button will now show disabled
+      if (result.error) {
+        setTagAiStatus(`Error: ${result.error}`)
+        setTimeout(() => setTagAiStatus(null), 3000)
+        return
+      }
+      if (result.canonical.length > 0 || result.new_suggestions.length > 0) {
+        setAiTagSuggestions(result)
+      } else {
+        setTagAiStatus('No tag suggestions found.')
+        setTimeout(() => setTagAiStatus(null), 3000)
+      }
+    },
+    onError: (err) => {
+      setTagAiStatus(`Error: ${err instanceof Error ? err.message : 'Request failed'}`)
+      setTimeout(() => setTagAiStatus(null), 3000)
+    },
   })
 
   const handleAccept = (tag: string) => {
@@ -479,11 +674,35 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
     patchMutation.mutate(confirmed)
   }
 
+  const noTagProvider = tagProviderAvailable === false
+
   return (
     <div className="space-y-4">
       {/* Confirmed tags */}
       <div>
-        <h3 className="mb-2 text-sm font-medium">Tags</h3>
+        <div className="mb-2 flex items-center gap-3">
+          <h3 className="text-sm font-medium">Tags</h3>
+          {/* AI suggest button */}
+          <button
+            type="button"
+            disabled={suggestTagsMutation.isPending || noTagProvider}
+            title={noTagProvider ? 'No AI provider configured' : 'Get tag suggestions from AI'}
+            onClick={() => {
+              setTagAiStatus(null)
+              suggestTagsMutation.mutate()
+            }}
+            className="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+          >
+            {suggestTagsMutation.isPending ? 'Suggesting…' : 'Suggest tags (AI)'}
+          </button>
+          {noTagProvider && (
+            <span className="text-xs text-muted-foreground/70">No AI configured</span>
+          )}
+          {tagAiStatus && (
+            <span className="text-xs text-red-600 dark:text-red-400">{tagAiStatus}</span>
+          )}
+        </div>
+
         {confirmed.length === 0 ? (
           <p className="text-sm text-muted-foreground italic">No tags yet.</p>
         ) : (
@@ -512,6 +731,87 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
           </p>
         )}
       </div>
+
+      {/* AI tag suggestions card */}
+      {aiTagSuggestions && aiTagSuggestions.provider_available && !aiTagSuggestions.error && (
+        <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              AI Tag Suggestions
+            </p>
+            <button
+              type="button"
+              onClick={() => setAiTagSuggestions(null)}
+              className="text-xs text-muted-foreground hover:text-foreground"
+              aria-label="Dismiss AI suggestions"
+            >
+              ✕ Dismiss
+            </button>
+          </div>
+
+          {aiTagSuggestions.canonical.length > 0 && (
+            <div>
+              <p className="mb-1 text-xs text-muted-foreground">
+                Matching existing catalog tags:
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {aiTagSuggestions.canonical.map((tag) => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2.5 py-0.5 text-xs"
+                  >
+                    {tag}
+                    {!confirmed.includes(tag) && (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmed((c) => addConfirmedTag(c, tag))}
+                        title={`Add tag "${tag}"`}
+                        className="text-green-600 hover:opacity-80"
+                      >
+                        +
+                      </button>
+                    )}
+                    {confirmed.includes(tag) && (
+                      <span className="text-muted-foreground/60 text-[10px]">✓</span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {aiTagSuggestions.new_suggestions.length > 0 && (
+            <div>
+              <p className="mb-1 text-xs text-muted-foreground">
+                New tags (will need admin approval after commit):
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {aiTagSuggestions.new_suggestions.map((tag) => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center gap-1 rounded-full border border-dashed border-border bg-muted px-2.5 py-0.5 text-xs text-muted-foreground"
+                  >
+                    {tag}
+                    {!confirmed.includes(tag) && (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmed((c) => addConfirmedTag(c, tag))}
+                        title={`Add tag "${tag}"`}
+                        className="text-green-600 hover:opacity-80"
+                      >
+                        +
+                      </button>
+                    )}
+                    {confirmed.includes(tag) && (
+                      <span className="text-muted-foreground/60 text-[10px]">✓</span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Pending / suggested tags */}
       {pending.length > 0 && (

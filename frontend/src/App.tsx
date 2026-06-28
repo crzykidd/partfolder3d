@@ -38,6 +38,7 @@ import { ChangesPage } from '@/pages/admin/ChangesPage'
 import { ReviewsPage } from '@/pages/admin/ReviewsPage'
 import { PrintStatsPage } from '@/pages/admin/PrintStatsPage'
 import { ShareAuditPage } from '@/pages/admin/ShareAuditPage'
+import { AiProvidersPage } from '@/pages/admin/AiProvidersPage'
 
 import { PublicSharePage } from '@/pages/PublicSharePage'
 
@@ -176,6 +177,14 @@ function App() {
                     element={
                       <AdminGuard>
                         <ShareAuditPage />
+                      </AdminGuard>
+                    }
+                  />
+                  <Route
+                    path="/admin/ai-providers"
+                    element={
+                      <AdminGuard>
+                        <AiProvidersPage />
                       </AdminGuard>
                     }
                   />

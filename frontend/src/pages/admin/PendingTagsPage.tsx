@@ -7,11 +7,131 @@
  * is encountered during reconciliation.  Admins promote them to active/canonical
  * via POST /api/tags/{id}/approve so they become visible in the tag cloud.
  *
+ * Phase 8b addition: "AI-assist: possible duplicates (client-side matching)" section
+ * at the top uses client-side Levenshtein fuzzy matching to surface pending tags that
+ * look like near-duplicates of existing canonical tags. No AI endpoint is called here;
+ * the matching is entirely client-side.
+ *
  * Uses GET /api/tags?active_only=false and filters client-side for status=pending.
  */
 
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as api from '@/lib/api'
+import { fuzzyMatchTags } from '@/lib/import-utils'
+
+// ---------------------------------------------------------------------------
+// AI-assist: duplicate detection (client-side fuzzy matching)
+// ---------------------------------------------------------------------------
+
+interface DuplicateDetectSectionProps {
+  allTags: api.TagSummary[]
+}
+
+function DuplicateDetectSection({ allTags }: DuplicateDetectSectionProps) {
+  // Heuristic: tags with popularity_count === 0 are likely pending (not yet used in catalog).
+  // Tags with popularity_count > 0 are canonical/active.
+  const canonicalTags = useMemo(
+    () => allTags.filter((t) => t.popularity_count > 0).map((t) => t.name),
+    [allTags],
+  )
+  const pendingLikeTags = useMemo(
+    () => allTags.filter((t) => t.popularity_count === 0).map((t) => t.name),
+    [allTags],
+  )
+
+  const [tagInput, setTagInput] = useState(() => pendingLikeTags.join(', '))
+  const [results, setResults] = useState<{ pending: string; closest: string }[] | null>(
+    null,
+  )
+
+  const runMatch = () => {
+    const names = tagInput
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    const matches = names
+      .map((name) => ({
+        pending: name,
+        closest: fuzzyMatchTags(name, canonicalTags) ?? '',
+      }))
+      .filter((r) => r.closest !== '')
+    setResults(matches)
+  }
+
+  if (pendingLikeTags.length === 0 || canonicalTags.length === 0) return null
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+      <div>
+        <h2 className="text-sm font-semibold">
+          AI-assist: possible duplicates (client-side matching)
+        </h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Compares pending tag names against existing canonical tags using
+          Levenshtein distance (≤ 3 edits). No AI endpoint is called — this is
+          client-side only. Edit the list below and click{' '}
+          <span className="font-medium">Find duplicates</span> to re-run.
+        </p>
+      </div>
+
+      <textarea
+        value={tagInput}
+        onChange={(e) => {
+          setTagInput(e.target.value)
+          setResults(null)
+        }}
+        rows={3}
+        className="input-base w-full resize-y text-sm"
+        placeholder="Comma-separated tag names to check…"
+      />
+
+      <button
+        type="button"
+        onClick={runMatch}
+        disabled={!tagInput.trim()}
+        className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50 transition-colors"
+      >
+        Find duplicates
+      </button>
+
+      {results !== null && (
+        results.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            No near-duplicates found (all tags differ by more than 3 edits from
+            existing canonical tags).
+          </p>
+        ) : (
+          <div className="overflow-hidden rounded-md border border-border">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase tracking-wide">
+                    Pending tag
+                  </th>
+                  <th className="px-3 py-2 text-left font-semibold text-muted-foreground uppercase tracking-wide">
+                    Possible duplicate of
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((r) => (
+                  <tr
+                    key={r.pending}
+                    className="border-t border-border hover:bg-muted/30 transition-colors"
+                  >
+                    <td className="px-3 py-2 font-medium">{r.pending}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{r.closest}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+    </div>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Page
@@ -55,6 +175,9 @@ export function PendingTagsPage() {
           Approving a tag makes it canonical and visible in the tag cloud.
         </p>
       </div>
+
+      {/* Phase 8b: AI-assist duplicate detection (client-side only) */}
+      {data && <DuplicateDetectSection allTags={data.tags} />}
 
       {isLoading && (
         <p className="text-sm text-muted-foreground">Loading…</p>
