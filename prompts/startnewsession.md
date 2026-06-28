@@ -8,7 +8,7 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-06-27 (Phase 6a committed)
+**Last updated:** 2026-06-27 (Phase 6 complete; Phase 7 in flight)
 
 ---
 
@@ -31,9 +31,9 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 
 ## Current status
 
-- **Phase:** 6a (backend) **done** (committed `7bc344a` on `dev`); **6b frontend in flight**.
-  Next action = verify + commit 6b (`prompts/2026-06-27-phase-6b-frontend-reconcile.md`), then
-  plan + dispatch **Phase 7 — Print history + sharing** (build-plan §"Phase 7" + PRD §9–11).
+- **Phase:** 6 **complete** (6a `7bc344a` + 6b `0797fbf` on `dev`). **Phase 7 in flight**
+  (`prompts/2026-06-27-phase-7-print-history-sharing.md`, model: sonnet — print history +
+  sharing; expected to split, likely 7a backend then 7b frontend, possibly further).
 - **Branch:** `dev` (work here). `main` is protected. Nothing pushed/PR'd yet (no dev→main
   until a working product exists).
 - **Done so far:** Phases 0–6a committed on `dev`:
@@ -45,11 +45,9 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
     **6a** reconcile engine **backend** — Issue/ChangeLog/ReviewItem (migration 0007), the
     `reconcile.py` engine (4 §8.1 behaviors, isolated per-item txns, daily `library_reconcile_scan`,
     `apply_review_item`), issues/changes/reviews routers; `rescan_item` refactored onto the engine.
-    All checks green (214 pytest on real PG, alembic 0007 round-trip, ruff).
-- **6b remaining (frontend, in flight):** `/admin/issues`, `/admin/changes`, `/admin/reviews`
-  (approve/reject), + Auto/Review per-behavior mode toggles via the generic settings API
-  (`scan.{sidecar_sync,re_render,file_changes}.mode`). Defaults: sidecar_sync=review,
-  re_render=auto, file_changes=review.
+    All checks green (214 pytest on real PG, alembic 0007 round-trip, ruff);
+    **6b** reconcile **frontend** — `/admin/issues`, `/admin/changes`, `/admin/reviews`
+    (approve/reject) + Reconcile-Modes Auto/Review toggles (96 vitest, tsc clean).
 
 ## Phase 5 follow-ups (small; fold into a later phase)
 
