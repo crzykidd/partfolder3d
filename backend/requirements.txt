@@ -36,6 +36,11 @@ PyYAML==6.0.2
 # pyrender+PyOpenGL: EGL/OSMesa path (tried first; falls back to vtk when unavailable).
 # Pillow: image I/O helper. numpy: mesh math.
 trimesh==4.5.3
+# lxml: trimesh's 3MF loader parses the zipped XML via lxml.etree. It's an OPTIONAL
+# trimesh extra (not pulled in by the base install), so without it 3MF renders fail
+# with "No module named 'lxml'" — even though STL/OBJ/PLY parse fine. 3MF is a v1
+# format, so this is required.
+lxml==6.1.1
 pyrender==0.1.45
 Pillow==11.1.0
 # pyrender hard-pins PyOpenGL==3.1.0, so this >= line resolves to 3.1.0 here —

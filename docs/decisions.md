@@ -2,6 +2,14 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-28 — 3MF rendering needs lxml (trimesh optional extra)
+
+Once the render backend worked, **3MF** renders failed with "No module named 'lxml'". trimesh's
+3MF loader parses the zipped XML via `lxml.etree`, but `lxml` is an OPTIONAL trimesh extra not
+pulled in by the base install (STL/OBJ/PLY parse without it). Added `lxml==6.1.1` to
+requirements; needs an image rebuild. 3MF is a v1 format → required, not optional. Same lesson as
+the render fix: exercise each format path against a real file in the actual image.
+
 ## 2026-06-28 — Job retry: retriable types and re-enqueue behaviour
 
 ### Retry map
