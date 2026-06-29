@@ -279,3 +279,136 @@ def test_worker_settings_builds_a_worker() -> None:
         assert fn in w.functions, f"task {fn!r} not registered on the worker"
     # …and the recurring cron jobs are wired in.
     assert any(name.startswith("cron:") for name in w.functions)
+
+
+# ---------------------------------------------------------------------------
+# Retry endpoint
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_retry_failed_render_job(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: object,
+) -> None:
+    """POST /api/jobs/{id}/retry on a failed render job re-enqueues render_item."""
+    from unittest.mock import AsyncMock, patch  # noqa: PLC0415
+
+    from app.worker.job_tracker import create_job, finish_job  # noqa: PLC0415
+
+    # Create a failed render job with item_id in payload.
+    # item_id=None for the FK column (no real Item row needed); the payload
+    # is what the retry endpoint reads for re-enqueueing.
+    jid = await create_job(db_session, "render", payload={"item_id": 42}, item_id=None)
+    await finish_job(db_session, jid, succeeded=False, error="render backend unavailable")
+    await db_session.commit()
+
+    await _setup_and_login(client, tmp_path)  # type: ignore[arg-type]
+    csrf = client.cookies.get("pf3d_csrf", "")
+
+    # Patch the Redis pool so no real Redis connection is needed.
+    # create_pool is lazily imported inside the endpoint body, so patch it
+    # at the arq module where it lives.
+    mock_redis = AsyncMock()
+    mock_pool = AsyncMock(return_value=mock_redis)
+
+    with patch("arq.create_pool", mock_pool):
+        resp = await client.post(
+            f"/api/jobs/{jid}/retry",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["queued"] is True
+
+    # Verify that enqueue_job was called with the correct task and item_id
+    mock_redis.enqueue_job.assert_called_once_with("render_item", 42)
+
+
+@pytest.mark.asyncio
+async def test_retry_non_failed_job_returns_409(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: object,
+) -> None:
+    """POST /api/jobs/{id}/retry on a running job returns 409."""
+    from app.worker.job_tracker import create_job  # noqa: PLC0415
+
+    # create_job sets status = "running"
+    jid = await create_job(db_session, "render", payload={"item_id": 5})
+    await db_session.commit()
+
+    await _setup_and_login(client, tmp_path)  # type: ignore[arg-type]
+    csrf = client.cookies.get("pf3d_csrf", "")
+
+    resp = await client.post(
+        f"/api/jobs/{jid}/retry",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 409, resp.text
+    assert "running" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_retry_succeeded_job_returns_409(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: object,
+) -> None:
+    """POST /api/jobs/{id}/retry on a succeeded job returns 409."""
+    from app.worker.job_tracker import create_job, finish_job  # noqa: PLC0415
+
+    jid = await create_job(db_session, "render", payload={"item_id": 3})
+    await finish_job(db_session, jid, succeeded=True)
+    await db_session.commit()
+
+    await _setup_and_login(client, tmp_path)  # type: ignore[arg-type]
+    csrf = client.cookies.get("pf3d_csrf", "")
+
+    resp = await client.post(
+        f"/api/jobs/{jid}/retry",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 409, resp.text
+
+
+@pytest.mark.asyncio
+async def test_retry_non_retriable_type_returns_400(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: object,
+) -> None:
+    """POST /api/jobs/{id}/retry on an unknown type returns 400."""
+    from app.worker.job_tracker import create_job, finish_job  # noqa: PLC0415
+
+    jid = await create_job(db_session, "unknown_type", payload={})
+    await finish_job(db_session, jid, succeeded=False, error="oops")
+    await db_session.commit()
+
+    await _setup_and_login(client, tmp_path)  # type: ignore[arg-type]
+    csrf = client.cookies.get("pf3d_csrf", "")
+
+    resp = await client.post(
+        f"/api/jobs/{jid}/retry",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 400, resp.text
+    assert "cannot be retried" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_retry_missing_job_returns_404(
+    client: AsyncClient,
+    tmp_path: object,
+) -> None:
+    """POST /api/jobs/{unknown_uuid}/retry returns 404."""
+    await _setup_and_login(client, tmp_path)  # type: ignore[arg-type]
+    csrf = client.cookies.get("pf3d_csrf", "")
+
+    resp = await client.post(
+        f"/api/jobs/{uuid.uuid4()}/retry",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 404, resp.text

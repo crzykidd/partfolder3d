@@ -2,6 +2,37 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-28 — Job retry: retriable types and re-enqueue behaviour
+
+### Retry map
+
+`POST /api/jobs/{id}/retry` re-enqueues a failed job.  Only one job type is
+currently retriable:
+
+| `Job.type` | arq task | args extracted from payload |
+|------------|----------|-----------------------------|
+| `"render"` | `render_item` | `payload["item_id"]` (int) |
+
+All other types return 400.  The rationale:
+
+- **render** is the only type whose arq task (`render_item`) creates a `Job` row
+  via `create_job()` in the production worker code.  Every failed render job will
+  have a valid `{"item_id": N}` payload and can be safely re-submitted.
+- **build_zip_bundle** / **exec_scheduled_job** / **process_import_session** /
+  **apply_review_item** do NOT create `Job` rows — they use their own state models
+  (`DownloadBundle`, `ScheduledJob`, `ImportSession`, `ReviewItem`).  No rows of
+  those types should appear in the `jobs` table in production.
+- A "zip_bundle" type was used in tests but has no production code path, so it is
+  not added to the map.
+
+### Re-enqueue behaviour
+
+The old failed `Job` row is **left intact** (preserved as history).  The retry
+re-enqueues the arq task; when that task runs it calls `create_job()` internally
+and creates a **new** `Job` row.  This is consistent with normal first-run
+behaviour, keeps the failure audit trail, and avoids any ambiguity about
+timestamps or status transitions on the original row.
+
 ## 2026-06-28 — AI usage tracking: AiUsage model, AiCallResult refactor, summary API, cost estimates
 
 ### AiUsage model shape

@@ -1263,6 +1263,9 @@ export const listJobs = (params: {
 export const getJob = (jobId: string): Promise<JobOut> =>
   apiFetch<JobOut>(`/api/jobs/${jobId}`)
 
+export const retryJob = (jobId: string): Promise<{ queued: boolean }> =>
+  apiFetch<{ queued: boolean }>(`/api/jobs/${jobId}/retry`, { method: 'POST' })
+
 // ---------------------------------------------------------------------------
 // Phase 4 — Scheduled Jobs
 // ---------------------------------------------------------------------------

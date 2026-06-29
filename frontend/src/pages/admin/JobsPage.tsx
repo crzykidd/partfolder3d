@@ -10,11 +10,13 @@
  */
 
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { RotateCw } from 'lucide-react'
 import * as api from '@/lib/api'
 import {
   AdminPage, PageHeader,
   Badge, jobStatusVariant,
+  Button,
   FilterPill,
   DataTable, TableRow, Td, Pagination,
 } from '@/components/ui'
@@ -72,6 +74,14 @@ function ProgressBar({ value }: { value: number }) {
 
 function JobRow({ job }: { job: api.JobOut }) {
   const [expanded, setExpanded] = useState(false)
+  const queryClient = useQueryClient()
+
+  const retryMutation = useMutation({
+    mutationFn: () => api.retryJob(job.id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['jobs'] })
+    },
+  })
 
   return (
     <>
@@ -115,11 +125,34 @@ function JobRow({ job }: { job: api.JobOut }) {
             <span style={{ color: 'var(--aurora-muted)', fontSize: 11 }}>—</span>
           )}
         </Td>
+        <Td onClick={(e) => e.stopPropagation()}>
+          {job.status === 'failed' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => retryMutation.mutate()}
+                disabled={retryMutation.isPending}
+              >
+                <RotateCw size={11} />
+                {retryMutation.isPending ? 'Retrying…' : 'Retry'}
+              </Button>
+              {retryMutation.isError && (
+                <span style={{ fontSize: 11, color: 'var(--aurora-danger)' }}>
+                  {retryMutation.error instanceof Error ? retryMutation.error.message : 'Failed'}
+                </span>
+              )}
+              {retryMutation.isSuccess && (
+                <span style={{ fontSize: 11, color: '#16A34A' }}>Enqueued ✓</span>
+              )}
+            </div>
+          )}
+        </Td>
       </TableRow>
 
       {expanded && (job.log || job.error) && (
         <tr style={{ borderTop: '1px solid var(--aurora-divider)', background: 'rgba(15,164,171,0.02)' }}>
-          <td colSpan={7} style={{ padding: '10px 14px' }}>
+          <td colSpan={8} style={{ padding: '10px 14px' }}>
             {job.log && (
               <pre
                 style={{
@@ -176,7 +209,7 @@ const STATUS_LABELS: Record<string, string> = {
   succeeded: 'succeeded',
 }
 
-const COLUMNS = ['ID', 'Type', 'Status', 'Progress', 'Created', 'Elapsed', 'Error']
+const COLUMNS = ['ID', 'Type', 'Status', 'Progress', 'Created', 'Elapsed', 'Error', 'Actions']
 
 export function JobsPage() {
   const [statusFilter, setStatusFilter] = useState('')
