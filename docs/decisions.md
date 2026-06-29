@@ -2,6 +2,62 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-28 — AI usage tracking: AiUsage model, AiCallResult refactor, summary API, cost estimates
+
+### AiUsage model shape
+
+`ai_usage` table (migration 0013): `id`, `created_at` (timestamptz, indexed), `provider`
+(str), `model` (str | null), `action` (str: `suggest_tags` | `cleanup_description` |
+`summarize` | `test`), `input_tokens` (int), `output_tokens` (int), `total_tokens` (int),
+`user_id` (nullable FK → users, SET NULL on delete), `success` (bool).
+
+The `created_at` index is the key: all windowed queries (24h/7d/30d) filter on it.
+
+### AiCallResult refactor + str-normalization for the test seam
+
+The real callers (`_call_anthropic_real`, `_call_openai_real`) were returning `str | None`.
+They now return `AiCallResult | None` — a small dataclass carrying `text`, `input_tokens`,
+`output_tokens`. This keeps token data coupled to the response without threading extra
+parameters through every function.
+
+The injectable test seam (`_anthropic_caller` / `_openai_caller` module-level vars) kept
+backward-compat by normalizing in `_dispatch`: if the caller returns a `str`, it wraps it
+as `AiCallResult(text=str_val, input_tokens=0, output_tokens=0)`. This means the 20+
+existing Phase 8 tests that patch the callers to return plain strings continue to pass
+unchanged. Only new tests that need to assert on token counts inject `AiCallResult` objects.
+
+`AiTagResult` and `AiTextResult` grew `input_tokens: int = 0` and `output_tokens: int = 0`
+fields so action endpoints can read them without touching the client layer. Defaults of 0
+are backward-safe for error paths and test-seam paths.
+
+### Record-failures-swallowed contract
+
+Usage recording happens in `ai_actions.py` after each action call. The `_record_usage`
+helper wraps its work in a `try/except` that logs and continues. Additionally, each
+endpoint's call to `await _record_usage(...)` is wrapped in its own `try/except` as a
+belt-and-suspenders outer guard — so even if `_record_usage` itself throws unexpectedly
+(e.g., if mocked to raise in tests), the AI feature still returns HTTP 200.
+
+The contract: AI usage recording **can never break or delay an AI feature**. Failures are
+always logged and never surfaced to callers.
+
+### Summary-window query approach
+
+`GET /api/ai-usage/summary` runs three SQL queries (24h / 7d / 30d) over the indexed
+`created_at` column. Each query aggregates `COUNT`, `SUM(input_tokens)`,
+`SUM(output_tokens)`, `SUM(total_tokens)` per window. A per-provider-model query within
+each window feeds the cost estimate. A 30d provider/model grouped query builds the
+breakdown table.
+
+### Estimated cost in USD
+
+`backend/app/ai/pricing.py` holds a local pricing table keyed by `(provider, model)`.
+Seeded with current Claude rates. Ollama is always $0. OpenAI models are deliberately
+**not seeded** — rates change frequently and vary by model; unknown models yield `null`
+cost (shown as "—" in the UI) rather than a misleading $0. The table is easy to extend.
+A `claude-opus-*` wildcard fallback covers future Claude Opus variants not yet listed.
+The API and UI label costs as **estimates**; actual billing may differ.
+
 ## 2026-06-28 — Headless render fix in the Docker image (X11 libs + PyOpenGL override)
 
 Phase-4 render worked on the host but `get_backend()` returned `none` in the running container.

@@ -1733,3 +1733,41 @@ export const reprobeAdminSite = (domain: string): Promise<ReprobeResponse> =>
     `/api/admin/site-capabilities/${encodeURIComponent(domain)}/reprobe`,
     { method: 'POST' },
   )
+
+// ---------------------------------------------------------------------------
+// Phase 13 — AI usage summary (admin-only)
+// ---------------------------------------------------------------------------
+
+export interface AiUsageWindow {
+  calls: number
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  /**
+   * Estimated cost in USD (derived from local pricing table).
+   * null when any contributing model has an unknown rate — show '—' in the UI.
+   * Labelled as an estimate; rates may drift from actual billing.
+   */
+  estimated_cost_usd: number | null
+}
+
+export interface AiUsageBreakdownRow {
+  provider: string
+  model: string | null
+  calls: number
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  estimated_cost_usd: number | null
+}
+
+export interface AiUsageSummary {
+  last_24h: AiUsageWindow
+  last_7d: AiUsageWindow
+  last_30d: AiUsageWindow
+  /** Provider/model breakdown for the 30-day window, descending by call count. */
+  breakdown: AiUsageBreakdownRow[]
+}
+
+export const getAiUsageSummary = (): Promise<AiUsageSummary> =>
+  apiFetch<AiUsageSummary>('/api/ai-usage/summary')

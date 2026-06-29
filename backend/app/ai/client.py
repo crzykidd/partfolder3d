@@ -19,6 +19,16 @@ Provider dispatch
 * OpenAI  → ``openai`` SDK (``chat.completions.create``).
 * Ollama  → ``openai`` SDK with ``base_url`` = the configured endpoint (Ollama
             exposes an OpenAI-compatible REST API).
+
+Token usage
+-----------
+* Real callers return ``AiCallResult`` (text + token counts).
+* The injectable test callers may return a plain ``str`` (backward-compatible):
+  ``_dispatch`` normalises ``str`` → ``AiCallResult(text=…, 0, 0)`` so existing
+  tests that patch ``_anthropic_caller`` / ``_openai_caller`` to return a string
+  do not need to change.
+* ``AiTagResult`` and ``AiTextResult`` carry ``input_tokens`` / ``output_tokens``
+  so callers (action endpoints) can record usage without touching the client layer.
 """
 
 from __future__ import annotations
@@ -39,10 +49,10 @@ log = logging.getLogger(__name__)
 # Mockable callers (set to None → use real SDK; monkeypatch in tests)
 # ---------------------------------------------------------------------------
 
-# Signature: (api_key, model, system, user_msg, max_tokens) -> str | None
+# Signature: (api_key, model, system, user_msg, max_tokens) -> str | AiCallResult | None
 _anthropic_caller = None
 
-# Signature: (api_key, base_url, model, system, user_msg, max_tokens) -> str | None
+# Signature: (api_key, base_url, model, system, user_msg, max_tokens) -> str | AiCallResult | None
 _openai_caller = None
 
 # ---------------------------------------------------------------------------
@@ -53,17 +63,35 @@ MAX_NEW_SUGGESTIONS = 5  # hard cap on genuinely new tag suggestions
 
 
 @dataclass
+class AiCallResult:
+    """Raw result from a single AI provider call.
+
+    text         — the response text (None on error/empty response)
+    input_tokens — tokens consumed by the prompt (0 when using mocked callers)
+    output_tokens — tokens in the completion (0 when using mocked callers)
+    """
+
+    text: str | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+@dataclass
 class AiTagResult:
     """Result of an AI tag-suggestion call.
 
     canonical       — matched names from the existing canonical tag list
     new_suggestions — genuinely new tags (≤ MAX_NEW_SUGGESTIONS); go to pending
     error           — non-None when the call failed (never re-raised to caller)
+    input_tokens    — prompt tokens (0 when mocked / provider error)
+    output_tokens   — completion tokens (0 when mocked / provider error)
     """
 
     canonical: list[str] = field(default_factory=list)
     new_suggestions: list[str] = field(default_factory=list)
     error: str | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 @dataclass
@@ -72,6 +100,8 @@ class AiTextResult:
 
     text: str | None = None
     error: str | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -181,8 +211,8 @@ def _call_anthropic_real(
     system: str,
     user_msg: str,
     max_tokens: int,
-) -> str | None:
-    """Invoke the Anthropic SDK.  Returns response text or None on error."""
+) -> AiCallResult | None:
+    """Invoke the Anthropic SDK.  Returns AiCallResult (with token counts) or None on error."""
     if not api_key:
         # No key → the SDK raises a cryptic "could not resolve authentication"
         # TypeError. Return cleanly instead (callers treat None as "no result").
@@ -198,9 +228,12 @@ def _call_anthropic_real(
             system=system,
             messages=[{"role": "user", "content": user_msg}],
         )
+        text: str | None = None
         if response.content and hasattr(response.content[0], "text"):
-            return str(response.content[0].text)
-        return None
+            text = str(response.content[0].text)
+        input_tokens = getattr(response.usage, "input_tokens", 0) or 0
+        output_tokens = getattr(response.usage, "output_tokens", 0) or 0
+        return AiCallResult(text=text, input_tokens=input_tokens, output_tokens=output_tokens)
     except Exception:
         log.exception("Anthropic API call failed")
         return None
@@ -213,8 +246,8 @@ def _call_openai_real(
     system: str,
     user_msg: str,
     max_tokens: int,
-) -> str | None:
-    """Invoke the OpenAI SDK (also used for Ollama via base_url).  Returns text or None."""
+) -> AiCallResult | None:
+    """Invoke the OpenAI SDK (also used for Ollama via base_url).  Returns AiCallResult or None."""
     try:
         import openai  # noqa: PLC0415
 
@@ -230,9 +263,13 @@ def _call_openai_real(
                 {"role": "user", "content": user_msg},
             ],
         )
+        text: str | None = None
         if response.choices:
-            return response.choices[0].message.content
-        return None
+            text = response.choices[0].message.content
+        usage = response.usage
+        input_tokens = getattr(usage, "prompt_tokens", 0) or 0
+        output_tokens = getattr(usage, "completion_tokens", 0) or 0
+        return AiCallResult(text=text, input_tokens=input_tokens, output_tokens=output_tokens)
     except Exception:
         log.exception("OpenAI/Ollama API call failed")
         return None
@@ -246,13 +283,30 @@ _DEFAULT_CLAUDE_MODEL = "claude-opus-4-8"
 _DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 
 
+def _normalize_caller_result(raw: object) -> AiCallResult | None:
+    """Normalise an injectable-caller return value to AiCallResult or None.
+
+    Real callers now return AiCallResult.  Test callers that return a plain
+    ``str`` are normalised here so they still work without any test changes.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, AiCallResult):
+        return raw
+    if isinstance(raw, str):
+        return AiCallResult(text=raw, input_tokens=0, output_tokens=0)
+    # Unexpected type — treat as no result
+    log.warning("Unexpected AI caller return type: %s", type(raw))
+    return None
+
+
 def _dispatch(
     provider: AiProvider,
     system: str,
     user_msg: str,
     max_tokens: int = 1024,
-) -> str | None:
-    """Dispatch a call to the configured provider. Returns text or None."""
+) -> AiCallResult | None:
+    """Dispatch a call to the configured provider. Returns AiCallResult or None."""
     # Decrypt key at call time only; never stored in cleartext.
     api_key = ""
     if provider.api_key_encrypted:
@@ -269,7 +323,8 @@ def _dispatch(
             model = _DEFAULT_CLAUDE_MODEL
         caller = _anthropic_caller
         if caller is not None:
-            return caller(api_key, model, system, user_msg, max_tokens)  # type: ignore[operator]
+            raw = caller(api_key, model, system, user_msg, max_tokens)  # type: ignore[operator]
+            return _normalize_caller_result(raw)
         return _call_anthropic_real(api_key, model, system, user_msg, max_tokens)
 
     # OpenAI or Ollama — both use the openai SDK; Ollama sets base_url.
@@ -278,7 +333,8 @@ def _dispatch(
     base_url = provider.endpoint  # None for OpenAI; endpoint for Ollama
     caller = _openai_caller
     if caller is not None:
-        return caller(api_key, base_url, model, system, user_msg, max_tokens)  # type: ignore[operator]
+        raw = caller(api_key, base_url, model, system, user_msg, max_tokens)  # type: ignore[operator]
+        return _normalize_caller_result(raw)
     return _call_openai_real(api_key, base_url, model, system, user_msg, max_tokens)
 
 
@@ -302,17 +358,20 @@ def suggest_tags(
 
     On any error this returns an AiTagResult with empty lists and an error
     message — it **never** raises.  AI failure does not block the manual path.
+
+    Token counts are populated in the returned AiTagResult so callers can
+    record usage without touching this layer.
     """
     system, user_msg = _build_tag_prompt(
         title, description, scraped_text, filenames, existing_tags
     )
     try:
-        raw = _dispatch(provider, system, user_msg, max_tokens=512)
-        if raw is None:
+        call_result = _dispatch(provider, system, user_msg, max_tokens=512)
+        if call_result is None or call_result.text is None:
             return AiTagResult(error="No response from AI provider")
 
         # Strip markdown code fences if the model wraps its output.
-        text = raw.strip()
+        text = call_result.text.strip()
         if text.startswith("```"):
             lines = text.splitlines()
             # Drop first line (```json / ```) and last line (```)
@@ -332,7 +391,12 @@ def suggest_tags(
         existing_set = set(existing_tags)
         canonical = [t for t in canonical if t in existing_set]
 
-        return AiTagResult(canonical=canonical, new_suggestions=new_suggestions)
+        return AiTagResult(
+            canonical=canonical,
+            new_suggestions=new_suggestions,
+            input_tokens=call_result.input_tokens,
+            output_tokens=call_result.output_tokens,
+        )
 
     except Exception as exc:
         log.warning("AI tag suggestion failed: %s", exc)
@@ -350,16 +414,21 @@ def cleanup_description(
     for review before applying it. Never auto-overwrites silently.
 
     Returns AiTextResult with ``text=None`` and an error message on failure.
+    Token counts in the result allow callers to record usage.
     """
     if not description or not description.strip():
         return AiTextResult(error="Empty description provided")
 
     system, user_msg = _build_cleanup_prompt(description, title)
     try:
-        raw = _dispatch(provider, system, user_msg, max_tokens=1024)
-        if raw is None:
+        call_result = _dispatch(provider, system, user_msg, max_tokens=1024)
+        if call_result is None or call_result.text is None:
             return AiTextResult(error="No response from AI provider")
-        return AiTextResult(text=raw.strip())
+        return AiTextResult(
+            text=call_result.text.strip(),
+            input_tokens=call_result.input_tokens,
+            output_tokens=call_result.output_tokens,
+        )
     except Exception as exc:
         log.warning("AI description cleanup failed: %s", exc)
         return AiTextResult(error=str(exc))
@@ -374,16 +443,21 @@ def summarize_scrape(
 
     The result is a **draft** — the caller must present it to the user.
     Never auto-applies. Returns AiTextResult with error on failure.
+    Token counts in the result allow callers to record usage.
     """
     if not scraped_text or not scraped_text.strip():
         return AiTextResult(error="No scraped content to summarize")
 
     system, user_msg = _build_summarize_prompt(scraped_text, title)
     try:
-        raw = _dispatch(provider, system, user_msg, max_tokens=512)
-        if raw is None:
+        call_result = _dispatch(provider, system, user_msg, max_tokens=512)
+        if call_result is None or call_result.text is None:
             return AiTextResult(error="No response from AI provider")
-        return AiTextResult(text=raw.strip())
+        return AiTextResult(
+            text=call_result.text.strip(),
+            input_tokens=call_result.input_tokens,
+            output_tokens=call_result.output_tokens,
+        )
     except Exception as exc:
         log.warning("AI scrape summarization failed: %s", exc)
         return AiTextResult(error=str(exc))

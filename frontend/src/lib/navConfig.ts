@@ -31,6 +31,7 @@ import {
   Printer,
   ShieldCheck,
   HardDrive,
+  Activity,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -60,7 +61,7 @@ export interface NavGroupDef {
 }
 
 // ---------------------------------------------------------------------------
-// Nav model — verified against App.tsx routes on 2026-06-28
+// Nav model — verified against App.tsx routes on 2026-06-28 (AI Usage added)
 // ---------------------------------------------------------------------------
 
 export const NAV_GROUPS: NavGroupDef[] = [
@@ -117,6 +118,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
       { label: 'Tag Admin',         icon: Settings,    path: '/admin/tags' },
       { label: 'Print Stats',       icon: BarChart2,   path: '/admin/print-stats' },
       { label: 'Share Audit',       icon: Share2,      path: '/admin/shares' },
+      { label: 'AI Usage',          icon: Activity,    path: '/admin/ai-usage' },
     ],
   },
 ]

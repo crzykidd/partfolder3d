@@ -12,6 +12,12 @@ endpoint here:
   PATCH /api/import-sessions/{id}. Nothing is auto-applied.
 * These endpoints NEVER block item creation, import commit, or crash the worker.
 
+Usage recording (Phase 13)
+--------------------------
+* A row is written to ``ai_usage`` after each successful AI call.
+* Recording failures are **swallowed** (logged, never re-raised) — usage tracking
+  can NEVER break an AI feature or the best-effort AI contract.
+
 Endpoints
 ---------
 POST /api/import-sessions/{id}/ai/suggest-tags
@@ -70,6 +76,46 @@ class AiTextOut(BaseModel):
 
     provider_available: bool = False
     error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Usage recording helper
+# ---------------------------------------------------------------------------
+
+
+async def _record_usage(
+    db: AsyncSession,
+    *,
+    provider_str: str,
+    model_str: str | None,
+    action: str,
+    input_tokens: int,
+    output_tokens: int,
+    user_id: int | None,
+    success: bool,
+) -> None:
+    """Write an AiUsage row.  All errors are swallowed — never raises."""
+    try:
+        from ..models.ai_usage import AiUsage  # noqa: PLC0415
+
+        row = AiUsage(
+            provider=provider_str,
+            model=model_str,
+            action=action,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+            user_id=user_id,
+            success=success,
+        )
+        db.add(row)
+        await db.flush()
+    except Exception:
+        log.exception(
+            "Failed to record AI usage (provider=%s, action=%s) — swallowed",
+            provider_str,
+            action,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +212,21 @@ async def ai_suggest_tags(
         existing_tags=existing_tags,
     )
 
+    # Record usage — swallowed on failure (belt-and-suspenders outer guard).
+    try:
+        await _record_usage(
+            db,
+            provider_str=provider.provider.value,
+            model_str=provider.model,
+            action="suggest_tags",
+            input_tokens=ai_result.input_tokens,
+            output_tokens=ai_result.output_tokens,
+            user_id=user.id,
+            success=ai_result.error is None,
+        )
+    except Exception:
+        log.exception("Usage recording raised outside _record_usage — swallowed")
+
     return AiTagSuggestionOut(
         canonical=ai_result.canonical,
         new_suggestions=ai_result.new_suggestions,
@@ -211,6 +272,22 @@ async def ai_cleanup_description(
         description=description,
         title=title,
     )
+
+    # Record usage — swallowed on failure (belt-and-suspenders outer guard).
+    try:
+        await _record_usage(
+            db,
+            provider_str=provider.provider.value,
+            model_str=provider.model,
+            action="cleanup_description",
+            input_tokens=ai_result.input_tokens,
+            output_tokens=ai_result.output_tokens,
+            user_id=user.id,
+            success=ai_result.error is None,
+        )
+    except Exception:
+        log.exception("Usage recording raised outside _record_usage — swallowed")
+
     return AiTextOut(
         text=ai_result.text,
         provider_available=True,
@@ -259,6 +336,22 @@ async def ai_summarize_scrape(
         scraped_text=scraped_text,
         title=title,
     )
+
+    # Record usage — swallowed on failure (belt-and-suspenders outer guard).
+    try:
+        await _record_usage(
+            db,
+            provider_str=provider.provider.value,
+            model_str=provider.model,
+            action="summarize",
+            input_tokens=ai_result.input_tokens,
+            output_tokens=ai_result.output_tokens,
+            user_id=user.id,
+            success=ai_result.error is None,
+        )
+    except Exception:
+        log.exception("Usage recording raised outside _record_usage — swallowed")
+
     return AiTextOut(
         text=ai_result.text,
         provider_available=True,

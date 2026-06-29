@@ -44,6 +44,7 @@ import { ExportPage } from '@/pages/admin/ExportPage'
 import { TagAdminPage } from '@/pages/admin/TagAdminPage'
 import { SiteCapabilitiesPage } from '@/pages/admin/SiteCapabilitiesPage'
 import { LibrariesPage } from '@/pages/admin/LibrariesPage'
+import { AiUsagePage } from '@/pages/admin/AiUsagePage'
 
 import { PublicSharePage } from '@/pages/PublicSharePage'
 
@@ -242,6 +243,14 @@ function App() {
                     element={
                       <AdminGuard>
                         <LibrariesPage />
+                      </AdminGuard>
+                    }
+                  />
+                  <Route
+                    path="/admin/ai-usage"
+                    element={
+                      <AdminGuard>
+                        <AiUsagePage />
                       </AdminGuard>
                     }
                   />

@@ -4,6 +4,7 @@ All models import from this package.  Alembic env.py imports Base.metadata here.
 """
 
 from .ai_provider import AiProvider, AiProviderType
+from .ai_usage import AiUsage
 from .api_key import ApiKey
 from .backup import BackupRecord
 from .base import Base
@@ -49,6 +50,7 @@ __all__ = [
     "Setting",
     "AiProvider",
     "AiProviderType",
+    "AiUsage",
     "UserSession",
     # Phase 2
     "Library",

@@ -37,6 +37,7 @@ const REAL_ROUTES = new Set([
   '/admin/tags',
   '/admin/print-stats',
   '/admin/shares',
+  '/admin/ai-usage',
 ])
 
 // ---------------------------------------------------------------------------

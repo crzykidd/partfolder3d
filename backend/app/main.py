@@ -16,6 +16,8 @@ Phase 8: optional AI assist — provider CRUD, tag suggestions, description
 Phase 9: admin — backup (DB + config, retention), catalog JSON export, reindex
          trigger, tag admin (aliases/categories/merge/approve), site-capabilities
          CRUD, full REST API parity check.
+Phase 13: AI usage tracking — record token counts per call, 24h/7d/30d usage
+          summary with estimated cost in the admin UI.
 """
 
 import logging
@@ -81,6 +83,7 @@ app.add_middleware(
 from .routers import (  # noqa: E402  # noqa: E402
     ai_actions,
     ai_providers,
+    ai_usage,
     api_keys,
     auth,
     backup,
@@ -137,6 +140,8 @@ app.include_router(shares.router)
 # Phase 8
 app.include_router(ai_providers.router)
 app.include_router(ai_actions.router)
+# Phase 13
+app.include_router(ai_usage.router)
 # Phase 9
 app.include_router(backup.router)
 app.include_router(export.router)
