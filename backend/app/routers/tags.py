@@ -23,7 +23,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import get_db, require_admin
+from ..auth.deps import csrf_protect, get_db, require_admin
 from ..models.tag import Tag, TagStatus
 from ..models.user import User
 
@@ -155,3 +155,48 @@ async def approve_pending_tag(
         category=tag.category,
         popularity_count=tag.popularity_count,
     )
+
+
+# ---------------------------------------------------------------------------
+# Starter tag seeding
+# ---------------------------------------------------------------------------
+
+
+class LoadDefaultsResponse(BaseModel):
+    added: int
+    skipped: int
+
+
+@router.post("/load-defaults", response_model=LoadDefaultsResponse)
+async def load_default_tags(
+    _admin: Annotated[User, Depends(require_admin)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> LoadDefaultsResponse:
+    """Insert the curated starter tag set as active canonical tags (admin + CSRF).
+
+    Idempotent: tags matched by normalized name are skipped without modification.
+    Returns ``{ added, skipped }`` so the caller can surface the counts in the UI.
+    """
+    from ..tags_defaults import STARTER_TAGS  # noqa: PLC0415
+
+    # Snapshot existing names for O(1) lookup (avoids N queries).
+    existing_result = await db.execute(select(Tag.name))
+    existing_names: set[str] = {row[0] for row in existing_result.all()}
+
+    added = 0
+    skipped = 0
+
+    for raw_name, category in STARTER_TAGS:
+        normalized = raw_name.lower().strip()
+        if normalized in existing_names:
+            skipped += 1
+            continue
+        db.add(Tag(name=normalized, category=category, status=TagStatus.active))
+        existing_names.add(normalized)  # guard against duplicates within the set
+        added += 1
+
+    if added:
+        await db.flush()
+
+    return LoadDefaultsResponse(added=added, skipped=skipped)

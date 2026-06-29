@@ -52,6 +52,12 @@ router = APIRouter(tags=["ai"])
 # ---------------------------------------------------------------------------
 
 
+class AiStatusOut(BaseModel):
+    """Response for GET /api/ai/status — cheap provider-availability check."""
+
+    provider_available: bool
+
+
 class AiTagSuggestionOut(BaseModel):
     """Response for the AI tag suggestion endpoint."""
 
@@ -159,6 +165,23 @@ async def _load_session_owned(
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+
+@router.get("/api/ai/status", response_model=AiStatusOut)
+async def ai_status(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AiStatusOut:
+    """Return whether an enabled AI provider is configured.
+
+    Available to any authenticated user (importers need this to gate the
+    wizard AI buttons).  Makes **no** AI or network call and records **no**
+    ai_usage row — it only checks for the existence of an enabled provider row.
+    """
+    from ..ai.client import get_enabled_provider  # noqa: PLC0415
+
+    provider = await get_enabled_provider(db)
+    return AiStatusOut(provider_available=provider is not None)
 
 
 @router.post(

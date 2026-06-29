@@ -1569,6 +1569,14 @@ export const aiSummarize = (sessionId: string): Promise<AiTextOut> =>
     { method: 'POST' },
   )
 
+export interface AiStatusOut {
+  provider_available: boolean
+}
+
+/** Cheap provider-availability probe — no AI call, no token spend, no usage row. */
+export const getAiStatus = (): Promise<AiStatusOut> =>
+  apiFetch<AiStatusOut>('/api/ai/status')
+
 // ---------------------------------------------------------------------------
 // Phase 9 — Backups (admin)
 // ---------------------------------------------------------------------------
@@ -1683,6 +1691,15 @@ export const mergeTag = (
     `/api/admin/tags/${sourceId}/merge-into/${targetId}`,
     { method: 'POST' },
   )
+
+export interface LoadDefaultTagsResponse {
+  added: number
+  skipped: number
+}
+
+/** Seed the catalog with the curated starter tag vocabulary (admin, idempotent). */
+export const loadDefaultTags = (): Promise<LoadDefaultTagsResponse> =>
+  apiFetch<LoadDefaultTagsResponse>('/api/tags/load-defaults', { method: 'POST' })
 
 // ---------------------------------------------------------------------------
 // Phase 9 — Admin site capabilities (admin-only; distinct from Phase 5 non-admin)

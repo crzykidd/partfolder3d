@@ -2,6 +2,36 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-28 — Starter tag set + idempotent seed; cheap AI status probe; auto-suggest-once
+
+### Starter tag set and idempotent seed
+
+A curated vocabulary (57 tags, 7 categories: type, function, feature, theme, process,
+audience, mechanical) lives in `backend/app/tags_defaults.py` as `(name, category)` pairs
+in the project's canonical form (lowercase/slug). `POST /api/tags/load-defaults` (admin +
+CSRF) inserts missing ones as `status=active` in one batch snapshot query, returning
+`{added, skipped}`. It never touches existing tags — pure insert-if-absent — so it is safe
+to call on a fresh instance or re-run at any time. Without active tags the AI suggest
+endpoint's canonical-matching has nothing to match against; this seeds that set.
+
+### Cheap `GET /api/ai/status` replaces billed probe
+
+The import wizard's Title step previously called `POST .../ai/cleanup-description` on
+mount just to detect whether a provider was available. That call spends real tokens and
+writes an `ai_usage` row even if the user never clicks "Clean up (AI)". The new
+`GET /api/ai/status` endpoint only calls `get_enabled_provider` — a single DB query with
+no AI or network call — and records no usage. Both the Title step and the Tags step now
+gate their AI buttons through this endpoint.
+
+### Auto-suggest-once on the Tags step
+
+When the wizard reaches the Tags step, `getAiStatus()` is called once (guarded by a
+`useRef` so it never fires again on re-render). If a provider is available, `aiSuggestTags`
+is automatically invoked, showing a loading state and populating the suggestions card on
+success. The manual "✦ Suggest tags (AI)" button is preserved for re-running. Errors from
+the auto-suggest are surfaced through the existing error state and auto-clear after 3 s;
+they never block the manual tag flow.
+
 ## 2026-06-28 — Quick Start page
 
 Quick Start (`/quick-start`) is a standalone page (not embedded in SettingsPage) with Aurora step cards linking to real routes; three steps carry live status badges via cheap existing queries (`listLibraries`, `getPathPrefix`, `listAiProviders`) — all best-effort with no badge on error; admin-only steps (libraries, AI, invites, backups, sharing) are role-filtered client-side.

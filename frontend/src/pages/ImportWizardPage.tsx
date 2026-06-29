@@ -392,10 +392,10 @@ function TitleStep({ session, onNext }: TitleStepProps) {
     retry: false,
   })
 
+  // Cheap probe — no AI call, no token spend, no usage row written.
   useEffect(() => {
-    if (!session.description?.trim()) return
     api
-      .aiCleanupDescription(session.id)
+      .getAiStatus()
       .then((r) => setProviderAvailable(r.provider_available))
       .catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -885,6 +885,8 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
   // Inline prompt shown when user clicks Next with unadded tag text
   const [showPendingPrompt, setShowPendingPrompt] = useState(false)
   const addAndContinueBtnRef = useRef<HTMLButtonElement>(null)
+  // Guard: auto-suggest fires at most once per step entry
+  const autoSuggestFiredRef = useRef(false)
 
   const [tagProviderAvailable, setTagProviderAvailable] = useState<boolean | null>(null)
   const [aiTagSuggestions, setAiTagSuggestions] = useState<api.AiTagSuggestionOut | null>(null)
@@ -923,6 +925,24 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
       setTimeout(() => setTagAiStatus(null), 3000)
     },
   })
+
+  // Auto-suggest once on step entry: cheap status probe first, then suggest if available.
+  useEffect(() => {
+    if (autoSuggestFiredRef.current) return
+    autoSuggestFiredRef.current = true
+    api
+      .getAiStatus()
+      .then((r) => {
+        setTagProviderAvailable(r.provider_available)
+        if (r.provider_available) {
+          suggestTagsMutation.mutate()
+        }
+      })
+      .catch(() => {
+        // Best-effort: failure silently leaves the manual button available.
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Focus the "Add & continue" button when the pending-tag prompt appears
   useEffect(() => {

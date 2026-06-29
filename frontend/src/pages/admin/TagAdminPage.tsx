@@ -30,6 +30,70 @@ import {
 } from '@/components/ui'
 
 // ---------------------------------------------------------------------------
+// Starter tags seeding
+// ---------------------------------------------------------------------------
+
+function StarterTagsSection() {
+  const queryClient = useQueryClient()
+  const [result, setResult] = useState<api.LoadDefaultTagsResponse | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const mutation = useMutation({
+    mutationFn: api.loadDefaultTags,
+    onSuccess: (data) => {
+      setResult(data)
+      setError(null)
+      // Refresh both the all-tags table and the pending tags list
+      void queryClient.invalidateQueries({ queryKey: ['admin-tags-all'] })
+      void queryClient.invalidateQueries({ queryKey: ['admin-tags-pending'] })
+      void queryClient.invalidateQueries({ queryKey: ['admin-tags-merge-list'] })
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : 'Failed to load starter tags.')
+      setResult(null)
+    },
+  })
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--aurora-text)', marginBottom: 4 }}>
+          Starter tags
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: 0 }}>
+          Seed the catalog with a curated default vocabulary organized by category
+          (type, function, feature, theme, process, audience, mechanical).
+          Existing tags are skipped — safe to run on a fresh instance or re-run at any time.
+        </p>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <Button
+          disabled={mutation.isPending}
+          onClick={() => {
+            setResult(null)
+            setError(null)
+            mutation.mutate()
+          }}
+        >
+          {mutation.isPending ? 'Loading…' : 'Load starter tags'}
+        </Button>
+
+        {result && (
+          <span style={{ fontSize: 13, color: '#16A34A' }}>
+            Added {result.added}, skipped {result.skipped}
+          </span>
+        )}
+
+        {error && (
+          <span style={{ fontSize: 13, color: 'var(--aurora-danger)' }}>{error}</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Pending tags section
 // ---------------------------------------------------------------------------
 
@@ -618,6 +682,10 @@ export function TagAdminPage() {
         title="Tag Administration"
         description="Approve or reject pending tags, manage categories and aliases, and merge duplicate tags into canonical forms."
       />
+
+      <StarterTagsSection />
+
+      <div style={{ borderTop: '1px solid var(--aurora-divider)', margin: '4px 0' }} />
 
       <PendingTagsSection />
 
