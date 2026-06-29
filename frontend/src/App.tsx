@@ -59,6 +59,7 @@ import { ImportWizardPage } from '@/pages/ImportWizardPage'
 
 import { SettingsPage } from '@/pages/settings/SettingsPage'
 import { ApiKeysPage } from '@/pages/settings/ApiKeysPage'
+import { QuickStartPage } from '@/pages/settings/QuickStartPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -106,6 +107,7 @@ function App() {
                   <Route path="/import/:sessionId" element={<ImportWizardPage />} />
 
                   {/* Settings */}
+                  <Route path="/quick-start" element={<QuickStartPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
                   <Route path="/settings/api-keys" element={<ApiKeysPage />} />
 

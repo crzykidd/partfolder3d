@@ -19,6 +19,7 @@ const REAL_ROUTES = new Set([
   '/catalog?favorited=true',
   '/me/creations',
   '/imports',
+  '/quick-start',
   '/settings',
   '/settings/api-keys',
   '/admin/jobs',

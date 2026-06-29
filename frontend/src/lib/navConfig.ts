@@ -14,6 +14,7 @@ import {
   PlusCircle,
   SlidersHorizontal,
   Key,
+  Rocket,
   Cpu,
   Calendar,
   AlertTriangle,
@@ -61,7 +62,8 @@ export interface NavGroupDef {
 }
 
 // ---------------------------------------------------------------------------
-// Nav model — verified against App.tsx routes on 2026-06-28 (AI Usage added)
+// Nav model — verified against App.tsx routes on 2026-06-28 (AI Usage added;
+//             Quick Start added 2026-06-28)
 // ---------------------------------------------------------------------------
 
 export const NAV_GROUPS: NavGroupDef[] = [
@@ -86,8 +88,9 @@ export const NAV_GROUPS: NavGroupDef[] = [
     id: 'settings',
     label: 'Settings',
     items: [
-      { label: 'Settings',  icon: SlidersHorizontal, path: '/settings' },
-      { label: 'API Keys',  icon: Key,               path: '/settings/api-keys' },
+      { label: 'Quick Start', icon: Rocket,           path: '/quick-start' },
+      { label: 'Settings',    icon: SlidersHorizontal, path: '/settings' },
+      { label: 'API Keys',    icon: Key,               path: '/settings/api-keys' },
     ],
   },
   {

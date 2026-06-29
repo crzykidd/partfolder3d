@@ -2,6 +2,18 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-28 — Quick Start page
+
+Quick Start (`/quick-start`) is a standalone page (not embedded in SettingsPage) with Aurora step cards linking to real routes; three steps carry live status badges via cheap existing queries (`listLibraries`, `getPathPrefix`, `listAiProviders`) — all best-effort with no badge on error; admin-only steps (libraries, AI, invites, backups, sharing) are role-filtered client-side.
+
+## 2026-06-28 — Path style toggle (feat-path-style-toggle)
+
+Explicit Windows (`\`) / Linux·macOS (`/`) path style toggle in Settings normalizes the saved prefix string's separators via `toPathStyle(path, style)` in `catalog-utils.ts`; `rewritePath`'s existing inference (checks whether the prefix contains `\`) is unchanged, so all previously saved prefixes continue to work without any backend or migration changes.
+
+## 2026-06-28 — Tags step: pending-tag-on-Next confirmation
+
+Chosen UX: **inline alertdialog panel** (not a modal) with three choices — "Add & continue", "Discard & continue", "Cancel" — shown only when the tag input has non-empty, non-duplicate text when Next is clicked; duplicates and empty inputs still advance silently. A `pendingTagNextAction` pure helper was added to `import-utils.ts` so the decision logic is unit-testable without rendering.
+
 ## 2026-06-28 — Phase 14: render Image reconcile, enum migration, upload storage, sidecar exclusion
 
 ### Render → Image reconcile approach
