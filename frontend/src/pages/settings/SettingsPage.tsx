@@ -1,5 +1,5 @@
 /**
- * SettingsPage — instance settings (admin) + per-user theme.
+ * SettingsPage — instance settings (admin) + per-user theme + per-library paths.
  *
  * Instance settings (admin only):
  *   GET /api/settings → list key/value pairs
@@ -17,7 +17,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/context/AuthContext'
 import { useTheme } from '@/components/ThemeProvider'
 import * as api from '@/lib/api'
-import { rewritePath, toPathStyle } from '@/lib/catalog-utils'
+import { detectOS, rewriteLocalPath } from '@/lib/catalog-utils'
 import {
   AdminPage, PageHeader,
   Card,
@@ -26,11 +26,33 @@ import {
 } from '@/components/ui'
 
 // ---------------------------------------------------------------------------
-// Path prefix section
+// OS override — stored in localStorage so it survives page reloads.
+// Values: 'windows' | 'posix' | 'auto'  (default 'auto')
 // ---------------------------------------------------------------------------
 
-/** Sample stored item path used for the live prefix preview. */
-const SAMPLE_DIR_PATH = '/library/main/Creator/Cool-Thing'
+const OS_OVERRIDE_KEY = 'pf3d_os_override'
+
+type OSOverride = 'windows' | 'posix' | 'auto'
+
+function readOSOverride(): OSOverride {
+  try {
+    const v = localStorage.getItem(OS_OVERRIDE_KEY)
+    if (v === 'windows' || v === 'posix' || v === 'auto') return v
+  } catch { /* ignore */ }
+  return 'auto'
+}
+
+function writeOSOverride(v: OSOverride): void {
+  try { localStorage.setItem(OS_OVERRIDE_KEY, v) } catch { /* ignore */ }
+}
+
+function getEffectiveOS(override: OSOverride): 'windows' | 'posix' {
+  return override === 'auto' ? detectOS() : override
+}
+
+// ---------------------------------------------------------------------------
+// Per-library path prefixes section
+// ---------------------------------------------------------------------------
 
 const INLINE_CODE: React.CSSProperties = {
   background: 'var(--aurora-glass)',
@@ -40,53 +62,106 @@ const INLINE_CODE: React.CSSProperties = {
   fontSize: 11,
 }
 
-type PathStyle = 'windows' | 'posix'
-
-function deriveStyle(prefix: string): PathStyle {
-  return prefix.includes('\\') ? 'windows' : 'posix'
+const PREVIEW_BOX: React.CSSProperties = {
+  background: 'var(--aurora-glass)',
+  border: '1px solid var(--aurora-glass-border)',
+  borderRadius: 6,
+  padding: '6px 10px',
 }
 
-function PathPrefixSection() {
+/** Build a sample container path for a library — used for live preview. */
+function sampleContainerPath(mountPath: string): string {
+  return `${mountPath}/Sample-Creator/Cool-Thing-abc123`
+}
+
+interface LibraryRowDraft {
+  windows: string
+  posix: string
+}
+
+function PathPrefixesSection() {
   const queryClient = useQueryClient()
 
-  const { data } = useQuery({
-    queryKey: ['path-prefix'],
-    queryFn: api.getPathPrefix,
+  const librariesQ = useQuery({
+    queryKey: ['libraries'],
+    queryFn: api.listLibraries,
+    staleTime: 60_000,
   })
 
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
-  const [pathStyle, setPathStyle] = useState<PathStyle>('posix')
+  const prefixesQ = useQuery({
+    queryKey: ['path-prefixes'],
+    queryFn: api.getPathPrefixes,
+    staleTime: 60_000,
+  })
 
-  // Sync draft + style when data arrives or editing is reset
+  const [osOverride, setOSOverride] = useState<OSOverride>(readOSOverride)
+  const [editing, setEditing] = useState(false)
+  // draft: library_id (string) → {windows, posix}
+  const [draft, setDraft] = useState<Record<string, LibraryRowDraft>>({})
+
+  const libraries = librariesQ.data ?? []
+  const savedPrefixes = prefixesQ.data?.path_prefixes ?? {}
+
+  // When data arrives (or editing is cancelled), reset draft to saved state.
   useEffect(() => {
     if (!editing) {
-      const prefix = data?.path_prefix ?? ''
-      setDraft(prefix)
-      setPathStyle(deriveStyle(prefix))
+      const next: Record<string, LibraryRowDraft> = {}
+      for (const lib of libraries) {
+        const entry = savedPrefixes[String(lib.id)]
+        next[String(lib.id)] = {
+          windows: entry?.windows ?? '',
+          posix: entry?.posix ?? '',
+        }
+      }
+      setDraft(next)
     }
-  }, [data, editing])
+  }, [savedPrefixes, libraries, editing])
 
   const mutation = useMutation({
-    mutationFn: () => api.setPathPrefix(draft.trim() || null),
+    mutationFn: () => {
+      // Convert draft to PathPrefixMap, treating '' as null
+      const map: api.PathPrefixMap = {}
+      for (const lib of libraries) {
+        const row = draft[String(lib.id)] ?? { windows: '', posix: '' }
+        map[String(lib.id)] = {
+          windows: row.windows.trim() || null,
+          posix: row.posix.trim() || null,
+        }
+      }
+      return api.setPathPrefixes(map)
+    },
     onSuccess: () => {
       setEditing(false)
-      void queryClient.invalidateQueries({ queryKey: ['path-prefix'] })
+      void queryClient.invalidateQueries({ queryKey: ['path-prefixes'] })
     },
   })
 
-  const currentValue = data?.path_prefix ?? ''
-
-  /** Normalize draft separators and enter edit mode when style is switched. */
-  function handleStyleChange(newStyle: PathStyle) {
-    const base = editing ? draft : currentValue
-    setDraft(toPathStyle(base, newStyle))
-    setPathStyle(newStyle)
-    if (!editing) setEditing(true)
+  function handleOSOverride(v: OSOverride) {
+    setOSOverride(v)
+    writeOSOverride(v)
   }
 
-  /** Preview path with whatever prefix the user currently has (draft or saved). */
-  const previewPath = rewritePath(SAMPLE_DIR_PATH, editing ? draft.trim() : currentValue)
+  function startEdit() {
+    // Seed draft from saved data before entering edit mode.
+    const next: Record<string, LibraryRowDraft> = {}
+    for (const lib of libraries) {
+      const entry = savedPrefixes[String(lib.id)]
+      next[String(lib.id)] = {
+        windows: entry?.windows ?? '',
+        posix: entry?.posix ?? '',
+      }
+    }
+    setDraft(next)
+    setEditing(true)
+  }
+
+  function cancelEdit() {
+    setEditing(false)
+    // draft will be reset by the useEffect above
+  }
+
+  const effectiveOS = getEffectiveOS(osOverride)
+  const isLoading = librariesQ.isLoading || prefixesQ.isLoading
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -94,132 +169,203 @@ function PathPrefixSection() {
         Path display
       </div>
       <Card>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* Description */}
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--aurora-text)', marginBottom: 4 }}>
-              Path prefix
+              Per-library path prefixes
             </div>
             <div style={{ fontSize: 12, color: 'var(--aurora-muted)', lineHeight: 1.7 }}>
-              Maps each stored item path to where <em>you</em> open the files — useful when your
-              library is mounted at a different location on your machine. The prefix is prepended
-              to item directory paths on item pages.
+              Maps each library's stored paths to where <em>you</em> open the files on your
+              machine or NAS. Set a prefix per library so different mounts work independently.
+              PartFolder 3D auto-detects whether you are on Windows or Mac/Linux and applies
+              the right separator style.
             </div>
             <div style={{ fontSize: 12, color: 'var(--aurora-muted)', marginTop: 4, lineHeight: 1.7 }}>
-              Examples:{' '}
-              <code style={INLINE_CODE}>Z:\3dprints\</code> (Windows) or{' '}
-              <code style={INLINE_CODE}>/mnt/nas/3dprints/</code> (Linux / macOS).
-              The path style controls whether paths use <code style={INLINE_CODE}>\</code> or{' '}
-              <code style={INLINE_CODE}>/</code> as the separator.
+              Windows example:{' '}
+              <code style={INLINE_CODE}>Z:\3dprints\</code>.{' '}
+              Mac / Linux example:{' '}
+              <code style={INLINE_CODE}>/mnt/nas/3dprints/</code>.
             </div>
           </div>
 
-          {/* Path style selector */}
+          {/* This-browser OS override */}
           <div>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--aurora-text-dim)', marginBottom: 6 }}>
-              Path style
+              This browser
             </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <FilterPill
-                active={pathStyle === 'posix'}
-                onClick={() => handleStyleChange('posix')}
-              >
-                Linux / macOS &nbsp;<code style={{ fontFamily: 'monospace', fontSize: 11 }}>/</code>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <FilterPill active={osOverride === 'auto'} onClick={() => handleOSOverride('auto')}>
+                Auto-detect
               </FilterPill>
-              <FilterPill
-                active={pathStyle === 'windows'}
-                onClick={() => handleStyleChange('windows')}
-              >
-                Windows &nbsp;<code style={{ fontFamily: 'monospace', fontSize: 11 }}>\</code>
+              <FilterPill active={osOverride === 'windows'} onClick={() => handleOSOverride('windows')}>
+                Windows <code style={{ fontFamily: 'monospace', fontSize: 11 }}>\</code>
               </FilterPill>
+              <FilterPill active={osOverride === 'posix'} onClick={() => handleOSOverride('posix')}>
+                Mac / Linux <code style={{ fontFamily: 'monospace', fontSize: 11 }}>/</code>
+              </FilterPill>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--aurora-muted)', marginTop: 5 }}>
+              Detected OS: <strong>{effectiveOS === 'windows' ? 'Windows' : 'Mac / Linux'}</strong>
+              {osOverride !== 'auto' && ' (manual override — stored in this browser)'}
             </div>
           </div>
 
-          {/* Prefix input / view */}
-          <div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--aurora-text-dim)', marginBottom: 6 }}>
-              Prefix
+          {/* Library table */}
+          {isLoading ? (
+            <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: 0 }}>Loading…</p>
+          ) : libraries.length === 0 ? (
+            <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: 0 }}>
+              No libraries configured yet. Add a library first.
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {libraries.map((lib) => {
+                const libIdStr = String(lib.id)
+                const row = editing
+                  ? (draft[libIdStr] ?? { windows: '', posix: '' })
+                  : {
+                      windows: savedPrefixes[libIdStr]?.windows ?? '',
+                      posix: savedPrefixes[libIdStr]?.posix ?? '',
+                    }
+                const currentPrefix = effectiveOS === 'windows' ? row.windows : row.posix
+                const sample = sampleContainerPath(lib.mount_path)
+                const preview = rewriteLocalPath(
+                  sample,
+                  lib.mount_path,
+                  currentPrefix || null,
+                  effectiveOS,
+                )
+
+                function setRow(field: 'windows' | 'posix', value: string) {
+                  setDraft((prev) => ({
+                    ...prev,
+                    [libIdStr]: { ...(prev[libIdStr] ?? { windows: '', posix: '' }), [field]: value },
+                  }))
+                }
+
+                return (
+                  <div
+                    key={lib.id}
+                    style={{
+                      borderTop: '1px solid var(--aurora-divider)',
+                      paddingTop: 12,
+                    }}
+                  >
+                    {/* Library name + mount */}
+                    <div style={{ marginBottom: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--aurora-text)' }}>
+                        {lib.name}
+                      </span>
+                      <code
+                        style={{
+                          marginLeft: 8,
+                          fontSize: 11,
+                          color: 'var(--aurora-muted)',
+                          fontFamily: 'monospace',
+                        }}
+                      >
+                        {lib.mount_path}
+                      </code>
+                      {!lib.enabled && (
+                        <span
+                          style={{
+                            marginLeft: 6,
+                            fontSize: 10,
+                            fontWeight: 600,
+                            background: 'var(--aurora-glass)',
+                            border: '1px solid var(--aurora-glass-border)',
+                            borderRadius: 20,
+                            padding: '1px 7px',
+                            color: 'var(--aurora-muted)',
+                          }}
+                        >
+                          disabled
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Path inputs */}
+                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                      <div style={{ flex: 1, minWidth: 180 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--aurora-text-dim)', marginBottom: 4 }}>
+                          Windows path <code style={INLINE_CODE}>\</code>
+                        </div>
+                        {editing ? (
+                          <AuroraInput
+                            type="text"
+                            value={row.windows}
+                            onChange={(e) => setRow('windows', e.target.value)}
+                            placeholder="e.g. Z:\3dprints\"
+                            style={{ fontFamily: 'monospace', fontSize: 12 }}
+                          />
+                        ) : (
+                          <span style={{ fontFamily: 'monospace', fontSize: 12, color: row.windows ? 'var(--aurora-text-dim)' : 'var(--aurora-muted)' }}>
+                            {row.windows || <em>not set</em>}
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ flex: 1, minWidth: 180 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--aurora-text-dim)', marginBottom: 4 }}>
+                          Mac / Linux path <code style={INLINE_CODE}>/</code>
+                        </div>
+                        {editing ? (
+                          <AuroraInput
+                            type="text"
+                            value={row.posix}
+                            onChange={(e) => setRow('posix', e.target.value)}
+                            placeholder="e.g. /mnt/nas/3dprints/"
+                            style={{ fontFamily: 'monospace', fontSize: 12 }}
+                          />
+                        ) : (
+                          <span style={{ fontFamily: 'monospace', fontSize: 12, color: row.posix ? 'var(--aurora-text-dim)' : 'var(--aurora-muted)' }}>
+                            {row.posix || <em>not set</em>}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Live preview for this row */}
+                    <div style={{ ...PREVIEW_BOX, marginTop: 8 }}>
+                      <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--aurora-text-dim)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Preview ({effectiveOS === 'windows' ? 'Windows' : 'Mac / Linux'})
+                      </div>
+                      <code style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--aurora-text)', wordBreak: 'break-all' }}>
+                        {preview}
+                      </code>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
-            {!editing ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontFamily: 'monospace', fontSize: 13, color: 'var(--aurora-muted)' }}>
-                  {currentValue || <em>not set</em>}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setDraft(currentValue)
-                    setPathStyle(deriveStyle(currentValue))
-                    setEditing(true)
-                  }}
-                >
+          )}
+
+          {/* Action buttons */}
+          {libraries.length > 0 && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', paddingTop: 4 }}>
+              {!editing ? (
+                <Button size="sm" onClick={startEdit}>
                   Edit
                 </Button>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <AuroraInput
-                  type="text"
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  placeholder={
-                    pathStyle === 'windows'
-                      ? 'e.g. Z:\\3dprints\\'
-                      : 'e.g. /mnt/nas/3dprints/'
-                  }
-                  style={{ flex: 1, fontFamily: 'monospace' }}
-                  autoFocus
-                />
-                <Button
-                  onClick={() => mutation.mutate()}
-                  disabled={mutation.isPending}
-                  size="sm"
-                >
-                  {mutation.isPending ? 'Saving…' : 'Save'}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setEditing(false)
-                    setDraft(currentValue)
-                    setPathStyle(deriveStyle(currentValue))
-                  }}
-                >
-                  Cancel
-                </Button>
-                {mutation.isError && (
-                  <span style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>Save failed</span>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Live preview — always shown when a prefix is set or being edited */}
-          {(editing || currentValue) && (
-            <div
-              style={{
-                background: 'var(--aurora-glass)',
-                border: '1px solid var(--aurora-glass-border)',
-                borderRadius: 6,
-                padding: '8px 12px',
-              }}
-            >
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--aurora-text-dim)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Preview
-              </div>
-              <code
-                style={{
-                  fontFamily: 'monospace',
-                  fontSize: 12,
-                  color: 'var(--aurora-text)',
-                  wordBreak: 'break-all',
-                }}
-              >
-                {previewPath}
-              </code>
+              ) : (
+                <>
+                  <Button
+                    size="sm"
+                    onClick={() => mutation.mutate()}
+                    disabled={mutation.isPending}
+                  >
+                    {mutation.isPending ? 'Saving…' : 'Save'}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={cancelEdit}>
+                    Cancel
+                  </Button>
+                  {mutation.isError && (
+                    <span style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>Save failed</span>
+                  )}
+                </>
+              )}
             </div>
           )}
 
@@ -399,8 +545,8 @@ export function SettingsPage() {
         </Card>
       </div>
 
-      {/* Per-user path prefix */}
-      <PathPrefixSection />
+      {/* Per-library × per-OS path prefixes */}
+      <PathPrefixesSection />
 
       {/* Instance settings (admin only) */}
       {isAdmin && (

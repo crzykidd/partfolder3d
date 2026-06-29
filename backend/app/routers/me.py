@@ -4,11 +4,13 @@ POST   /api/items/{key}/favorite    → star an item
 DELETE /api/items/{key}/favorite    → unstar an item
 GET    /api/me/favorites            → list starred items (paginated)
 GET    /api/me/creations            → items whose Creator is linked to current user
-GET    /api/me/path-prefix          → get per-user path display prefix
-PUT    /api/me/path-prefix          → set per-user path display prefix
+GET    /api/me/path-prefix          → (deprecated) single prefix; kept for compatibility
+PUT    /api/me/path-prefix          → (deprecated) single prefix; kept for compatibility
+GET    /api/me/path-prefixes        → per-library × per-OS prefix map (migration 0017+)
+PUT    /api/me/path-prefixes        → set per-library × per-OS prefix map (CSRF-protected)
 
 All endpoints require authentication.
-Favorites CSRF-protected on POST/DELETE; path_prefix PUT is CSRF-protected.
+Favorites CSRF-protected on POST/DELETE; path-prefix(es) PUT is CSRF-protected.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from ..models.creator import Creator
 from ..models.favorite import Favorite
 from ..models.image import Image
 from ..models.item import Item
+from ..models.library import Library
 from ..models.tag import ItemTag, Tag
 from ..models.user import User
 
@@ -51,6 +54,33 @@ class PathPrefixResponse(BaseModel):
 
 class PathPrefixRequest(BaseModel):
     path_prefix: str | None = None
+
+
+class PathPrefixEntry(BaseModel):
+    """Per-OS path prefix for one library."""
+
+    windows: str | None = None
+    posix: str | None = None
+
+
+# Maps library_id (as string) → per-OS entry.
+PathPrefixMap = dict[str, PathPrefixEntry]
+
+
+class PathPrefixesResponse(BaseModel):
+    """Wrapper returned by GET/PUT /api/me/path-prefixes."""
+
+    path_prefixes: dict[str, PathPrefixEntry]
+
+
+class PathPrefixesRequest(BaseModel):
+    """Body accepted by PUT /api/me/path-prefixes.
+
+    Keys are library IDs (as strings or ints).  Unknown or disabled library
+    IDs are silently ignored.
+    """
+
+    path_prefixes: dict[str, PathPrefixEntry]
 
 
 class ItemSummaryMini(BaseModel):
@@ -305,9 +335,78 @@ async def set_path_prefix(
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PathPrefixResponse:
-    """Set (or clear) the current user's path display prefix."""
+    """(Deprecated) Set (or clear) the current user's legacy single path prefix.
+
+    Use PUT /api/me/path-prefixes for the per-library × per-OS map instead.
+    """
     result = await db.execute(select(User).where(User.id == user.id))
     db_user = result.scalar_one()
     db_user.path_prefix = body.path_prefix
     await db.flush()
     return PathPrefixResponse(path_prefix=db_user.path_prefix)
+
+
+# ---------------------------------------------------------------------------
+# Per-library × per-OS path prefix map (Phase 17)
+# ---------------------------------------------------------------------------
+
+
+def _db_to_response(raw: Any) -> dict[str, PathPrefixEntry]:
+    """Convert the raw JSONB value from the DB to the typed response dict."""
+    if not raw:
+        return {}
+    result: dict[str, PathPrefixEntry] = {}
+    for lib_id_str, entry in raw.items():
+        if isinstance(entry, dict):
+            result[lib_id_str] = PathPrefixEntry(
+                windows=entry.get("windows"),
+                posix=entry.get("posix"),
+            )
+    return result
+
+
+@router.get("/api/me/path-prefixes", response_model=PathPrefixesResponse)
+async def get_path_prefixes(
+    user: Annotated[User, Depends(get_current_user)],
+) -> PathPrefixesResponse:
+    """Get the current user's per-library × per-OS path prefix map.
+
+    Returns an empty dict ``{}`` when no prefixes have been configured.
+    Keys are library IDs as strings; each entry has ``windows`` and ``posix``
+    fields (either a path string or null).
+    """
+    return PathPrefixesResponse(path_prefixes=_db_to_response(user.path_prefixes))
+
+
+@router.put("/api/me/path-prefixes", response_model=PathPrefixesResponse)
+async def set_path_prefixes(
+    body: PathPrefixesRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PathPrefixesResponse:
+    """Set the current user's per-library × per-OS path prefix map (CSRF-protected).
+
+    Only library IDs that exist in the database are persisted; unknown or
+    disabled library IDs are silently ignored.  Pass an empty dict to clear
+    all prefixes.  Null prefix values for a given OS are stored as-is
+    (explicit "no prefix for this OS on this library").
+    """
+    # Validate: keep only keys whose library_id exists (enabled or not).
+    lib_result = await db.execute(select(Library.id))
+    valid_ids = {str(row[0]) for row in lib_result.all()}
+
+    filtered: dict[str, Any] = {}
+    for lib_id_str, entry in body.path_prefixes.items():
+        if lib_id_str in valid_ids:
+            filtered[lib_id_str] = {
+                "windows": entry.windows,
+                "posix": entry.posix,
+            }
+
+    db_result = await db.execute(select(User).where(User.id == user.id))
+    db_user = db_result.scalar_one()
+    db_user.path_prefixes = filtered or None
+    await db.flush()
+
+    return PathPrefixesResponse(path_prefixes=_db_to_response(db_user.path_prefixes))

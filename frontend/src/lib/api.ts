@@ -590,6 +590,26 @@ export interface PathPrefixResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Per-library × per-OS path prefixes (Phase 17)
+// ---------------------------------------------------------------------------
+
+/** Per-OS entry for one library. */
+export interface PathPrefixEntry {
+  windows: string | null
+  posix: string | null
+}
+
+/**
+ * Per-library prefix map.
+ * Keys are library IDs as strings; values hold per-OS local path prefixes.
+ */
+export type PathPrefixMap = Record<string, PathPrefixEntry>
+
+export interface PathPrefixesResponse {
+  path_prefixes: PathPrefixMap
+}
+
+// ---------------------------------------------------------------------------
 // Phase 3 — Catalog API functions
 // ---------------------------------------------------------------------------
 
@@ -719,6 +739,19 @@ export const setPathPrefix = (pathPrefix: string | null): Promise<PathPrefixResp
   apiFetch<PathPrefixResponse>('/api/me/path-prefix', {
     method: 'PUT',
     body: JSON.stringify({ path_prefix: pathPrefix }),
+  })
+
+/** Get the per-library × per-OS path prefix map for the current user. */
+export const getPathPrefixes = (): Promise<PathPrefixesResponse> =>
+  apiFetch<PathPrefixesResponse>('/api/me/path-prefixes')
+
+/** Persist the per-library × per-OS path prefix map. */
+export const setPathPrefixes = (
+  path_prefixes: PathPrefixMap,
+): Promise<PathPrefixesResponse> =>
+  apiFetch<PathPrefixesResponse>('/api/me/path-prefixes', {
+    method: 'PUT',
+    body: JSON.stringify({ path_prefixes }),
   })
 
 export const queueZip = (

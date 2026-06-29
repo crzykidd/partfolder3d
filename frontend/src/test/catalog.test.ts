@@ -14,6 +14,8 @@ import {
   getTagFontWeight,
   toPathStyle,
   rewritePath,
+  detectOS,
+  rewriteLocalPath,
   mapBundleStatus,
   shouldContinuePolling,
 } from '@/lib/catalog-utils'
@@ -167,6 +169,109 @@ describe('rewritePath', () => {
   it('handles paths without leading slash', () => {
     const result = rewritePath('library/ab/my-item', '/mnt/nas/')
     expect(result).toBe('/mnt/nas/library/ab/my-item')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// detectOS — OS detection from platform hint
+// ---------------------------------------------------------------------------
+
+describe('detectOS', () => {
+  it('returns "windows" for a Windows platform string', () => {
+    expect(detectOS('Win32')).toBe('windows')
+    expect(detectOS('Windows')).toBe('windows')
+    expect(detectOS('windows')).toBe('windows')
+  })
+
+  it('returns "posix" for Mac platform strings', () => {
+    expect(detectOS('MacIntel')).toBe('posix')
+    expect(detectOS('macOS')).toBe('posix')
+    expect(detectOS('Mac')).toBe('posix')
+  })
+
+  it('returns "posix" for Linux platform strings', () => {
+    expect(detectOS('Linux x86_64')).toBe('posix')
+    expect(detectOS('Linux')).toBe('posix')
+  })
+
+  it('returns "posix" for an empty string (safe default)', () => {
+    expect(detectOS('')).toBe('posix')
+  })
+
+  it('is case-insensitive for Windows detection', () => {
+    expect(detectOS('WIN64')).toBe('windows')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// rewriteLocalPath — per-library mount-path stripping + local prefix join
+// ---------------------------------------------------------------------------
+
+describe('rewriteLocalPath', () => {
+  it('returns raw containerPath when localPrefix is null', () => {
+    expect(
+      rewriteLocalPath('/library/main/Creator/Cool', '/library/main', null, 'posix'),
+    ).toBe('/library/main/Creator/Cool')
+  })
+
+  it('returns raw containerPath when localPrefix is undefined', () => {
+    expect(
+      rewriteLocalPath('/library/main/Creator/Cool', '/library/main', undefined, 'posix'),
+    ).toBe('/library/main/Creator/Cool')
+  })
+
+  it('returns raw containerPath when localPrefix is empty string', () => {
+    expect(
+      rewriteLocalPath('/library/main/Creator/Cool', '/library/main', '', 'posix'),
+    ).toBe('/library/main/Creator/Cool')
+  })
+
+  it('strips mount path and prepends posix prefix', () => {
+    expect(
+      rewriteLocalPath('/library/main/Creator/Cool', '/library/main', '/mnt/nas/', 'posix'),
+    ).toBe('/mnt/nas/Creator/Cool')
+  })
+
+  it('strips mount path and prepends windows prefix, converting separators', () => {
+    expect(
+      rewriteLocalPath('/library/main/Creator/Cool', '/library/main', 'C:\\prints\\', 'windows'),
+    ).toBe('C:\\prints\\Creator\\Cool')
+  })
+
+  it('adds trailing separator to prefix if missing (posix)', () => {
+    expect(
+      rewriteLocalPath('/library/main/Foo/Bar', '/library/main', '/mnt/nas', 'posix'),
+    ).toBe('/mnt/nas/Foo/Bar')
+  })
+
+  it('adds trailing backslash to prefix if missing (windows)', () => {
+    expect(
+      rewriteLocalPath('/library/main/Foo/Bar', '/library/main', 'C:\\prints', 'windows'),
+    ).toBe('C:\\prints\\Foo\\Bar')
+  })
+
+  it('normalises all separators when converting to windows style', () => {
+    expect(
+      rewriteLocalPath('/library/main/sub/item', '/library/main', 'D:\\files\\', 'windows'),
+    ).toBe('D:\\files\\sub\\item')
+  })
+
+  it('handles path where relative segment is empty after mount strip', () => {
+    expect(
+      rewriteLocalPath('/library/main', '/library/main', '/mnt/nas/', 'posix'),
+    ).toBe('/mnt/nas/')
+  })
+
+  it('falls back gracefully when mountPath is not a prefix of containerPath', () => {
+    expect(
+      rewriteLocalPath('/other/path/item', '/library/main', '/mnt/nas/', 'posix'),
+    ).toBe('/mnt/nas/other/path/item')
+  })
+
+  it('strips leading slash from relative segment', () => {
+    expect(
+      rewriteLocalPath('/library/main/Dir/Model', '/library/main', '/data/', 'posix'),
+    ).toBe('/data/Dir/Model')
   })
 })
 

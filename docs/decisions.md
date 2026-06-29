@@ -2,6 +2,68 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-29 — Phase 17: per-library × per-OS local path prefixes
+
+### Model: per-user JSONB map keyed by library ID and OS
+
+The single `users.path_prefix` string was replaced by `users.path_prefixes`
+(JSONB, migration 0017) — a map `{ "<library_id>": { "windows": str|null,
+"posix": str|null } }`.  Keys are library IDs as strings (JSON requires string
+keys).  This handles two use cases the old single field could not:
+- Multiple libraries at different mount points (e.g. `/library/main` and
+  `/library/archive`) each need an independent local mapping.
+- The same user on a Windows PC and a Mac needs separate `C:\prints\` and
+  `/mnt/nas/` prefixes stored simultaneously; the browser picks the right one.
+
+`path_prefix` is kept (deprecated) so the downgrade is trivially safe.
+
+### Browser OS detection + manual override
+
+`detectOS(platformHint?)` in `catalog-utils.ts` checks
+`navigator.userAgentData?.platform` (preferred, modern) → `navigator.platform`
+→ `navigator.userAgent`.  A `Win` (case-insensitive) match returns `'windows'`;
+everything else returns `'posix'` (safe default for Mac / Linux / Android).
+
+The function accepts an optional platform hint for unit-testability (vitest
+tests inject strings without a real `navigator`).
+
+A `pf3d_os_override` localStorage key (`'windows' | 'posix' | 'auto'`) lets a
+user force the display style in this browser (e.g. a Linux user connecting via
+browser on a Windows machine).  The override is shown and editable on the
+Settings page.
+
+### Mount-path stripping (rewriteLocalPath)
+
+`rewriteLocalPath(containerPath, libraryMountPath, localPrefix, os)` in
+`catalog-utils.ts`:
+1. Strips `libraryMountPath` from the front of `containerPath` (e.g. removes
+   `/library/main` leaving `Creator/Model-abc`).
+2. Joins the remainder onto `localPrefix` (e.g. `C:\prints\` → `C:\prints\Creator\Model-abc`).
+3. Normalises all separators via `toPathStyle(path, os)`.
+
+Falls back to the raw `containerPath` when `localPrefix` is absent.  This is
+intentionally different from the old `rewritePath` (which prepended the prefix
+to the whole path); `rewritePath` is kept for backward compatibility.
+
+### Migration of legacy path_prefix (data migration in 0017)
+
+`infer_prefix_map(path_prefix, library_ids)` (in `app/path_prefix_utils.py`)
+is the shared helper used by both the Alembic data migration and the backend
+tests.  For each user with a non-null legacy `path_prefix`, the function:
+- Infers OS from the string (backslash present → `windows`; else `posix`).
+- Applies the prefix to every library, setting the inferred OS entry and
+  leaving the other OS entry null.
+
+The helper lives in `app/` (not in the migration file) because migration files
+have numeric-prefixed names that cannot be imported directly by Python.
+
+### PUT endpoint validation
+
+`PUT /api/me/path-prefixes` silently ignores unknown library IDs (deleted or
+never-created libraries that appear in the client's map).  Only IDs present in
+the `libraries` table are written to the DB.  This prevents stale map entries
+from blocking the save on the frontend.
+
 ## 2026-06-29 — Phase 16: per-object static analysis (object_analysis)
 
 ### Volume-estimate formula and settings

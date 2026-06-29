@@ -19,7 +19,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Check, Copy, Download, Trash2, Upload, X as XIcon } from 'lucide-react'
 
 import * as api from '@/lib/api'
-import { mapBundleStatus, rewritePath, shouldContinuePolling, type ZipPollStatus } from '@/lib/catalog-utils'
+import { detectOS, mapBundleStatus, rewriteLocalPath, shouldContinuePolling, type ZipPollStatus } from '@/lib/catalog-utils'
 import { formatPrintTime, formatFilamentLength, formatFilamentWeight, renderStars } from '@/lib/print-utils'
 import { useAuth } from '@/context/AuthContext'
 
@@ -419,21 +419,60 @@ function ImageCarousel({
 // Path display + copy
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// OS override (localStorage) — read/write helper used by PathDisplay
+// ---------------------------------------------------------------------------
+
+const _OS_OVERRIDE_KEY = 'pf3d_os_override'
+
+function _readOSOverride(): 'windows' | 'posix' | 'auto' {
+  try {
+    const v = localStorage.getItem(_OS_OVERRIDE_KEY)
+    if (v === 'windows' || v === 'posix' || v === 'auto') return v
+  } catch { /* ignore */ }
+  return 'auto'
+}
+
+function _effectiveOS(): 'windows' | 'posix' {
+  const override = _readOSOverride()
+  return override === 'auto' ? detectOS() : override
+}
+
+// ---------------------------------------------------------------------------
+// PathDisplay — per-library × per-OS path rewrite
+// ---------------------------------------------------------------------------
+
 interface PathDisplayProps {
   dirPath: string
   itemKey: string
+  libraryId: number
 }
 
-function PathDisplay({ dirPath, itemKey }: PathDisplayProps) {
+function PathDisplay({ dirPath, itemKey, libraryId }: PathDisplayProps) {
   const [copied, setCopied] = useState(false)
 
-  const { data: prefixData } = useQuery({
-    queryKey: ['path-prefix'],
-    queryFn: api.getPathPrefix,
+  const librariesQ = useQuery({
+    queryKey: ['libraries'],
+    queryFn: api.listLibraries,
+    staleTime: 5 * 60_000,
+  })
+
+  const prefixesQ = useQuery({
+    queryKey: ['path-prefixes'],
+    queryFn: api.getPathPrefixes,
     staleTime: 60_000,
   })
 
-  const displayPath = rewritePath(dirPath, prefixData?.path_prefix)
+  // Resolve: find library mount_path + user's prefix entry for this library + OS.
+  const library = librariesQ.data?.find((l) => l.id === libraryId)
+  const prefixMap = prefixesQ.data?.path_prefixes ?? {}
+  const libEntry = prefixMap[String(libraryId)]
+  const os = _effectiveOS()
+  const localPrefix = libEntry?.[os] ?? null
+
+  const displayPath = library
+    ? rewriteLocalPath(dirPath, library.mount_path, localPrefix, os)
+    : dirPath  // fallback: library not loaded yet, show raw
 
   const handleCopy = useCallback(async () => {
     try {
@@ -476,13 +515,13 @@ function PathDisplay({ dirPath, itemKey }: PathDisplayProps) {
         {copied ? 'Copied' : 'Copy'}
       </button>
       <Link
-        to={`/settings?focus=path-prefix&from=/items/${itemKey}`}
+        to={`/settings?from=/items/${itemKey}`}
         style={{ flexShrink: 0, fontSize: 11, color: 'var(--aurora-muted)', textDecoration: 'none', transition: 'color 0.15s' }}
         onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--aurora-accent)' }}
         onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--aurora-muted)' }}
-        title="Configure path prefix"
+        title="Configure path prefixes"
       >
-        Edit prefix
+        Edit prefixes
       </Link>
     </div>
   )
@@ -2287,7 +2326,7 @@ export function ItemPage() {
 
       {/* Location */}
       <AuroraSection title="Location">
-        <PathDisplay dirPath={item.dir_path} itemKey={item.key} />
+        <PathDisplay dirPath={item.dir_path} itemKey={item.key} libraryId={item.library_id} />
       </AuroraSection>
 
       {/* Downloads */}

@@ -37,7 +37,7 @@ import { AdminPage, PageHeader, Badge, Card } from '@/components/ui'
 // Types
 // ---------------------------------------------------------------------------
 
-type StatusKey = 'libraries' | 'pathPrefix' | 'aiProviders'
+type StatusKey = 'libraries' | 'pathPrefixes' | 'aiProviders'
 
 interface StepDef {
   icon: React.ReactNode
@@ -71,10 +71,10 @@ const STEPS: StepDef[] = [
     icon: <SlidersHorizontal size={20} />,
     title: 'Personalize your workspace',
     description:
-      'Set your theme (light / dark / system), choose top-bar or sidebar navigation, and configure the local path display so on-disk paths match where you open files.',
+      'Set your theme (light / dark / system), choose top-bar or sidebar navigation, and configure per-library path prefixes so on-disk paths match where you open files.',
     to: '/settings',
     cta: 'Open settings',
-    statusKey: 'pathPrefix',
+    statusKey: 'pathPrefixes',
   },
   {
     icon: <Package size={20} />,
@@ -244,9 +244,9 @@ export function QuickStartPage() {
     enabled: isAdmin,
   })
 
-  const pathPrefixQ = useQuery({
-    queryKey: ['quick-start', 'path-prefix'],
-    queryFn: api.getPathPrefix,
+  const pathPrefixesQ = useQuery({
+    queryKey: ['quick-start', 'path-prefixes'],
+    queryFn: api.getPathPrefixes,
     retry: false,
     staleTime: 5 * 60 * 1000,
   })
@@ -259,12 +259,18 @@ export function QuickStartPage() {
     enabled: isAdmin,
   })
 
-  // Resolve live status per key (undefined = no data yet or error → omit badge)
+  // Resolve live status per key (undefined = no data yet or error → omit badge).
+  // pathPrefixes: "configured" = at least one library has at least one prefix set.
+  const pathPrefixesConfigured = pathPrefixesQ.isSuccess
+    ? Object.values(pathPrefixesQ.data.path_prefixes).some(
+        (e) => e.windows != null || e.posix != null,
+      )
+    : undefined
+
   const statusMap: Record<StatusKey, boolean | undefined> = {
     libraries:
       librariesQ.isSuccess ? librariesQ.data.length > 0 : undefined,
-    pathPrefix:
-      pathPrefixQ.isSuccess ? pathPrefixQ.data.path_prefix != null : undefined,
+    pathPrefixes: pathPrefixesConfigured,
     aiProviders:
       aiProvidersQ.isSuccess ? aiProvidersQ.data.length > 0 : undefined,
   }

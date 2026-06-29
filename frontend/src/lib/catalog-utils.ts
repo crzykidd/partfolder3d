@@ -92,6 +92,84 @@ export function rewritePath(
 }
 
 // ---------------------------------------------------------------------------
+// OS detection (for per-library path rewrite)
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect whether the current browser is running on Windows or a posix OS
+ * (Mac / Linux / iOS / Android).
+ *
+ * Pass a `platformHint` string to override navigator in tests.
+ * Otherwise reads `navigator.userAgentData?.platform` (modern) or falls back
+ * to `navigator.platform` / `navigator.userAgent`.
+ *
+ * Returns `'windows'` only for genuine Windows environments; everything else
+ * is `'posix'`.
+ */
+export function detectOS(platformHint?: string): 'windows' | 'posix' {
+  const src =
+    platformHint ??
+    (typeof navigator !== 'undefined'
+      ? ((navigator as Navigator & { userAgentData?: { platform?: string } })
+          .userAgentData?.platform ??
+          navigator.platform ??
+          navigator.userAgent)
+      : '')
+  return /win/i.test(src) ? 'windows' : 'posix'
+}
+
+/**
+ * Rewrite a container-relative `containerPath` (e.g. the item's `dir_path`)
+ * into the user's local machine path for a specific library.
+ *
+ * Steps:
+ * 1. Strip `libraryMountPath` from the front of `containerPath`.
+ * 2. Prepend `localPrefix` (the user's configured prefix for this library + OS).
+ * 3. Normalise all separators to `os` style via `toPathStyle`.
+ *
+ * Falls back to the raw `containerPath` when `localPrefix` is absent.
+ *
+ * Example:
+ *   containerPath    = '/library/main/Creator/Cool-Thing'
+ *   libraryMountPath = '/library/main'
+ *   localPrefix      = 'C:\\prints\\'
+ *   os               = 'windows'
+ *   → 'C:\\prints\\Creator\\Cool-Thing'
+ */
+export function rewriteLocalPath(
+  containerPath: string,
+  libraryMountPath: string,
+  localPrefix: string | null | undefined,
+  os: 'windows' | 'posix',
+): string {
+  if (!localPrefix) return containerPath
+
+  // Strip the library mount path from the front of the container path.
+  let relative = containerPath
+  if (libraryMountPath && containerPath.startsWith(libraryMountPath)) {
+    relative = containerPath.slice(libraryMountPath.length)
+  }
+
+  // Remove any leading separator that was left behind.
+  if (relative.startsWith('/') || relative.startsWith('\\')) {
+    relative = relative.slice(1)
+  }
+
+  // Normalise relative segment separators to the target OS.
+  const normalizedRelative = toPathStyle(relative, os)
+
+  // Ensure the prefix ends with the right separator then normalise it too.
+  const sep = os === 'windows' ? '\\' : '/'
+  const prefixWithSep =
+    localPrefix.endsWith('/') || localPrefix.endsWith('\\')
+      ? localPrefix
+      : localPrefix + sep
+  const normalizedPrefix = toPathStyle(prefixWithSep, os)
+
+  return normalizedPrefix + normalizedRelative
+}
+
+// ---------------------------------------------------------------------------
 // ZIP poll state machine (PRD §11)
 // ---------------------------------------------------------------------------
 
