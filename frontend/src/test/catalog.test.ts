@@ -12,6 +12,7 @@ import { describe, it, expect } from 'vitest'
 import {
   getTagFontSize,
   getTagFontWeight,
+  toPathStyle,
   rewritePath,
   mapBundleStatus,
   shouldContinuePolling,
@@ -82,6 +83,41 @@ describe('getTagFontWeight', () => {
     const weights = ['font-normal', 'font-medium', 'font-semibold', 'font-bold']
     expect(weights.indexOf(w80)).toBeGreaterThan(weights.indexOf(w50))
     expect(weights.indexOf(w50)).toBeGreaterThan(weights.indexOf(w10))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// toPathStyle — separator normalisation
+// ---------------------------------------------------------------------------
+
+describe('toPathStyle', () => {
+  it('converts all forward slashes to backslashes for windows style', () => {
+    expect(toPathStyle('/mnt/nas/3dprints/', 'windows')).toBe('\\mnt\\nas\\3dprints\\')
+  })
+
+  it('converts all backslashes to forward slashes for posix style', () => {
+    expect(toPathStyle('C:\\prints\\Creator\\', 'posix')).toBe('C:/prints/Creator/')
+  })
+
+  it('leaves posix path unchanged when already posix style', () => {
+    expect(toPathStyle('/mnt/nas/', 'posix')).toBe('/mnt/nas/')
+  })
+
+  it('leaves windows path unchanged when already windows style', () => {
+    expect(toPathStyle('Z:\\3dprints\\', 'windows')).toBe('Z:\\3dprints\\')
+  })
+
+  it('handles empty string', () => {
+    expect(toPathStyle('', 'windows')).toBe('')
+    expect(toPathStyle('', 'posix')).toBe('')
+  })
+
+  it('converts mixed separators to windows style', () => {
+    expect(toPathStyle('C:/prints\\sub/', 'windows')).toBe('C:\\prints\\sub\\')
+  })
+
+  it('converts mixed separators to posix style', () => {
+    expect(toPathStyle('C:/prints\\sub/', 'posix')).toBe('C:/prints/sub/')
   })
 })
 

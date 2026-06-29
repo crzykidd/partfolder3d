@@ -17,16 +17,34 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/context/AuthContext'
 import { useTheme } from '@/components/ThemeProvider'
 import * as api from '@/lib/api'
+import { rewritePath, toPathStyle } from '@/lib/catalog-utils'
 import {
   AdminPage, PageHeader,
-  Card, SectionHeader,
-  Button,
-  Field, AuroraInput,
+  Card,
+  Button, FilterPill,
+  AuroraInput,
 } from '@/components/ui'
 
 // ---------------------------------------------------------------------------
 // Path prefix section
 // ---------------------------------------------------------------------------
+
+/** Sample stored item path used for the live prefix preview. */
+const SAMPLE_DIR_PATH = '/library/main/Creator/Cool-Thing'
+
+const INLINE_CODE: React.CSSProperties = {
+  background: 'var(--aurora-glass)',
+  borderRadius: 4,
+  padding: '1px 5px',
+  fontFamily: 'monospace',
+  fontSize: 11,
+}
+
+type PathStyle = 'windows' | 'posix'
+
+function deriveStyle(prefix: string): PathStyle {
+  return prefix.includes('\\') ? 'windows' : 'posix'
+}
 
 function PathPrefixSection() {
   const queryClient = useQueryClient()
@@ -38,11 +56,14 @@ function PathPrefixSection() {
 
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
+  const [pathStyle, setPathStyle] = useState<PathStyle>('posix')
 
-  // Sync draft when data arrives or editing is reset
+  // Sync draft + style when data arrives or editing is reset
   useEffect(() => {
     if (!editing) {
-      setDraft(data?.path_prefix ?? '')
+      const prefix = data?.path_prefix ?? ''
+      setDraft(prefix)
+      setPathStyle(deriveStyle(prefix))
     }
   }, [data, editing])
 
@@ -56,70 +77,152 @@ function PathPrefixSection() {
 
   const currentValue = data?.path_prefix ?? ''
 
+  /** Normalize draft separators and enter edit mode when style is switched. */
+  function handleStyleChange(newStyle: PathStyle) {
+    const base = editing ? draft : currentValue
+    setDraft(toPathStyle(base, newStyle))
+    setPathStyle(newStyle)
+    if (!editing) setEditing(true)
+  }
+
+  /** Preview path with whatever prefix the user currently has (draft or saved). */
+  const previewPath = rewritePath(SAMPLE_DIR_PATH, editing ? draft.trim() : currentValue)
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--aurora-text)' }}>
         Path display
       </div>
       <Card>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--aurora-text)' }}>Path prefix</div>
-          <div style={{ fontSize: 12, color: 'var(--aurora-muted)', lineHeight: 1.6 }}>
-            Prefix prepended to the item directory path on item pages — useful when
-            your library is mounted at a different path locally (e.g.{' '}
-            <code style={{ background: 'var(--aurora-glass)', borderRadius: 4, padding: '1px 5px', fontFamily: 'monospace', fontSize: 11 }}>C:\prints\</code>{' '}
-            or{' '}
-            <code style={{ background: 'var(--aurora-glass)', borderRadius: 4, padding: '1px 5px', fontFamily: 'monospace', fontSize: 11 }}>/mnt/nas/</code>).
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+          {/* Description */}
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--aurora-text)', marginBottom: 4 }}>
+              Path prefix
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--aurora-muted)', lineHeight: 1.7 }}>
+              Maps each stored item path to where <em>you</em> open the files — useful when your
+              library is mounted at a different location on your machine. The prefix is prepended
+              to item directory paths on item pages.
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--aurora-muted)', marginTop: 4, lineHeight: 1.7 }}>
+              Examples:{' '}
+              <code style={INLINE_CODE}>Z:\3dprints\</code> (Windows) or{' '}
+              <code style={INLINE_CODE}>/mnt/nas/3dprints/</code> (Linux / macOS).
+              The path style controls whether paths use <code style={INLINE_CODE}>\</code> or{' '}
+              <code style={INLINE_CODE}>/</code> as the separator.
+            </div>
           </div>
-          {!editing && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-              <span style={{ fontFamily: 'monospace', fontSize: 13, color: 'var(--aurora-muted)' }}>
-                {currentValue || <em>not set</em>}
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setDraft(currentValue)
-                  setEditing(true)
+
+          {/* Path style selector */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--aurora-text-dim)', marginBottom: 6 }}>
+              Path style
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <FilterPill
+                active={pathStyle === 'posix'}
+                onClick={() => handleStyleChange('posix')}
+              >
+                Linux / macOS &nbsp;<code style={{ fontFamily: 'monospace', fontSize: 11 }}>/</code>
+              </FilterPill>
+              <FilterPill
+                active={pathStyle === 'windows'}
+                onClick={() => handleStyleChange('windows')}
+              >
+                Windows &nbsp;<code style={{ fontFamily: 'monospace', fontSize: 11 }}>\</code>
+              </FilterPill>
+            </div>
+          </div>
+
+          {/* Prefix input / view */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--aurora-text-dim)', marginBottom: 6 }}>
+              Prefix
+            </div>
+            {!editing ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontFamily: 'monospace', fontSize: 13, color: 'var(--aurora-muted)' }}>
+                  {currentValue || <em>not set</em>}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setDraft(currentValue)
+                    setPathStyle(deriveStyle(currentValue))
+                    setEditing(true)
+                  }}
+                >
+                  Edit
+                </Button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <AuroraInput
+                  type="text"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder={
+                    pathStyle === 'windows'
+                      ? 'e.g. Z:\\3dprints\\'
+                      : 'e.g. /mnt/nas/3dprints/'
+                  }
+                  style={{ flex: 1, fontFamily: 'monospace' }}
+                  autoFocus
+                />
+                <Button
+                  onClick={() => mutation.mutate()}
+                  disabled={mutation.isPending}
+                  size="sm"
+                >
+                  {mutation.isPending ? 'Saving…' : 'Save'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setEditing(false)
+                    setDraft(currentValue)
+                    setPathStyle(deriveStyle(currentValue))
+                  }}
+                >
+                  Cancel
+                </Button>
+                {mutation.isError && (
+                  <span style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>Save failed</span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Live preview — always shown when a prefix is set or being edited */}
+          {(editing || currentValue) && (
+            <div
+              style={{
+                background: 'var(--aurora-glass)',
+                border: '1px solid var(--aurora-glass-border)',
+                borderRadius: 6,
+                padding: '8px 12px',
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--aurora-text-dim)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Preview
+              </div>
+              <code
+                style={{
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  color: 'var(--aurora-text)',
+                  wordBreak: 'break-all',
                 }}
               >
-                Edit
-              </Button>
+                {previewPath}
+              </code>
             </div>
           )}
-          {editing && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-              <AuroraInput
-                type="text"
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder="e.g. C:\prints\ or /mnt/nas/"
-                style={{ flex: 1, fontFamily: 'monospace' }}
-                autoFocus
-              />
-              <Button
-                onClick={() => mutation.mutate()}
-                disabled={mutation.isPending}
-                size="sm"
-              >
-                {mutation.isPending ? 'Saving…' : 'Save'}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setEditing(false)
-                  setDraft(currentValue)
-                }}
-              >
-                Cancel
-              </Button>
-              {mutation.isError && (
-                <span style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>Save failed</span>
-              )}
-            </div>
-          )}
+
         </div>
       </Card>
     </div>

@@ -47,6 +47,21 @@ export function getTagFontWeight(
 // ---------------------------------------------------------------------------
 
 /**
+ * Normalise every path separator in `path` to the chosen style.
+ *
+ * - 'windows': convert all `/` → `\`
+ * - 'posix':   convert all `\` → `/`
+ *
+ * Use this to keep the saved path-prefix string consistent with the user's
+ * chosen path style before persisting it.  `rewritePath`'s separator
+ * inference (checks whether the prefix contains `\`) remains unchanged.
+ */
+export function toPathStyle(path: string, style: 'windows' | 'posix'): string {
+  if (style === 'windows') return path.replace(/\//g, '\\')
+  return path.replace(/\\/g, '/')
+}
+
+/**
  * Rewrite a stored dir_path using the user's local path prefix.
  *
  * Rules:
