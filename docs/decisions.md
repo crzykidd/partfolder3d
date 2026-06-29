@@ -2,6 +2,45 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-29 — Phase 16: per-object static analysis (object_analysis)
+
+### Volume-estimate formula and settings
+
+Grams = `volume_cm3 × density_g_cm3 × (infill_pct / 100)`.  trimesh volumes are in mm³
+for mm-unit meshes, so divide by 1000 to get cm³.  Two tuneable settings live in the
+`settings` table: `estimate.filament_density_g_cm3` (default 1.24 g/cm³, typical PLA) and
+`estimate.infill_pct` (default 15 %).  Field `est_method='volume'` is reserved so a future
+slicing-based approach can be added without a schema change.
+
+### Non-watertight mesh fallback
+
+`_safe_volume_cm3` tries in order: (1) check `is_watertight` → use `abs(mesh.volume)/1000`;
+(2) call `mesh.fill_holes()` and recheck; (3) use `mesh.convex_hull.volume/1000` as upper
+bound; (4) return None.  Any result from steps 2–4 sets `low_confidence=True`.  The
+`LOW CONF` badge on the frontend communicates this to the user.
+
+### 3MF color parsing approach
+
+Colors are extracted from `3D/3dmodel.model` inside the ZIP by lxml.  Priority:
+- Per-triangle `p1` refs on `<triangle>` elements → collect distinct `displaycolor` hex
+  values from the referenced material group.
+- Per-object `pid`/`pindex` on `<object>` elements → single color per object.
+- Bambu/Orca vendor paint (`paint_color`/`mmu_segmentation` attributes on triangles) →
+  best-effort only; distinct non-zero `paint_color` values are counted as a proxy color
+  count; actual per-segment decoding is not implemented (bitfield format is undocumented).
+
+### Per-file SHA-256 cache key
+
+`File.object_analysis` is a JSONB blob keyed by `source_hash` (the file's current sha256).
+The worker skips re-analysis if the stored hash matches the current `File.sha256`.  This
+piggybacks on the existing drift-check pipeline — no extra disk I/O on unchanged files.
+
+### Object-to-color matching strategy (3MF)
+
+trimesh may name Scene geometries as the original `<object id>` or as `'object_<id>'`.
+The color map is keyed by id string.  Matching tries: (1) exact name match; (2) strip the
+`object_` prefix; (3) positional fallback (XML order = Scene order).
+
 ## 2026-06-29 — Phase 15: local-modification tracking
 
 ### Baseline-diff approach

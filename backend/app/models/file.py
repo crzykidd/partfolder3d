@@ -7,8 +7,10 @@ location/extension at inventory time.  `sha256` is recomputed on change
 
 import enum
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -46,6 +48,8 @@ class File(Base):
     last_seen_mtime: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Phase 16: per-object mesh analysis (JSON, sha-keyed; null until analyzed)
+    object_analysis: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
 
     item: Mapped["Item"] = relationship(  # noqa: F821
         "Item", back_populates="files", foreign_keys=[item_id]

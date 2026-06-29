@@ -383,12 +383,64 @@ export interface TagOut {
   category: string | null
 }
 
+// ---------------------------------------------------------------------------
+// Phase 16 — Object analysis types
+// ---------------------------------------------------------------------------
+
+export interface ObjectAnalysis {
+  /** Object name (geometry name or filename stem for STL). */
+  name: string
+  /** Number of distinct colors for this object. */
+  color_count: number
+  /** Raw hex color strings (e.g. '#FF0000'). Empty for STL (no color data). */
+  colors: string[]
+  /** Mesh volume in cm³. Null if could not be computed. */
+  volume_cm3: number | null
+  /**
+   * Estimated filament weight in grams.
+   * Formula: volume_cm3 × density × (infill_pct / 100).
+   * ROUGH ESTIMATE — can be 2–5× off without real slicing.
+   */
+  est_grams: number | null
+  /** Method used for the estimate. 'volume' = volume-based; 'sliced' reserved for future. */
+  est_method: 'volume' | 'sliced' | string
+  /** True if the mesh is watertight (volume is exact). */
+  watertight: boolean
+  /**
+   * True if the estimate is low-confidence (non-watertight mesh; convex-hull
+   * fallback used for volume).
+   */
+  low_confidence: boolean
+  /** Bounding-box extents [x, y, z] in mm. Null on error. */
+  dims_mm: [number, number, number] | null
+}
+
+export interface FileObjectAnalysis {
+  /** ISO datetime when this file was last analyzed. */
+  analyzed_at: string
+  /** sha256 of the file at analysis time (cache key). */
+  source_hash: string
+  /** Per-object breakdown. */
+  objects: ObjectAnalysis[]
+  /** Total object count in this file. */
+  total_objects: number
+  /**
+   * Total distinct colors across all objects.
+   * For STL this equals the number of objects (1 color each).
+   */
+  total_colors: number
+  /** Sum of est_grams across all objects. */
+  total_est_grams: number
+}
+
 export interface FileOut {
   id: number
   path: string
   role: string
   size: number
   sha256: string | null
+  /** Phase 16: per-object analysis; null until worker has run. */
+  object_analysis: FileObjectAnalysis | null
 }
 
 export interface ImageOut {
@@ -428,6 +480,10 @@ export interface ItemDetail {
   is_modified: boolean
   locally_modified_at: string | null
   modified_override: string | null  // 'modified' | 'original' | null
+  // Phase 16: object-analysis aggregate (null until at least one file is analyzed)
+  analysis_total_objects: number | null
+  analysis_total_colors: number | null
+  analysis_total_est_grams: number | null
 }
 
 export interface PaginatedItems {

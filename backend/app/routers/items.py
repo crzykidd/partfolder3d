@@ -118,6 +118,8 @@ class FileOut(BaseModel):
     role: str
     size: int
     sha256: str | None
+    # Phase 16: per-object mesh analysis (null until worker runs)
+    object_analysis: Any | None = None
 
     model_config = {"from_attributes": True}
 
@@ -184,6 +186,10 @@ class ItemDetail(BaseModel):
     is_modified: bool = False           # effective state (override wins over auto)
     locally_modified_at: datetime | None = None
     modified_override: str | None = None
+    # Phase 16: object-analysis aggregate (null until at least one file is analyzed)
+    analysis_total_objects: int | None = None
+    analysis_total_colors: int | None = None
+    analysis_total_est_grams: float | None = None
 
     model_config = {"from_attributes": True}
 
@@ -390,6 +396,24 @@ async def _enqueue_render(item_id: int) -> None:
         log.exception("_enqueue_render: failed to enqueue render for item %s", item_id)
 
 
+async def _enqueue_analyze(item_id: int) -> None:
+    """Fire-and-forget: enqueue analyze_item alongside render on item events.
+
+    Phase 16: called on item create / file change / per-item Rescan.
+    Never blocks item creation.
+    """
+    try:
+        from arq import create_pool  # noqa: PLC0415
+        from arq.connections import RedisSettings  # noqa: PLC0415
+
+        redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
+        await redis.enqueue_job("analyze_item", item_id)
+        await redis.aclose()
+        log.debug("_enqueue_analyze: analyze_item enqueued for item %s", item_id)
+    except Exception:
+        log.exception("_enqueue_analyze: failed to enqueue analysis for item %s", item_id)
+
+
 def _effective_is_modified(item: Item) -> bool:
     """Compute the effective is_modified flag.
 
@@ -405,6 +429,35 @@ def _effective_is_modified(item: Item) -> bool:
     return bool(getattr(item, "locally_modified", False))
 
 
+def _build_analysis_aggregate(
+    files: list[File],
+) -> tuple[int | None, int | None, float | None]:
+    """Compute item-level analysis aggregate from analyzed file rows.
+
+    Returns (total_objects, total_colors, total_est_grams).
+    Returns (None, None, None) if no files have been analyzed yet.
+    """
+    total_objects = 0
+    total_colors = 0
+    total_grams = 0.0
+    any_analyzed = False
+
+    for f in files:
+        a = getattr(f, "object_analysis", None)
+        if not isinstance(a, dict):
+            continue
+        any_analyzed = True
+        total_objects += a.get("total_objects", 0)
+        total_colors += a.get("total_colors", 0)
+        g = a.get("total_est_grams")
+        if g is not None:
+            total_grams += float(g)
+
+    if not any_analyzed:
+        return None, None, None
+    return total_objects, total_colors, round(total_grams, 3)
+
+
 def _build_item_detail(
     item: Item,
     tags: list[Tag],
@@ -412,6 +465,7 @@ def _build_item_detail(
     images: list[Image],
 ) -> dict[str, Any]:
     """Build the ItemDetail dict from loaded ORM objects."""
+    total_obj, total_col, total_g = _build_analysis_aggregate(files)
     return {
         "id": item.id,
         "key": item.key,
@@ -434,6 +488,10 @@ def _build_item_detail(
         "is_modified": _effective_is_modified(item),
         "locally_modified_at": getattr(item, "locally_modified_at", None),
         "modified_override": getattr(item, "modified_override", None),
+        # Phase 16: object-analysis aggregate
+        "analysis_total_objects": total_obj,
+        "analysis_total_colors": total_col,
+        "analysis_total_est_grams": total_g,
     }
 
 
@@ -549,6 +607,8 @@ async def create_item(
 
     # Phase 4: enqueue render job (fire-and-forget; never blocks item creation)
     await _enqueue_render(item.id)
+    # Phase 16: enqueue mesh analysis alongside render
+    await _enqueue_analyze(item.id)
 
     return _build_item_detail(item, tags, file_objs, images)
 
@@ -975,6 +1035,9 @@ async def rescan_item(
         from ..models.creator import Creator  # noqa: PLC0415
         creator_result = await db.execute(select(Creator).where(Creator.id == item.creator_id))
         item.creator = creator_result.scalar_one_or_none()
+
+    # Phase 16: re-enqueue analysis on rescan (fire-and-forget)
+    await _enqueue_analyze(item.id)
 
     return _build_item_detail(item, tags, files, images)
 
