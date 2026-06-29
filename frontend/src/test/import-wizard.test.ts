@@ -20,6 +20,7 @@ import {
   rejectPendingTag,
   removeConfirmedTag,
   addConfirmedTag,
+  pendingTagNextAction,
   isProcessing,
   isEditable,
   extractDomain,
@@ -180,6 +181,36 @@ describe('addConfirmedTag', () => {
   it('ignores whitespace-only strings', () => {
     const result = addConfirmedTag(['fdm'], '   ')
     expect(result).toEqual(['fdm'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// pendingTagNextAction
+// ---------------------------------------------------------------------------
+
+describe('pendingTagNextAction', () => {
+  it('returns "advance" when input is empty', () => {
+    expect(pendingTagNextAction('', ['fdm'])).toBe('advance')
+  })
+
+  it('returns "advance" when input is whitespace-only', () => {
+    expect(pendingTagNextAction('   ', ['fdm'])).toBe('advance')
+  })
+
+  it('returns "advance" when input is already in confirmed (dedup)', () => {
+    expect(pendingTagNextAction('fdm', ['fdm', 'resin'])).toBe('advance')
+  })
+
+  it('returns "advance" when trimmed input matches a confirmed tag', () => {
+    expect(pendingTagNextAction('  fdm  ', ['fdm'])).toBe('advance')
+  })
+
+  it('returns "prompt" when input is non-empty and not in confirmed', () => {
+    expect(pendingTagNextAction('miniature', ['fdm', 'resin'])).toBe('prompt')
+  })
+
+  it('returns "prompt" when confirmed is empty and input has text', () => {
+    expect(pendingTagNextAction('fdm', [])).toBe('prompt')
   })
 })
 

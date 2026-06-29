@@ -144,6 +144,32 @@ export function extractDomain(url: string): string | null {
 // Fuzzy tag matching (Phase 8b — PendingTagsPage duplicate detection)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Pending-tag-on-next decision
+// ---------------------------------------------------------------------------
+
+/**
+ * Determine what action to take when the user advances from the Tags step
+ * while there is text in the tag input that has not yet been added.
+ *
+ * - 'advance' — input is empty or is already a confirmed tag (duplicate);
+ *               the caller should clear the input silently and advance.
+ * - 'prompt'  — input is non-empty and not a duplicate; show the
+ *               "Add & continue / Discard & continue / Cancel" confirmation.
+ */
+export function pendingTagNextAction(
+  input: string,
+  confirmed: string[],
+): 'advance' | 'prompt' {
+  const trimmed = input.trim()
+  if (!trimmed || confirmed.includes(trimmed)) return 'advance'
+  return 'prompt'
+}
+
+// ---------------------------------------------------------------------------
+// Fuzzy tag matching (Phase 8b — PendingTagsPage duplicate detection)
+// ---------------------------------------------------------------------------
+
 /**
  * Compute the Levenshtein edit distance between two strings.
  * Case-sensitive — normalise to lower-case before calling if needed.

@@ -31,6 +31,7 @@ import {
   rejectPendingTag,
   removeConfirmedTag,
   addConfirmedTag,
+  pendingTagNextAction,
   isProcessing,
   isEditable,
   extractDomain,
@@ -881,6 +882,9 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
   )
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // Inline prompt shown when user clicks Next with unadded tag text
+  const [showPendingPrompt, setShowPendingPrompt] = useState(false)
+  const addAndContinueBtnRef = useRef<HTMLButtonElement>(null)
 
   const [tagProviderAvailable, setTagProviderAvailable] = useState<boolean | null>(null)
   const [aiTagSuggestions, setAiTagSuggestions] = useState<api.AiTagSuggestionOut | null>(null)
@@ -920,6 +924,23 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
     },
   })
 
+  // Focus the "Add & continue" button when the pending-tag prompt appears
+  useEffect(() => {
+    if (showPendingPrompt) {
+      addAndContinueBtnRef.current?.focus()
+    }
+  }, [showPendingPrompt])
+
+  // ESC dismisses the pending-tag prompt
+  useEffect(() => {
+    if (!showPendingPrompt) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowPendingPrompt(false)
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [showPendingPrompt])
+
   const handleAccept = (tag: string) => {
     const [c, p] = acceptPendingTag(confirmed, pending, tag)
     setConfirmed(c)
@@ -952,6 +973,31 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
   }
 
   const handleNext = () => {
+    setError(null)
+    if (pendingTagNextAction(input, confirmed) === 'prompt') {
+      // Non-empty, non-duplicate text in the input → ask the user
+      setShowPendingPrompt(true)
+      return
+    }
+    // Empty or duplicate input → clear silently and advance
+    if (input.trim()) setInput('')
+    patchMutation.mutate(confirmed)
+  }
+
+  // "Add & continue" — add the pending text then advance
+  const handleAddAndContinue = () => {
+    const newConfirmed = addConfirmedTag(confirmed, input)
+    setConfirmed(newConfirmed)
+    setInput('')
+    setShowPendingPrompt(false)
+    setError(null)
+    patchMutation.mutate(newConfirmed)
+  }
+
+  // "Discard & continue" — clear the input text and advance without adding
+  const handleDiscardAndContinue = () => {
+    setInput('')
+    setShowPendingPrompt(false)
     setError(null)
     patchMutation.mutate(confirmed)
   }
@@ -1243,30 +1289,104 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
         <p style={{ fontSize: 13, color: 'var(--aurora-danger)', margin: 0 }}>{error}</p>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 4 }}>
-        <button
-          type="button"
-          onClick={onPrev}
-          style={AURORA_BTN_GHOST}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
-        >
-          ← Back
-        </button>
-        <button
-          type="button"
-          disabled={patchMutation.isPending}
-          onClick={handleNext}
+      {/* Pending-tag confirmation prompt — shown when user clicks Next with unadded text */}
+      {showPendingPrompt && (
+        <div
+          role="alertdialog"
+          aria-label="Unadded tag confirmation"
           style={{
-            ...AURORA_BTN_PRIMARY,
-            opacity: patchMutation.isPending ? 0.6 : 1,
+            background: 'rgba(15, 164, 171, 0.06)',
+            border: '1px solid var(--aurora-pill-border)',
+            borderRadius: 10,
+            padding: '14px 16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
           }}
-          onMouseEnter={(e) => { if (!patchMutation.isPending) (e.currentTarget as HTMLButtonElement).style.opacity = '0.85' }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = patchMutation.isPending ? '0.6' : '1' }}
         >
-          {patchMutation.isPending ? 'Saving…' : 'Next →'}
-        </button>
-      </div>
+          <p style={{ fontSize: 13, color: 'var(--aurora-text)', margin: 0 }}>
+            You typed{' '}
+            <strong style={{ color: 'var(--aurora-accent)' }}>"{input.trim()}"</strong>
+            {' '}but haven't added it yet. What would you like to do?
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            <button
+              ref={addAndContinueBtnRef}
+              type="button"
+              disabled={patchMutation.isPending}
+              onClick={handleAddAndContinue}
+              style={{
+                ...AURORA_BTN_PRIMARY,
+                opacity: patchMutation.isPending ? 0.6 : 1,
+              }}
+              onMouseEnter={(e) => { if (!patchMutation.isPending) (e.currentTarget as HTMLButtonElement).style.opacity = '0.85' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = patchMutation.isPending ? '0.6' : '1' }}
+            >
+              {patchMutation.isPending ? 'Saving…' : 'Add & continue'}
+            </button>
+            <button
+              type="button"
+              disabled={patchMutation.isPending}
+              onClick={handleDiscardAndContinue}
+              style={{
+                ...AURORA_BTN_GHOST,
+                opacity: patchMutation.isPending ? 0.5 : 1,
+                cursor: patchMutation.isPending ? 'not-allowed' : 'pointer',
+              }}
+              onMouseEnter={(e) => { if (!patchMutation.isPending) (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
+            >
+              Discard & continue
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowPendingPrompt(false)}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--aurora-muted)',
+                fontSize: 13,
+                cursor: 'pointer',
+                padding: '4px 0',
+                textDecoration: 'underline',
+                transition: 'color 0.15s',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--aurora-text)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--aurora-muted)' }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Normal nav buttons — hidden while the pending-tag prompt is showing */}
+      {!showPendingPrompt && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 4 }}>
+          <button
+            type="button"
+            onClick={onPrev}
+            style={AURORA_BTN_GHOST}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
+          >
+            ← Back
+          </button>
+          <button
+            type="button"
+            disabled={patchMutation.isPending}
+            onClick={handleNext}
+            style={{
+              ...AURORA_BTN_PRIMARY,
+              opacity: patchMutation.isPending ? 0.6 : 1,
+            }}
+            onMouseEnter={(e) => { if (!patchMutation.isPending) (e.currentTarget as HTMLButtonElement).style.opacity = '0.85' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = patchMutation.isPending ? '0.6' : '1' }}
+          >
+            {patchMutation.isPending ? 'Saving…' : 'Next →'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
