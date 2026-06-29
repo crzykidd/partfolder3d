@@ -7,8 +7,8 @@ The item's stable on-disk identity is `<slug>-<key>/`; `key` never changes.
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import TSVECTOR
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -45,6 +45,24 @@ class Item(Base):
     # Maintained application-side; updated whenever title/description/tags change.
     # GIN index added in migration 0004.
     search_vector: Mapped[Any] = mapped_column(TSVECTOR, nullable=True)
+
+    # ---- Phase 15: local-modification tracking ----
+    # Snapshot of model-file path→sha256 captured at import commit.
+    # Null for items without source_url or created before this feature.
+    source_baseline: Mapped[Any] = mapped_column(JSONB, nullable=True)
+    # Best-effort version/updated marker from the scraper at import.
+    # Reserved for future upstream-update check (type 2). May be null.
+    source_version: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # Set by the scan engine when current model files diverge from source_baseline.
+    locally_modified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Timestamp when divergence was last detected (or cleared).
+    locally_modified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Manual override: 'modified' | 'original' | null.
+    # Effective state = override if set, else locally_modified.
+    modified_override: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

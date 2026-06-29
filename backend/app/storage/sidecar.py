@@ -63,6 +63,14 @@ class SidecarImage:
 
 
 @dataclass
+class SidecarModifiedState:
+    """Records local-modification state in the sidecar (Phase 15)."""
+    locally_modified: bool
+    modified_at: str | None = None        # ISO-8601 UTC when divergence last detected
+    source: str | None = None             # source_url at time of capture
+
+
+@dataclass
 class SidecarData:
     schema_version: int
     key: str
@@ -79,6 +87,8 @@ class SidecarData:
     default_image: str | None = None
     images: list[SidecarImage] = field(default_factory=list)
     files: list[SidecarFile] = field(default_factory=list)
+    # Phase 15: local-modification tracking (backward-compatible; omitted if None)
+    modified_state: SidecarModifiedState | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +162,16 @@ def _to_dict(data: SidecarData) -> dict[str, Any]:
     doc["created_at"] = data.created_at
     doc["updated_at"] = data.updated_at
 
+    # Phase 15: modified_state block (omit if None — backward-compatible)
+    if data.modified_state is not None:
+        ms = data.modified_state
+        ms_dict: dict[str, Any] = {"locally_modified": ms.locally_modified}
+        if ms.modified_at is not None:
+            ms_dict["modified_at"] = ms.modified_at
+        if ms.source is not None:
+            ms_dict["source"] = ms.source
+        doc["modified_state"] = ms_dict
+
     return doc
 
 
@@ -189,6 +209,16 @@ def _from_dict(d: dict[str, Any]) -> SidecarData:
 
     source = d.get("source") or {}
 
+    # Phase 15: parse optional modified_state block (lenient)
+    modified_state: SidecarModifiedState | None = None
+    raw_ms = d.get("modified_state")
+    if isinstance(raw_ms, dict):
+        modified_state = SidecarModifiedState(
+            locally_modified=bool(raw_ms.get("locally_modified", False)),
+            modified_at=raw_ms.get("modified_at"),
+            source=raw_ms.get("source"),
+        )
+
     return SidecarData(
         schema_version=int(d.get("schema_version", 1)),
         key=str(d.get("key", "")),
@@ -205,6 +235,7 @@ def _from_dict(d: dict[str, Any]) -> SidecarData:
         files=files,
         created_at=str(d.get("created_at", "")),
         updated_at=str(d.get("updated_at", "")),
+        modified_state=modified_state,
     )
 
 
@@ -287,6 +318,9 @@ def build_sidecar(
 
     `item` must have: key, title, slug, description, source_url, source_site,
     license, creator (or None), created_at, updated_at.
+
+    Phase 15: if item has locally_modified / locally_modified_at / modified_override,
+    a modified_state block is written (backward-compatible; omitted when not applicable).
     """
     if now is None:
         now = datetime.now(UTC)
@@ -312,6 +346,29 @@ def build_sidecar(
         _dt_to_iso(item.updated_at) if item.updated_at else updated
     )
 
+    # Phase 15: build modified_state block when modification tracking data is present.
+    # Only write when the item has a source_url (the feature is opt-in by source).
+    modified_state: SidecarModifiedState | None = None
+    source_url_val = getattr(item, "source_url", None)
+    locally_modified_val = getattr(item, "locally_modified", False)
+    locally_modified_at_val = getattr(item, "locally_modified_at", None)
+    modified_override_val = getattr(item, "modified_override", None)
+    if source_url_val:
+        # Effective state
+        effective = (
+            modified_override_val == "modified"
+            if modified_override_val is not None
+            else bool(locally_modified_val)
+        )
+        modified_at_iso: str | None = None
+        if locally_modified_at_val is not None:
+            modified_at_iso = _dt_to_iso(locally_modified_at_val)
+        modified_state = SidecarModifiedState(
+            locally_modified=effective,
+            modified_at=modified_at_iso,
+            source=source_url_val,
+        )
+
     return SidecarData(
         schema_version=item.schema_version,
         key=item.key,
@@ -328,4 +385,5 @@ def build_sidecar(
         files=files or [],
         created_at=created_iso,
         updated_at=updated_iso,
+        modified_state=modified_state,
     )

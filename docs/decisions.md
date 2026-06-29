@@ -2,6 +2,70 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-29 — Phase 15: local-modification tracking
+
+### Baseline-diff approach
+
+`source_baseline` is a JSONB map of `{ relative_path → sha256 }` for model-role files only,
+captured at `commit_import_session` (only when the item has a `source_url`).  The reconcile
+engine (behavior e) computes the same map from current DB File rows and compares; any
+difference (path set or hash) sets `locally_modified=True`.  Comparison is done on DB-stored
+hashes (already maintained by the re_render behavior), so baseline detection piggybacks on
+the existing drift-check pipeline without extra disk reads.
+
+### Effective-state rule (override vs auto)
+
+`modified_override` takes precedence over `locally_modified`:
+- `'modified'` → `is_modified = True` always
+- `'original'` → `is_modified = False` always
+- `null`        → `is_modified = locally_modified` (auto)
+
+The override is persisted in the DB and written to the sidecar.  It is NOT reset when
+the scan engine runs, so users can permanently mark an item as "original" even if future
+scans would disagree (e.g. a deliberate, accepted customisation).
+
+### What counts as "modified" (model files only)
+
+Only files with `role=model` are included in the baseline and the comparison.  Renders,
+thumbnails, sidecars, print photos, and gcode files are excluded.  Rationale: these are
+either derived (renders), per-user (photos), or printing artefacts — none represent the
+"design content" that was downloaded from the source.
+
+### source_version: captured but unused
+
+`source_version` (String nullable) is added to Item for the future type-2 upstream-update
+check ("a newer version is available online").  The import session does not currently scrape
+this field (scraper integration is best-effort; left for the future phase).  The column exists
+so the future phase can add it without another migration.
+
+### Sidecar: modified_state block (backward-compatible)
+
+When `source_url` is present, `build_sidecar` writes a `modified_state` block:
+```yaml
+modified_state:
+  locally_modified: <effective bool>
+  modified_at: <ISO-8601 UTC or null>
+  source: <source_url>
+```
+The reader ignores unknown keys, so old sidecars without the block parse cleanly with
+`modified_state=None`.  The block is intentionally omitted for sourceless items (no
+`source_url`) to keep the sidecar lightweight.
+
+### Public share: no baseline hashes
+
+The `PublicItemOut` schema includes `is_modified` (the effective boolean) and the existing
+`source_url` / `source_site`.  The raw `source_baseline` dict (path→sha256 pairs) is NOT
+exposed publicly — it reveals filesystem layout and is irrelevant to share consumers.
+
+### Type-2 upstream-update check: out of scope
+
+Checking whether a newer version is available at the source URL (type 2) is explicitly
+excluded from this phase.  `source_version` is captured as a stub; the actual network
+re-check requires a background job, per-site scraping logic, and user notification — all
+left for a dedicated future phase.
+
+---
+
 ## 2026-06-28 — Tag approval refresh fix; AI suggestion click-to-add UX; new tags created as pending
 
 ### Tag approval: two-screen approach (option a — keep both, make identical)

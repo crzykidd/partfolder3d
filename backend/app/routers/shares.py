@@ -113,6 +113,8 @@ class PublicItemOut(BaseModel):
     source_site: str | None
     tags: list[str]
     public_print_records: list[dict]
+    # Phase 15: local-modification tracking (baseline hashes NOT exposed publicly)
+    is_modified: bool = False
 
 
 class BundleOut(BaseModel):
@@ -314,6 +316,9 @@ async def public_share_view(
         for r in public_records
     ]
 
+    # Phase 15: compute effective is_modified (don't expose baseline hashes)
+    from ..routers.items import _effective_is_modified  # noqa: PLC0415
+
     # Record access event
     _record_audit(db, link.id, "accessed_view", request)
 
@@ -326,6 +331,7 @@ async def public_share_view(
         source_site=item.source_site,
         tags=tag_names,
         public_print_records=serialized_records,
+        is_modified=_effective_is_modified(item),
     )
 
 

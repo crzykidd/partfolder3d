@@ -180,8 +180,16 @@ class ItemDetail(BaseModel):
     tags: list[TagOut]
     files: list[FileOut]
     images: list[ImageOut]
+    # Phase 15: local-modification tracking
+    is_modified: bool = False           # effective state (override wins over auto)
+    locally_modified_at: datetime | None = None
+    modified_override: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class PatchModifiedOverrideRequest(BaseModel):
+    override: str | None = None  # 'modified' | 'original' | null
 
 
 class PaginatedItems(BaseModel):
@@ -382,6 +390,21 @@ async def _enqueue_render(item_id: int) -> None:
         log.exception("_enqueue_render: failed to enqueue render for item %s", item_id)
 
 
+def _effective_is_modified(item: Item) -> bool:
+    """Compute the effective is_modified flag.
+
+    override='modified' → True
+    override='original' → False
+    override=None       → locally_modified (auto)
+    """
+    override = getattr(item, "modified_override", None)
+    if override == "modified":
+        return True
+    if override == "original":
+        return False
+    return bool(getattr(item, "locally_modified", False))
+
+
 def _build_item_detail(
     item: Item,
     tags: list[Tag],
@@ -407,6 +430,10 @@ def _build_item_detail(
         "tags": tags,
         "files": files,
         "images": images,
+        # Phase 15: local-modification tracking
+        "is_modified": _effective_is_modified(item),
+        "locally_modified_at": getattr(item, "locally_modified_at", None),
+        "modified_override": getattr(item, "modified_override", None),
     }
 
 
@@ -1012,6 +1039,62 @@ async def set_default_image(
         select(Image).where(Image.item_id == item.id).order_by(Image.order)
     )
     images = list(img_result2.scalars().all())
+
+    return _build_item_detail(item, tags, files, images)
+
+
+@router.patch("/{key}/modified-override", response_model=ItemDetail)
+async def patch_modified_override(
+    key: str,
+    body: PatchModifiedOverrideRequest,
+    _user: Annotated[User, Depends(get_current_user)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, Any]:
+    """Set or clear the manual modified-override for an item (Phase 15).
+
+    Body: { "override": "modified" | "original" | null }
+      "modified"  — permanently mark as modified (even if files match baseline)
+      "original"  — permanently mark as original (even if files diverge)
+      null        — return to auto mode (let the scan engine decide)
+
+    Requires authentication + CSRF.  Does not require source_url to be set, but
+    the flag is only meaningful (and surfaced in UI) when source_url is present.
+    """
+    result = await db.execute(
+        select(Item).options(selectinload(Item.creator)).where(Item.key == key)
+    )
+    item = result.scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found.")
+
+    override = body.override
+    if override is not None and override not in ("modified", "original"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="override must be 'modified', 'original', or null.",
+        )
+
+    item.modified_override = override
+    item.updated_at = datetime.now(UTC)
+    await db.flush()
+
+    # Write sidecar so the modified_state block reflects the new effective state
+    await _write_item_sidecar(db, item)
+
+    tag_result = await db.execute(
+        select(Tag).join(ItemTag, Tag.id == ItemTag.tag_id)
+        .where(ItemTag.item_id == item.id)
+    )
+    tags = list(tag_result.scalars().all())
+
+    file_result = await db.execute(select(File).where(File.item_id == item.id))
+    files = list(file_result.scalars().all())
+
+    img_result = await db.execute(
+        select(Image).where(Image.item_id == item.id).order_by(Image.order)
+    )
+    images = list(img_result.scalars().all())
 
     return _build_item_detail(item, tags, files, images)
 

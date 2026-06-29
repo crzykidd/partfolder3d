@@ -424,6 +424,10 @@ export interface ItemDetail {
   tags: TagOut[]
   files: FileOut[]
   images: ImageOut[]
+  // Phase 15: local-modification tracking
+  is_modified: boolean
+  locally_modified_at: string | null
+  modified_override: string | null  // 'modified' | 'original' | null
 }
 
 export interface PaginatedItems {
@@ -1156,6 +1160,8 @@ export interface PublicShareItem {
   source_site: string | null
   tags: string[]
   public_print_records: PublicPrintRecord[]
+  // Phase 15: local-modification tracking (baseline hashes NOT exposed)
+  is_modified: boolean
 }
 
 export interface PublicCatalogItem {
@@ -1186,6 +1192,22 @@ export const getPublicCatalog = (
     `/api/public/share/${token}/catalog${qs ? `?${qs}` : ''}`,
   )
 }
+
+// ---------------------------------------------------------------------------
+// Phase 15: local-modification tracking
+// ---------------------------------------------------------------------------
+
+/** Set or clear the manual modified-override for an item.
+ *  override: 'modified' | 'original' | null  (null = revert to auto)
+ */
+export const patchModifiedOverride = (
+  key: string,
+  override: 'modified' | 'original' | null,
+): Promise<ItemDetail> =>
+  apiFetch<ItemDetail>(`/api/items/${key}/modified-override`, {
+    method: 'PATCH',
+    body: JSON.stringify({ override }),
+  })
 
 /** Queue a public ZIP for a share token. */
 export const queuePublicZip = (token: string): Promise<BundleOut> =>

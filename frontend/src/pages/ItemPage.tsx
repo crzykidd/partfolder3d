@@ -1711,6 +1711,15 @@ export function ItemPage() {
     },
   })
 
+  // Phase 15: manual modified-override mutation
+  const overrideMutation = useMutation({
+    mutationFn: (override: 'modified' | 'original' | null) =>
+      api.patchModifiedOverride(key!, override),
+    onSuccess: (updatedItem) => {
+      queryClient.setQueryData(['item', key], updatedItem)
+    },
+  })
+
   if (isLoading) {
     return (
       <div style={{ padding: '96px 0', textAlign: 'center', fontSize: 13, color: 'var(--aurora-muted)' }}>
@@ -1921,6 +1930,107 @@ export function ItemPage() {
                   <span style={{ color: 'var(--aurora-muted)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>License</span>
                   <span style={{ color: 'var(--aurora-text-dim)' }}>{item.license}</span>
                 </>
+              )}
+            </div>
+          )}
+
+          {/* Phase 15: Local-modification badge (only when source_url present) */}
+          {item.source_url && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {/* Badge */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                {item.is_modified ? (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      background: 'rgba(220,38,38,0.10)',
+                      color: 'var(--aurora-danger)',
+                      border: '1px solid rgba(220,38,38,0.30)',
+                      borderRadius: 20,
+                      padding: '3px 10px',
+                    }}
+                  >
+                    ⚠ Modified from original
+                  </span>
+                ) : (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      background: 'rgba(22,163,74,0.10)',
+                      color: '#16a34a',
+                      border: '1px solid rgba(22,163,74,0.25)',
+                      borderRadius: 20,
+                      padding: '3px 10px',
+                    }}
+                    className="dark:text-green-300"
+                  >
+                    ✓ Matches original
+                  </span>
+                )}
+                {item.locally_modified_at && (
+                  <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>
+                    Last changed {formatDate(item.locally_modified_at)}
+                  </span>
+                )}
+                {item.modified_override && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      background: 'var(--aurora-glass)',
+                      border: '1px solid var(--aurora-glass-border)',
+                      borderRadius: 20,
+                      padding: '2px 8px',
+                      color: 'var(--aurora-muted)',
+                    }}
+                  >
+                    manual
+                  </span>
+                )}
+              </div>
+
+              {/* Override control (owner/admin only) */}
+              {isOwnerOrAdmin && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 10, color: 'var(--aurora-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Override:
+                  </span>
+                  {(['modified', 'original', null] as const).map((val) => {
+                    const label = val === null ? 'Auto' : val === 'modified' ? 'Modified' : 'Original'
+                    const isActive = item.modified_override === val
+                    return (
+                      <button
+                        key={String(val)}
+                        onClick={() => overrideMutation.mutate(val)}
+                        disabled={overrideMutation.isPending}
+                        style={{
+                          fontSize: 11,
+                          fontWeight: isActive ? 700 : 500,
+                          padding: '3px 10px',
+                          borderRadius: 20,
+                          border: isActive
+                            ? '1px solid var(--aurora-accent)'
+                            : '1px solid var(--aurora-glass-border)',
+                          background: isActive ? 'rgba(15,164,171,0.12)' : 'var(--aurora-glass)',
+                          color: isActive ? 'var(--aurora-accent)' : 'var(--aurora-text-dim)',
+                          cursor: overrideMutation.isPending ? 'not-allowed' : 'pointer',
+                          opacity: overrideMutation.isPending ? 0.6 : 1,
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
               )}
             </div>
           )}

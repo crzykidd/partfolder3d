@@ -508,6 +508,40 @@ export function PublicSharePage() {
       <PublicBar />
 
       <div style={{ maxWidth: 860, margin: '0 auto', padding: '28px 24px', display: 'flex', flexDirection: 'column', gap: 24 }}>
+        {/* Phase 15: Prominent modified-copy notice (only when modified + has source) */}
+        {data.is_modified && data.source_url && (
+          <div
+            role="alert"
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 12,
+              padding: '14px 18px',
+              borderRadius: 10,
+              background: 'rgba(220,38,38,0.08)',
+              border: '1.5px solid rgba(220,38,38,0.30)',
+            }}
+          >
+            <span style={{ fontSize: 18, lineHeight: 1, flexShrink: 0 }} aria-hidden="true">⚠</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--aurora-danger)' }}>
+                This is a modified copy — it differs from the original at{' '}
+                <a
+                  href={data.source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--aurora-accent)', textDecoration: 'underline', wordBreak: 'break-all' }}
+                >
+                  {data.source_site || data.source_url}
+                </a>
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>
+                The files shared here may have been altered from the version originally downloaded from that source.
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Title card */}
         <div style={{ ...CARD_STYLE, padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
           <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: 'var(--aurora-text)', letterSpacing: '-0.02em' }}>

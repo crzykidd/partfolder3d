@@ -958,6 +958,18 @@ async def commit_import_session(
             db.add(f)
         await db.flush()
 
+        # ---- 6b. Capture source_baseline (Phase 15) ----
+        # Only when the item has a source_url — this is the "original online version"
+        # reference.  Capture the sha256 of model files only (role=model).
+        if session.source_url:
+            from ..models.file import FileRole  # noqa: PLC0415
+            baseline: dict[str, str] = {}
+            for rec in records:
+                if rec.role == FileRole.model and rec.sha256:
+                    baseline[rec.relative_path] = rec.sha256
+            item.source_baseline = baseline if baseline else None
+        await db.flush()
+
         # ---- 7. Handle images ----
         img_order = 0
         for si in session.images:

@@ -621,6 +621,62 @@ async def _behavior_integrity(
 
 
 # ---------------------------------------------------------------------------
+# Behavior (e): Local-modification tracking (Phase 15)
+# ---------------------------------------------------------------------------
+
+async def _behavior_modified_tracking(
+    db: AsyncSession,
+    item: Any,
+    db_files: list[Any],
+    result: ReconcileResult,
+) -> None:
+    """Compare current model-file hashes to source_baseline; update locally_modified.
+
+    Best-effort: any exception is caught and recorded as an error string.
+    Skips items with null source_baseline (no import reference to compare against).
+    Only model-role files are compared (same set used to build the baseline at import).
+    """
+    from ..models.file import FileRole  # noqa: PLC0415
+
+    baseline = getattr(item, "source_baseline", None)
+    if baseline is None:
+        return  # no baseline → nothing to compare
+
+    if not isinstance(baseline, dict):
+        return  # malformed baseline — skip silently
+
+    # Build current path→sha256 map for model files only.
+    current: dict[str, str] = {}
+    for f in db_files:
+        if f.role == FileRole.model and f.sha256:
+            current[f.path] = f.sha256
+
+    # Compare sets
+    modified = current != baseline
+
+    prev_modified = bool(getattr(item, "locally_modified", False))
+
+    if modified == prev_modified:
+        return  # no change in state — nothing to update
+
+    item.locally_modified = modified
+    item.locally_modified_at = datetime.now(UTC)
+    await db.flush()
+
+    change_label = "diverged from baseline" if modified else "matches baseline again"
+    result.changes_applied.append({
+        "behavior": "modified_tracking",
+        "change_type": "locally_modified_updated",
+        "locally_modified": modified,
+        "note": f"Item {item.key!r} {change_label}",
+    })
+    log.info(
+        "_behavior_modified_tracking: item %s %s (baseline=%d files, current=%d files)",
+        item.key, change_label, len(baseline), len(current),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Public: reconcile a single item
 # ---------------------------------------------------------------------------
 
@@ -711,6 +767,16 @@ async def reconcile_one_item(
     except Exception as exc:
         log.exception("reconcile_one_item: integrity check failed for item %s", item.id)
         result.errors.append(f"integrity: {exc}")
+
+    # ---- Behavior (e): Local-modification tracking (Phase 15) ----
+    try:
+        # Reload db_files after file_changes may have added/removed rows
+        file_result = await db.execute(select(File).where(File.item_id == item.id))
+        current_db_files = list(file_result.scalars().all())
+        await _behavior_modified_tracking(db, item, current_db_files, result)
+    except Exception as exc:
+        log.exception("reconcile_one_item: modified_tracking failed for item %s", item.id)
+        result.errors.append(f"modified_tracking: {exc}")
 
     return result
 
