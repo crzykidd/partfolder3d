@@ -935,9 +935,11 @@ async def commit_import_session(
             if tag_name not in confirmed_tags:
                 confirmed_tags.append(tag_name)
 
-        # Attach via shared helper
+        # Attach via shared helper — any brand-new tag created here is marked
+        # pending so it enters the admin approval queue rather than becoming
+        # immediately canonical.  Tags that already exist keep their current status.
         if confirmed_tags:
-            await _attach_tags(db, item, confirmed_tags)
+            await _attach_tags(db, item, confirmed_tags, new_tag_status=TagStatus.pending)
 
         # ---- 6. Inventory files + create File rows ----
         sc_name = sidecar_name(title, key)

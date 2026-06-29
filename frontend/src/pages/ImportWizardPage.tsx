@@ -1112,132 +1112,183 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
         )}
       </div>
 
-      {/* AI tag suggestions card */}
-      {aiTagSuggestions && aiTagSuggestions.provider_available && !aiTagSuggestions.error && (
-        <div
-          style={{
-            background: 'var(--aurora-glass)',
-            border: '1px solid var(--aurora-glass-border)',
-            borderRadius: 10,
-            padding: '14px 16px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 12,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={SECTION_LABEL}>AI Tag Suggestions</span>
-            <button
-              type="button"
-              onClick={() => setAiTagSuggestions(null)}
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                fontSize: 11,
-                color: 'var(--aurora-muted)',
-                padding: 0,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                transition: 'color 0.15s',
-              }}
-              aria-label="Dismiss AI suggestions"
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--aurora-text)' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--aurora-muted)' }}
-            >
-              ✕ Dismiss
-            </button>
+      {/* AI tag suggestions card — click-to-add; chips disappear once added */}
+      {(() => {
+        if (!aiTagSuggestions || !aiTagSuggestions.provider_available || aiTagSuggestions.error) return null
+        const unconfirmedCanonical = aiTagSuggestions.canonical.filter((t) => !confirmed.includes(t))
+        const unconfirmedNew = aiTagSuggestions.new_suggestions.filter((t) => !confirmed.includes(t))
+        if (unconfirmedCanonical.length === 0 && unconfirmedNew.length === 0) return null
+
+        const addSuggestion = (tag: string) => setConfirmed((c) => addConfirmedTag(c, tag))
+        const addAllCanonical = () => {
+          setConfirmed((c) => unconfirmedCanonical.reduce((acc, t) => addConfirmedTag(acc, t), c))
+        }
+        const addAllNew = () => {
+          setConfirmed((c) => unconfirmedNew.reduce((acc, t) => addConfirmedTag(acc, t), c))
+        }
+
+        const chipBase: React.CSSProperties = {
+          display: 'inline-flex',
+          alignItems: 'center',
+          borderRadius: 20,
+          padding: '4px 12px',
+          fontSize: 11,
+          fontWeight: 600,
+          cursor: 'pointer',
+          transition: 'all 0.15s',
+          userSelect: 'none',
+        }
+
+        return (
+          <div
+            style={{
+              background: 'var(--aurora-glass)',
+              border: '1px solid var(--aurora-glass-border)',
+              borderRadius: 10,
+              padding: '14px 16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={SECTION_LABEL}>AI Tag Suggestions — click a chip to add</span>
+              <button
+                type="button"
+                onClick={() => setAiTagSuggestions(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  color: 'var(--aurora-muted)',
+                  padding: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  transition: 'color 0.15s',
+                }}
+                aria-label="Dismiss AI suggestions"
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--aurora-text)' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--aurora-muted)' }}
+              >
+                ✕ Dismiss
+              </button>
+            </div>
+
+            {unconfirmedCanonical.length > 0 && (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                  <p style={{ fontSize: 11, color: 'var(--aurora-muted)', margin: 0 }}>
+                    Matches your tags:
+                  </p>
+                  {unconfirmedCanonical.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={addAllCanonical}
+                      style={{
+                        ...AURORA_BTN_GHOST_SM,
+                        fontSize: 10,
+                        padding: '2px 10px',
+                      }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
+                    >
+                      Add all
+                    </button>
+                  )}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {unconfirmedCanonical.map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => addSuggestion(tag)}
+                      title={`Add tag "${tag}"`}
+                      style={{
+                        ...chipBase,
+                        background: 'rgba(15,164,171,0.08)',
+                        border: '1px solid var(--aurora-pill-border)',
+                        color: 'var(--aurora-accent)',
+                      }}
+                      onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.background = 'rgba(15,164,171,0.18)'
+                        ;(e.currentTarget as HTMLButtonElement).style.boxShadow = '0 0 0 2px var(--aurora-pill-border)'
+                      }}
+                      onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.background = 'rgba(15,164,171,0.08)'
+                        ;(e.currentTarget as HTMLButtonElement).style.boxShadow = 'none'
+                      }}
+                    >
+                      + #{tag}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {unconfirmedNew.length > 0 && (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                  <p style={{ fontSize: 11, color: 'var(--aurora-muted)', margin: 0 }}>
+                    New suggestions:
+                  </p>
+                  {unconfirmedNew.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={addAllNew}
+                      style={{
+                        ...AURORA_BTN_GHOST_SM,
+                        fontSize: 10,
+                        padding: '2px 10px',
+                      }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
+                    >
+                      Add all
+                    </button>
+                  )}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {unconfirmedNew.map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => addSuggestion(tag)}
+                      title={`Add tag "${tag}"`}
+                      style={{
+                        ...chipBase,
+                        background: 'var(--aurora-glass)',
+                        border: '1px dashed var(--aurora-glass-border)',
+                        color: 'var(--aurora-text-dim)',
+                      }}
+                      onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)'
+                        ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--aurora-muted)'
+                      }}
+                      onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)'
+                        ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--aurora-glass-border)'
+                      }}
+                    >
+                      + #{tag}
+                    </button>
+                  ))}
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--aurora-muted)', margin: '8px 0 0', lineHeight: 1.5 }}>
+                  Added now — your item gets tagged immediately. New tags are
+                  reviewed by an admin before joining the global tag cloud.
+                </p>
+              </div>
+            )}
           </div>
+        )
+      })()}
 
-          {aiTagSuggestions.canonical.length > 0 && (
-            <div>
-              <p style={{ fontSize: 11, color: 'var(--aurora-muted)', margin: '0 0 8px' }}>
-                Matching existing catalog tags:
-              </p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {aiTagSuggestions.canonical.map((tag) => (
-                  <span
-                    key={tag}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 5,
-                      background: confirmed.includes(tag) ? 'var(--aurora-pill)' : 'var(--aurora-glass)',
-                      border: `1px solid ${confirmed.includes(tag) ? 'var(--aurora-pill-border)' : 'var(--aurora-glass-border)'}`,
-                      borderRadius: 20,
-                      padding: '3px 10px',
-                      fontSize: 11,
-                      color: confirmed.includes(tag) ? 'var(--aurora-accent)' : 'var(--aurora-text-dim)',
-                    }}
-                  >
-                    #{tag}
-                    {!confirmed.includes(tag) && (
-                      <button
-                        type="button"
-                        onClick={() => setConfirmed((c) => addConfirmedTag(c, tag))}
-                        title={`Add tag "${tag}"`}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#16A34A', fontSize: 14, padding: 0, lineHeight: 1, display: 'flex' }}
-                      >
-                        +
-                      </button>
-                    )}
-                    {confirmed.includes(tag) && (
-                      <Check size={11} style={{ color: 'var(--aurora-accent)' }} />
-                    )}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {aiTagSuggestions.new_suggestions.length > 0 && (
-            <div>
-              <p style={{ fontSize: 11, color: 'var(--aurora-muted)', margin: '0 0 8px' }}>
-                New tags (will need admin approval after commit):
-              </p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {aiTagSuggestions.new_suggestions.map((tag) => (
-                  <span
-                    key={tag}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 5,
-                      background: confirmed.includes(tag) ? 'var(--aurora-pill)' : 'var(--aurora-glass)',
-                      border: `1px dashed ${confirmed.includes(tag) ? 'var(--aurora-pill-border)' : 'var(--aurora-glass-border)'}`,
-                      borderRadius: 20,
-                      padding: '3px 10px',
-                      fontSize: 11,
-                      color: confirmed.includes(tag) ? 'var(--aurora-accent)' : 'var(--aurora-muted)',
-                    }}
-                  >
-                    #{tag}
-                    {!confirmed.includes(tag) && (
-                      <button
-                        type="button"
-                        onClick={() => setConfirmed((c) => addConfirmedTag(c, tag))}
-                        title={`Add tag "${tag}"`}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#16A34A', fontSize: 14, padding: 0, lineHeight: 1, display: 'flex' }}
-                      >
-                        +
-                      </button>
-                    )}
-                    {confirmed.includes(tag) && (
-                      <Check size={11} style={{ color: 'var(--aurora-accent)' }} />
-                    )}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Pending / suggested tags */}
+      {/* Pending / suggested tags from session reconciliation */}
       {pending.length > 0 && (
         <div>
-          <span style={SECTION_LABEL}>Suggested tags (new — need approval after commit)</span>
+          <span style={SECTION_LABEL}>Suggested tags (not yet in the catalog — accept or skip)</span>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {pending.map((tag) => (
               <span

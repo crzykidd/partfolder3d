@@ -5,14 +5,18 @@
  *
  * Pending tags are created by the import wizard when an unknown tag string
  * is encountered during reconciliation.  Admins promote them to active/canonical
- * via POST /api/tags/{id}/approve so they become visible in the tag cloud.
+ * via POST /api/admin/tags/{id}/approve so they become visible in the tag cloud.
  *
  * Phase 8b addition: "AI-assist: possible duplicates (client-side matching)" section
  * at the top uses client-side Levenshtein fuzzy matching to surface pending tags that
  * look like near-duplicates of existing canonical tags. No AI endpoint is called here;
  * the matching is entirely client-side.
  *
- * Uses GET /api/tags?active_only=false and filters client-side for status=pending.
+ * Uses GET /api/admin/tags/pending for the approval table (pending-only, exact list),
+ * and GET /api/tags?active_only=false for the DuplicateDetectSection comparison.
+ *
+ * Tip: /admin/tags (Tag Administration) is the single-stop shop for pending approval
+ * + alias management + merge. This page is a focused approve/reject view.
  *
  * Styling: Aurora aesthetic (B3b restyle — visual pass, all behavior preserved).
  */
@@ -130,85 +134,144 @@ function DuplicateDetectSection({ allTags }: DuplicateDetectSectionProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Per-row approve + reject
+// ---------------------------------------------------------------------------
+
+function PendingTagRow({ tag }: { tag: api.TagAdminOut }) {
+  const queryClient = useQueryClient()
+  const [confirmReject, setConfirmReject] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const approveMutation = useMutation({
+    mutationFn: () => api.adminApproveTag(tag.id),
+    onSuccess: () => {
+      setError(null)
+      // Invalidate the exact pending-tags key used by this query, plus the
+      // general tags key so other pages (tag cloud, all-tags table) update too.
+      void queryClient.invalidateQueries({ queryKey: ['admin-tags-pending'] })
+      void queryClient.invalidateQueries({ queryKey: ['tags'] })
+    },
+    onError: (err) =>
+      setError(err instanceof Error ? err.message : 'Approve failed.'),
+  })
+
+  const rejectMutation = useMutation({
+    mutationFn: () => api.adminRejectTag(tag.id),
+    onSuccess: () => {
+      setError(null)
+      void queryClient.invalidateQueries({ queryKey: ['admin-tags-pending'] })
+    },
+    onError: (err) =>
+      setError(err instanceof Error ? err.message : 'Reject failed.'),
+  })
+
+  const busy = approveMutation.isPending || rejectMutation.isPending
+
+  return (
+    <TableRow>
+      <Td style={{ fontWeight: 600 }}>{tag.name}</Td>
+      <Td style={{ color: 'var(--aurora-muted)' }}>{tag.category ?? '—'}</Td>
+      <Td style={{ color: 'var(--aurora-muted)' }}>{tag.popularity_count}</Td>
+      <Td>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <Button
+            size="sm"
+            disabled={busy}
+            onClick={() => {
+              setError(null)
+              approveMutation.mutate()
+            }}
+            extraStyle={{ background: 'rgba(22,163,74,0.1)', border: '1px solid rgba(22,163,74,0.3)', color: '#16A34A' }}
+          >
+            {approveMutation.isPending ? 'Approving…' : 'Approve'}
+          </Button>
+
+          {confirmReject ? (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>Sure?</span>
+              <Button
+                variant="danger"
+                size="sm"
+                disabled={rejectMutation.isPending}
+                onClick={() => {
+                  setError(null)
+                  rejectMutation.mutate()
+                }}
+              >
+                {rejectMutation.isPending ? 'Rejecting…' : 'Confirm reject'}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setConfirmReject(false)}>
+                Cancel
+              </Button>
+            </span>
+          ) : (
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={approveMutation.isPending}
+              onClick={() => setConfirmReject(true)}
+            >
+              Reject
+            </Button>
+          )}
+        </div>
+        {error && (
+          <p style={{ marginTop: 4, fontSize: 11, color: 'var(--aurora-danger)', margin: '4px 0 0' }}>{error}</p>
+        )}
+      </Td>
+    </TableRow>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
 export function PendingTagsPage() {
-  const queryClient = useQueryClient()
-
-  const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['tags', 'pending'],
+  // All-tags query: used only by DuplicateDetectSection for fuzzy comparison.
+  // Key kept separate from the pending-only query to avoid cache confusion.
+  const { data: allTagsData } = useQuery({
+    queryKey: ['tags', 'all-for-dup-detect'],
     queryFn: () =>
       api.listAllTags({
         active_only: false,
-        per_page: 200,
+        per_page: 500,
       }),
   })
 
-  // Filter to pending tags only (status field not on TagSummary but we'll work
-  // with what the API returns — pending tags will have popularity_count 0 in
-  // most cases).  The backend returns all tags when active_only=false; we need
-  // to identify pending ones.  Since TagSummary lacks a status field, we rely
-  // on the backend's active_only=false returning *all* tags including pending
-  // ones, and we call approvePendingTag on any of them via their id.
-  // Note: the current TagSummary interface doesn't expose status.  The
-  // approval flow works regardless — the backend validates the tag is pending.
-  const pendingTags = data?.tags ?? []
-
-  const approveMutation = useMutation({
-    mutationFn: (id: number) => api.approvePendingTag(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['tags'] })
-    },
+  // Pending-only query: drives the approval table.
+  // Uses the exact same key and endpoint as TagAdminPage's PendingTagsSection
+  // so invalidation is consistent across both screens.
+  const { data: pendingTags = [], isLoading, isError, error } = useQuery({
+    queryKey: ['admin-tags-pending'],
+    queryFn: api.listAdminPendingTags,
   })
 
   return (
     <AdminPage>
       <PageHeader
         title="Pending Tags"
-        description="Tags added by the import wizard that haven't been approved yet. Approving a tag makes it canonical and visible in the tag cloud."
+        description="Tags added by the import wizard that haven't been approved yet. Approving a tag makes it canonical and visible in the tag cloud. For aliases, merges, and category edits, use Tag Administration (/admin/tags)."
         meta={isLoading ? undefined : `${pendingTags.length} tag${pendingTags.length === 1 ? '' : 's'}`}
       />
 
       {/* Phase 8b: AI-assist duplicate detection (client-side only) */}
-      {data && <DuplicateDetectSection allTags={data.tags} />}
+      {allTagsData && <DuplicateDetectSection allTags={allTagsData.tags} />}
 
       {isError && (
         <div style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>
-          {error instanceof Error ? error.message : 'Failed to load tags.'}
-        </div>
-      )}
-
-      {approveMutation.isError && (
-        <div style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>
-          {approveMutation.error instanceof Error
-            ? approveMutation.error.message
-            : 'Failed to approve tag.'}
+          {error instanceof Error ? error.message : 'Failed to load pending tags.'}
         </div>
       )}
 
       <DataTable
-        columns={['Tag name', 'Category', 'Uses', 'Action']}
+        columns={['Tag name', 'Category', 'Uses', 'Actions']}
         isLoading={isLoading}
         isEmpty={!isLoading && pendingTags.length === 0}
         emptyMessage="No pending tags."
       >
         {pendingTags.map((tag) => (
-          <TableRow key={tag.id}>
-            <Td style={{ fontWeight: 600 }}>{tag.name}</Td>
-            <Td style={{ color: 'var(--aurora-muted)' }}>{tag.category ?? '—'}</Td>
-            <Td style={{ color: 'var(--aurora-muted)' }}>{tag.popularity_count}</Td>
-            <Td>
-              <Button
-                size="sm"
-                disabled={approveMutation.isPending}
-                onClick={() => approveMutation.mutate(tag.id)}
-                extraStyle={{ background: 'rgba(22,163,74,0.1)', border: '1px solid rgba(22,163,74,0.3)', color: '#16A34A' }}
-              >
-                Approve
-              </Button>
-            </Td>
-          </TableRow>
+          <PendingTagRow key={tag.id} tag={tag} />
         ))}
       </DataTable>
     </AdminPage>

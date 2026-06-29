@@ -104,14 +104,25 @@ function PendingTagRow({ tag }: { tag: api.TagAdminOut }) {
 
   const approveMutation = useMutation({
     mutationFn: () => api.adminApproveTag(tag.id),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['admin-tags-pending'] }),
+    onSuccess: () => {
+      // Invalidate the pending list (removes the row), the all-tags table
+      // (approved tag now appears there), and the general tags key so the
+      // tag cloud and other consumers pick up the change.
+      void queryClient.invalidateQueries({ queryKey: ['admin-tags-pending'] })
+      void queryClient.invalidateQueries({ queryKey: ['admin-tags-all'] })
+      void queryClient.invalidateQueries({ queryKey: ['tags'] })
+    },
     onError: (err) =>
       setError(err instanceof Error ? err.message : 'Approve failed.'),
   })
 
   const rejectMutation = useMutation({
     mutationFn: () => api.adminRejectTag(tag.id),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['admin-tags-pending'] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin-tags-pending'] })
+      void queryClient.invalidateQueries({ queryKey: ['admin-tags-all'] })
+      void queryClient.invalidateQueries({ queryKey: ['tags'] })
+    },
     onError: (err) =>
       setError(err instanceof Error ? err.message : 'Reject failed.'),
   })
@@ -188,7 +199,15 @@ function PendingTagsSection() {
         </div>
         <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: 0 }}>
           Tags submitted by the import wizard that need approval before they
-          appear in the catalog tag cloud.
+          appear in the catalog tag cloud.{' '}
+          <a
+            href="/admin/pending-tags"
+            style={{ color: 'var(--aurora-accent)', textDecoration: 'none', fontSize: 12 }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none' }}
+          >
+            Focused pending-tags view →
+          </a>
         </p>
       </div>
 

@@ -432,6 +432,112 @@ async def test_approve_already_active_tag_idempotent(
 
 
 # ---------------------------------------------------------------------------
+# Import commit: new tags must be created as pending (fix regression)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_commit_new_tag_created_as_pending(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+) -> None:
+    """Committing an import session creates brand-new tags as status=pending.
+
+    An existing active tag must remain active (just linked, not downgraded).
+    This ensures new tags from the import wizard enter the admin approval queue
+    rather than becoming immediately canonical and bypassing review.
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models.import_session import ImportSession, ImportSessionStatus  # noqa: PLC0415
+    from app.models.tag import Tag, TagStatus  # noqa: PLC0415
+
+    csrf = await _setup_and_login(client, tmp_path)
+
+    # Create a library with a temp mount path so the commit can write files.
+    lib_path = tmp_path / "lib"
+    lib_path.mkdir()
+    lib_resp = await client.post(
+        "/api/libraries",
+        json={"name": "Commit Test Lib", "mount_path": str(lib_path)},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert lib_resp.status_code == 201
+    library_id = lib_resp.json()["id"]
+
+    # Pre-create an active canonical tag (simulates a tag already in the catalog).
+    existing_tag = Tag(name="existing-canonical", status=TagStatus.active)
+    db_session.add(existing_tag)
+    await db_session.flush()
+
+    # Create an upload import session (starts as draft; no files needed).
+    create_resp = await client.post(
+        "/api/import-sessions",
+        json={"source_type": "upload"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert create_resp.status_code == 201
+    session_id = create_resp.json()["id"]
+
+    # Directly set the session to pending_wizard with a hand-crafted tag_state
+    # that includes a brand-new tag name not yet in the database.  This bypasses
+    # reconcile_tags so we can inject an unknown confirmed tag and verify that
+    # the commit path creates it as pending rather than active.
+    res = await db_session.execute(
+        select(ImportSession).where(ImportSession.id == session_id)
+    )
+    sess = res.scalar_one()
+    sess.status = ImportSessionStatus.pending_wizard
+    sess.confirmed_title = "Tag Status Test Item"
+    sess.library_id = library_id
+    sess.tag_state = {
+        "confirmed": ["existing-canonical", "brand-new-tag"],
+        "pending": [],
+    }
+    await db_session.flush()
+
+    # Commit the session.
+    commit_resp = await client.post(
+        f"/api/import-sessions/{session_id}/commit",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert commit_resp.status_code == 200, commit_resp.text
+
+    # Existing active tag stays active — commit must not downgrade it.
+    res = await db_session.execute(
+        select(Tag).where(Tag.name == "existing-canonical")
+    )
+    tag_existing = res.scalar_one_or_none()
+    assert tag_existing is not None
+    assert tag_existing.status == TagStatus.active, (
+        "An existing active tag must remain active after import commit"
+    )
+
+    # Brand-new tag must be created as pending (not active) so it enters the
+    # admin approval queue.
+    res = await db_session.execute(
+        select(Tag).where(Tag.name == "brand-new-tag")
+    )
+    tag_new = res.scalar_one_or_none()
+    assert tag_new is not None, "New tag should be created at commit time"
+    assert tag_new.status == TagStatus.pending, (
+        "Tags first seen during an import commit must be status=pending "
+        "so they appear in the admin approval queue before becoming canonical"
+    )
+
+    # Verify the new pending tag appears via the admin pending-tags endpoint.
+    pending_resp = await client.get("/api/admin/tags/pending")
+    assert pending_resp.status_code == 200
+    pending_names = [t["name"] for t in pending_resp.json()]
+    assert "brand-new-tag" in pending_names, (
+        f"brand-new-tag not in pending list; got: {pending_names}"
+    )
+    # Existing canonical tag must NOT be in the pending list.
+    assert "existing-canonical" not in pending_names
+
+
+# ---------------------------------------------------------------------------
 # URL scraper unit tests (no network; fixture-based)
 # ---------------------------------------------------------------------------
 

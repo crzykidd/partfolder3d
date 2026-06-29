@@ -54,7 +54,7 @@ from ..models.file import File
 from ..models.image import Image, ImageSource
 from ..models.item import Item
 from ..models.library import Library
-from ..models.tag import ItemTag, Tag
+from ..models.tag import ItemTag, Tag, TagStatus
 from ..models.user import User
 from ..storage.inventory import FileRecord, inventory_item
 from ..storage.journal import MoveError, atomic_rename, move_to_trash
@@ -196,19 +196,40 @@ class PaginatedItems(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-async def _get_or_create_tag(db: AsyncSession, name: str) -> Tag:
-    """Get a tag by name or create it if absent."""
+async def _get_or_create_tag(
+    db: AsyncSession,
+    name: str,
+    status: TagStatus = TagStatus.active,
+) -> Tag:
+    """Get a tag by name or create it if absent.
+
+    The *status* parameter controls the status assigned to **newly-created** tags
+    only — it has no effect when the tag already exists.  Callers on the import
+    path pass ``status=TagStatus.pending`` so freshly-minted tags enter the admin
+    approval queue instead of becoming immediately canonical.
+    """
     result = await db.execute(select(Tag).where(Tag.name == name))
     tag = result.scalar_one_or_none()
     if tag is None:
-        tag = Tag(name=name)
+        tag = Tag(name=name, status=status)
         db.add(tag)
         await db.flush()
     return tag
 
 
-async def _attach_tags(db: AsyncSession, item: Item, tag_names: list[str]) -> None:
-    """Replace the item's tags with the given list."""
+async def _attach_tags(
+    db: AsyncSession,
+    item: Item,
+    tag_names: list[str],
+    new_tag_status: TagStatus = TagStatus.active,
+) -> None:
+    """Replace the item's tags with the given list.
+
+    *new_tag_status* is forwarded to :func:`_get_or_create_tag` and only
+    affects tags that do not yet exist in the database.  Import-path callers
+    pass ``new_tag_status=TagStatus.pending`` so any brand-new tags are queued
+    for admin approval rather than becoming active immediately.
+    """
     # Remove existing
     await db.execute(
         ItemTag.__table__.delete().where(ItemTag.item_id == item.id)  # type: ignore[attr-defined]
@@ -217,7 +238,7 @@ async def _attach_tags(db: AsyncSession, item: Item, tag_names: list[str]) -> No
         name = name.strip()
         if not name:
             continue
-        tag = await _get_or_create_tag(db, name)
+        tag = await _get_or_create_tag(db, name, status=new_tag_status)
         db.add(ItemTag(item_id=item.id, tag_id=tag.id))
     await db.flush()
 

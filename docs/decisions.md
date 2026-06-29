@@ -2,6 +2,59 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-28 — Tag approval refresh fix; AI suggestion click-to-add UX; new tags created as pending
+
+### Tag approval: two-screen approach (option a — keep both, make identical)
+
+Two screens can approve pending tags: `/admin/pending-tags` (PendingTagsPage) and the
+pending section of `/admin/tags` (TagAdminPage). The decision is to **keep both** (option a
+from the prompt) and make their behavior and invalidation identical:
+
+- Both screens now use `listAdminPendingTags()` via `GET /api/admin/tags/pending` (the
+  admin endpoint that filters to `status=pending` only).
+- Both use `queryKey: ['admin-tags-pending']` so cache invalidation is consistent.
+- Both mutations (`adminApproveTag` / `adminRejectTag`) invalidate `['admin-tags-pending']`,
+  `['admin-tags-all']`, and `['tags']` on success.
+- PendingTagsPage previously used `listAllTags({ active_only: false })` with key
+  `['tags', 'pending']` and invalidated `['tags']` — this meant the approved tag was never
+  removed from the list (the endpoint returns all tags regardless of status). Fixed by
+  switching to the pending-only endpoint.
+- Cross-link from TagAdminPage's pending section → PendingTagsPage for the focused view.
+
+The existing DuplicateDetectSection in PendingTagsPage is unchanged and keeps a separate
+all-tags query (`['tags', 'all-for-dup-detect']`) for its fuzzy comparison.
+
+### Import commit: new tags created as pending
+
+Root cause: `_get_or_create_tag` in `routers/items.py` defaulted to `status=active` for
+any newly-created tag. When `commit_import_session` called `_attach_tags(db, item, confirmed_tags)`,
+any confirmed tag not yet in the database was created as `active`, bypassing the approval queue.
+
+Fix: added a `status: TagStatus = TagStatus.active` parameter to `_get_or_create_tag` and a
+corresponding `new_tag_status: TagStatus = TagStatus.active` parameter to `_attach_tags`.
+The commit path in `import_sessions.py` now calls `_attach_tags(..., new_tag_status=TagStatus.pending)`.
+Tags that already exist keep their current status unchanged; only brand-new tags created at
+commit time become pending. Existing callers (`create_item`, `update_item`) are unaffected
+since their defaults remain `active`.
+
+### AI tag suggestion card: click-to-add with calm messaging
+
+Previous UX: AI suggestions were presented as passive chips with a small `+` button; added
+chips stayed visible in the suggestion box (only showing a checkmark); wording read "will need
+admin approval after commit" which sounded like a blocker.
+
+New UX in `ImportWizardPage.tsx` (Tags step):
+- Suggestions are shown as interactive chips: clicking the entire chip adds it to Confirmed
+  Tags AND removes it from the suggestion box (filtering by `!confirmed.includes(tag)`).
+- Two labeled groups: **Matches your tags** (canonical, solid border) and
+  **New suggestions** (dashed border).
+- "Add all" button appears when each group has more than one chip.
+- Calm note under "New suggestions": "Added now — your item gets tagged immediately. New tags
+  are reviewed by an admin before joining the global tag cloud." This is accurate: the item
+  gets the tag immediately (via `item_tags` link); only the Tag row is pending for the cloud.
+- The "Suggested tags" section below (from session `tag_state.pending`) was relabeled from
+  "need approval after commit" to "not yet in the catalog — accept or skip" for consistency.
+
 ## 2026-06-28 — Starter tag set + idempotent seed; cheap AI status probe; auto-suggest-once
 
 ### Starter tag set and idempotent seed
