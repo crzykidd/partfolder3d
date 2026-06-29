@@ -2,6 +2,56 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-28 — Phase 14: render Image reconcile, enum migration, upload storage, sidecar exclusion
+
+### Render → Image reconcile approach
+
+`render_item` (arq worker) now calls `_reconcile_render_images` after rendering. The
+function is a **best-effort step** wrapped in try/except; a DB hiccup does not fail
+the job. It:
+- Scans `renders/*.png` on disk (the SHA-keyed cache) to build the current set
+- Deletes `source=render` Image rows whose PNG no longer exists (and removes the orphaned
+  PNG if present)
+- Creates Image rows for new PNGs (no duplicates: match by `(item_id, source=render, path)`)
+- Flushes before setting the default
+
+### Default-image rule for renders
+
+After reconcile: if the item has **no** `is_default` image at all, the first render row
+(lowest order) is promoted to default, so the catalog grid shows a thumbnail. If a
+curated (`scraped`/`uploaded`) image is already default, it is left untouched. Render
+images sort after curated images (order > max curated order).
+
+### `_reconcile_render_images` optional session parameter
+
+The function accepts `_db: AsyncSession | None`. In production (`_db=None`) it opens and
+commits its own `SessionLocal`; when an AsyncSession is injected (tests) it runs within
+that session and flushes without committing. This lets unit tests call the function via
+the test session's rollback-isolated transaction without a FK violation.
+
+### Sidecar exclusion of render images
+
+`_build_sidecar_data` (items router) already iterated `images_list` to build the sidecar.
+It now filters with `if img.source != ImageSource.render`. Render rows are DB-only —
+they are derived/regenerable from the on-disk PNGs; excluding them keeps the sidecar
+portable and curated.
+
+### Enum migration 0014: non-transactional ADD VALUE + no-op downgrade
+
+`ALTER TYPE imagesource ADD VALUE 'render'` cannot run inside a Postgres transaction.
+Migration 0014 uses `op.get_context().autocommit_block()` to issue the DDL outside any
+surrounding transaction. The `DO $$ … END $$` block makes the upgrade idempotent
+(checks `pg_enum` before adding). Downgrade is a documented no-op — Postgres cannot
+remove enum values without recreating the type, and the extra value is harmless when
+unused.
+
+### Image upload storage location
+
+Uploaded images are stored in `<item_dir>/images/<random_hex>.<ext>` (16-byte secrets
+token, original extension). This mirrors where scraped images live. Path traversal is
+prevented by validating content-type against an allowlist and generating the filename
+server-side (never using the original upload filename in the path).
+
 ## 2026-06-28 — 3MF rendering needs lxml (trimesh optional extra)
 
 Once the render backend worked, **3MF** renders failed with "No module named 'lxml'". trimesh's

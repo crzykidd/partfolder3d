@@ -16,7 +16,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Check, Copy, Download, X as XIcon } from 'lucide-react'
+import { Check, Copy, Download, Trash2, Upload, X as XIcon } from 'lucide-react'
 
 import * as api from '@/lib/api'
 import { mapBundleStatus, rewritePath, shouldContinuePolling, type ZipPollStatus } from '@/lib/catalog-utils'
@@ -131,12 +131,27 @@ interface ImageCarouselProps {
   images: api.ImageOut[]
   itemKey: string
   onSetDefault: (imageId: number) => void
+  onDeleteImage: (imageId: number) => void
   isSettingDefault: boolean
+  isDeletingImage: boolean
+  isOwner: boolean
 }
 
-function ImageCarousel({ images, itemKey, onSetDefault, isSettingDefault }: ImageCarouselProps) {
+function ImageCarousel({
+  images,
+  itemKey,
+  onSetDefault,
+  onDeleteImage,
+  isSettingDefault,
+  isDeletingImage,
+  isOwner,
+}: ImageCarouselProps) {
   const [activeIdx, setActiveIdx] = useState(0)
   const [lightbox, setLightbox] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null)
+
+  // Keep activeIdx in bounds when images list changes
+  const clampedIdx = Math.min(activeIdx, Math.max(0, images.length - 1))
 
   if (!images.length) {
     return (
@@ -154,7 +169,12 @@ function ImageCarousel({ images, itemKey, onSetDefault, isSettingDefault }: Imag
     )
   }
 
-  const active = images[activeIdx]
+  const active = images[clampedIdx]
+
+  function handleDeleteConfirm(imageId: number) {
+    setConfirmDelete(null)
+    onDeleteImage(imageId)
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -173,45 +193,126 @@ function ImageCarousel({ images, itemKey, onSetDefault, isSettingDefault }: Imag
       >
         <img
           src={`/api/items/${itemKey}/files/${active.path}`}
-          alt={`Image ${activeIdx + 1}`}
+          alt={`Image ${clampedIdx + 1}`}
           style={{ maxHeight: 320, maxWidth: '100%', objectFit: 'contain', cursor: 'zoom-in' }}
           onClick={() => setLightbox(true)}
           loading="lazy"
         />
-        {active.is_default && (
-          <span
-            style={{
-              position: 'absolute',
-              top: 8,
-              left: 8,
-              background: 'var(--aurora-accent)',
-              color: 'var(--aurora-accent-fg)',
-              borderRadius: 20,
-              fontSize: 10,
-              fontWeight: 700,
-              padding: '3px 8px',
-              boxShadow: '0 0 8px var(--aurora-accent-glow)',
-            }}
-          >
-            Default
-          </span>
-        )}
-        {!active.is_default && (
-          <button
-            onClick={() => onSetDefault(active.id)}
-            disabled={isSettingDefault}
+
+        {/* Top-left: Default badge + Rendered badge */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 8,
+            left: 8,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+          }}
+        >
+          {active.is_default && (
+            <span
+              style={{
+                background: 'var(--aurora-accent)',
+                color: 'var(--aurora-accent-fg)',
+                borderRadius: 20,
+                fontSize: 10,
+                fontWeight: 700,
+                padding: '3px 8px',
+                boxShadow: '0 0 8px var(--aurora-accent-glow)',
+              }}
+            >
+              Default
+            </span>
+          )}
+          {active.source === 'render' && (
+            <span
+              style={{
+                background: 'rgba(139,92,246,0.20)',
+                color: '#A78BFA',
+                border: '1px solid rgba(139,92,246,0.4)',
+                borderRadius: 20,
+                fontSize: 10,
+                fontWeight: 700,
+                padding: '3px 8px',
+              }}
+            >
+              Rendered
+            </span>
+          )}
+        </div>
+
+        {/* Top-right: Set-default + Delete buttons (owner only) */}
+        {isOwner && (
+          <div
             style={{
               position: 'absolute',
               top: 8,
               right: 8,
-              ...AURORA_BTN_GHOST,
-              fontSize: 11,
-              padding: '3px 9px',
-              opacity: isSettingDefault ? 0.5 : 1,
+              display: 'flex',
+              gap: 4,
+              flexDirection: 'column',
+              alignItems: 'flex-end',
             }}
           >
-            Set as default
-          </button>
+            {!active.is_default && (
+              <button
+                onClick={() => onSetDefault(active.id)}
+                disabled={isSettingDefault}
+                style={{
+                  ...AURORA_BTN_GHOST,
+                  fontSize: 11,
+                  padding: '3px 9px',
+                  opacity: isSettingDefault ? 0.5 : 1,
+                }}
+              >
+                Set as default
+              </button>
+            )}
+            {confirmDelete === active.id ? (
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button
+                  onClick={() => handleDeleteConfirm(active.id)}
+                  disabled={isDeletingImage}
+                  style={{
+                    background: '#EF4444',
+                    border: 'none',
+                    borderRadius: 20,
+                    color: '#FFF',
+                    fontSize: 11,
+                    padding: '3px 9px',
+                    cursor: 'pointer',
+                    opacity: isDeletingImage ? 0.5 : 1,
+                  }}
+                >
+                  {isDeletingImage ? '…' : 'Delete?'}
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(null)}
+                  style={{ ...AURORA_BTN_GHOST, fontSize: 11, padding: '3px 9px' }}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmDelete(active.id)}
+                disabled={isDeletingImage}
+                style={{
+                  ...AURORA_BTN_GHOST,
+                  fontSize: 11,
+                  padding: '3px 9px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  opacity: isDeletingImage ? 0.5 : 1,
+                }}
+                title="Delete image"
+              >
+                <Trash2 size={11} />
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -228,11 +329,12 @@ function ImageCarousel({ images, itemKey, onSetDefault, isSettingDefault }: Imag
                 width: 56,
                 borderRadius: 8,
                 overflow: 'hidden',
-                border: `2px solid ${idx === activeIdx ? 'var(--aurora-accent)' : 'var(--aurora-glass-border)'}`,
-                boxShadow: idx === activeIdx ? 'var(--aurora-glow)' : 'none',
+                border: `2px solid ${idx === clampedIdx ? 'var(--aurora-accent)' : 'var(--aurora-glass-border)'}`,
+                boxShadow: idx === clampedIdx ? 'var(--aurora-glow)' : 'none',
                 cursor: 'pointer',
                 padding: 0,
                 transition: 'all 0.15s',
+                position: 'relative',
               }}
             >
               <img
@@ -241,6 +343,24 @@ function ImageCarousel({ images, itemKey, onSetDefault, isSettingDefault }: Imag
                 style={{ height: '100%', width: '100%', objectFit: 'cover', display: 'block' }}
                 loading="lazy"
               />
+              {img.source === 'render' && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    bottom: 2,
+                    right: 2,
+                    background: 'rgba(139,92,246,0.85)',
+                    color: '#fff',
+                    borderRadius: 4,
+                    fontSize: 8,
+                    fontWeight: 700,
+                    padding: '1px 3px',
+                    lineHeight: 1.2,
+                  }}
+                >
+                  R
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -265,7 +385,7 @@ function ImageCarousel({ images, itemKey, onSetDefault, isSettingDefault }: Imag
         >
           <img
             src={`/api/items/${itemKey}/files/${active.path}`}
-            alt={`Full size ${activeIdx + 1}`}
+            alt={`Full size ${clampedIdx + 1}`}
             style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }}
             onClick={(e) => e.stopPropagation()}
           />
@@ -1557,6 +1677,8 @@ export function ItemPage() {
   const queryClient = useQueryClient()
   const { user } = useAuth()
   const isOwnerOrAdmin = !!user  // all authenticated users can manage their items
+  const uploadInputRef = useRef<HTMLInputElement | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
 
   const { data: item, isLoading, isError } = useQuery({
     queryKey: ['item', key],
@@ -1568,6 +1690,24 @@ export function ItemPage() {
     mutationFn: (imageId: number) => api.setDefaultImage(key!, imageId),
     onSuccess: (updatedItem) => {
       queryClient.setQueryData(['item', key], updatedItem)
+    },
+  })
+
+  const uploadImageMutation = useMutation({
+    mutationFn: (file: File) => api.uploadItemImage(key!, file),
+    onSuccess: () => {
+      setUploadError(null)
+      void queryClient.invalidateQueries({ queryKey: ['item', key] })
+    },
+    onError: (e) => {
+      setUploadError(e instanceof Error ? e.message : 'Upload failed.')
+    },
+  })
+
+  const deleteImageMutation = useMutation({
+    mutationFn: (imageId: number) => api.deleteItemImage(key!, imageId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['item', key] })
     },
   })
 
@@ -1638,13 +1778,52 @@ export function ItemPage() {
       {/* Hero: images + metadata side by side */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         {/* Left: images */}
-        <div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <ImageCarousel
             images={sortedImages}
             itemKey={item.key}
             onSetDefault={(imageId) => setDefaultMutation.mutate(imageId)}
+            onDeleteImage={(imageId) => deleteImageMutation.mutate(imageId)}
             isSettingDefault={setDefaultMutation.isPending}
+            isDeletingImage={deleteImageMutation.isPending}
+            isOwner={isOwnerOrAdmin}
           />
+          {/* Upload control (authenticated users only) */}
+          {isOwnerOrAdmin && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <button
+                onClick={() => uploadInputRef.current?.click()}
+                disabled={uploadImageMutation.isPending}
+                style={{
+                  ...AURORA_BTN_GHOST,
+                  fontSize: 12,
+                  padding: '6px 14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  opacity: uploadImageMutation.isPending ? 0.5 : 1,
+                  alignSelf: 'flex-start',
+                }}
+              >
+                <Upload size={13} />
+                {uploadImageMutation.isPending ? 'Uploading…' : 'Upload image'}
+              </button>
+              <input
+                ref={uploadInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) uploadImageMutation.mutate(f)
+                  e.target.value = ''
+                }}
+              />
+              {uploadError && (
+                <span style={{ fontSize: 11, color: 'var(--aurora-danger)' }}>{uploadError}</span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right: metadata card */}

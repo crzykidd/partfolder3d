@@ -562,6 +562,30 @@ export const setDefaultImage = (key: string, imageId: number): Promise<ItemDetai
     body: JSON.stringify({ image_id: imageId }),
   })
 
+export const uploadItemImage = (key: string, file: File): Promise<ImageOut> => {
+  const form = new FormData()
+  form.append('file', file)
+  return apiFetchForm<ImageOut>(`/api/items/${key}/images`, form)
+}
+
+export const deleteItemImage = (key: string, imageId: number): Promise<void> => {
+  const headers = new Headers()
+  const csrf = getCsrfToken()
+  if (csrf) headers.set('X-CSRF-Token', csrf)
+  return fetch(`/api/items/${key}/images/${imageId}`, { method: 'DELETE', headers })
+    .then(async (res) => {
+      if (!res.ok) {
+        let detail: unknown
+        try { detail = await res.json() } catch { detail = res.statusText }
+        const message =
+          typeof detail === 'object' && detail !== null && 'detail' in detail
+            ? String((detail as Record<string, unknown>)['detail'])
+            : res.statusText
+        throw new ApiError(res.status, message, detail)
+      }
+    })
+}
+
 export const listTags = (params: {
   q?: string
   category?: string

@@ -277,6 +277,156 @@ async def build_zip_bundle(ctx: dict, bundle_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase 4 helpers
+# ---------------------------------------------------------------------------
+
+
+async def _reconcile_render_images(
+    item_id: int,
+    item_dir: Path,
+    renders_dir: Path,
+    _db: "object | None" = None,
+) -> None:
+    """Reconcile source=render Image rows to exactly match renders/<sha>.png files.
+
+    Rules:
+    - Create Image rows for render PNGs not yet tracked.
+    - Delete Image rows whose render PNG no longer exists on disk.
+    - No duplicates: match by (item_id, source=render, path).
+    - Default image: if the item has NO is_default image, set one render row as
+      default so the catalog thumbnail appears.  If a curated image is already
+      default, leave it.
+    - Render images sort after curated images (order > max curated order).
+    - Excludes render Images from the sidecar (handled in items.py).
+    - Best-effort: caller catches and logs any exception.
+
+    Args:
+        _db: Optional AsyncSession.  When None (production), opens and commits its
+             own SessionLocal.  When provided (tests), uses that session and flushes
+             without committing (caller manages the transaction).
+    """
+    import sqlalchemy as sa  # noqa: PLC0415
+
+    from app.db import SessionLocal  # noqa: PLC0415
+    from app.models.image import Image, ImageSource  # noqa: PLC0415
+
+    async def _do_reconcile(db: object) -> None:  # type: ignore[type-arg]
+        """Inner function that operates on a given session."""
+        renders_dir_path = renders_dir
+        if not renders_dir_path.exists():
+            # No renders dir → clean up stale DB rows
+            stale = await db.execute(  # type: ignore[union-attr]
+                sa.select(Image).where(
+                    Image.item_id == item_id,
+                    Image.source == ImageSource.render,
+                )
+            )
+            for row in stale.scalars().all():
+                await db.delete(row)  # type: ignore[union-attr]
+            return
+
+        # Collect current render PNGs
+        current_render_paths: set[str] = set()
+        for p in renders_dir_path.iterdir():
+            if p.is_file() and p.suffix.lower() == ".png":
+                current_render_paths.add(str(p.relative_to(item_dir)))
+
+        # Load existing render Image rows
+        existing_result = await db.execute(  # type: ignore[union-attr]
+            sa.select(Image).where(
+                Image.item_id == item_id,
+                Image.source == ImageSource.render,
+            )
+        )
+        existing_render_rows: list[Image] = list(existing_result.scalars().all())
+        existing_by_path: dict[str, Image] = {row.path: row for row in existing_render_rows}
+
+        # Delete stale rows (and their files)
+        for path, row in list(existing_by_path.items()):
+            if path not in current_render_paths:
+                try:
+                    stale_file = item_dir / path
+                    if stale_file.exists():
+                        stale_file.unlink()
+                except OSError as exc:
+                    log.warning(
+                        "_reconcile_render_images: could not remove %s: %s", path, exc
+                    )
+                await db.delete(row)  # type: ignore[union-attr]
+                del existing_by_path[path]
+
+        # Compute starting order for new render rows
+        curated_order_result = await db.execute(  # type: ignore[union-attr]
+            sa.select(sa.func.max(Image.order)).where(
+                Image.item_id == item_id,
+                Image.source.in_([ImageSource.scraped, ImageSource.uploaded]),
+            )
+        )
+        max_curated_order = curated_order_result.scalar_one_or_none() or 0
+
+        render_order_result = await db.execute(  # type: ignore[union-attr]
+            sa.select(sa.func.max(Image.order)).where(
+                Image.item_id == item_id,
+                Image.source == ImageSource.render,
+            )
+        )
+        max_render_order = render_order_result.scalar_one_or_none() or 0
+        next_order = max(max_curated_order, max_render_order) + 1
+
+        # Create rows for new render PNGs
+        for rp in sorted(current_render_paths):
+            if rp not in existing_by_path:
+                new_img = Image(
+                    item_id=item_id,
+                    path=rp,
+                    source=ImageSource.render,
+                    is_default=False,
+                    order=next_order,
+                )
+                db.add(new_img)  # type: ignore[union-attr]
+                next_order += 1
+
+        await db.flush()  # type: ignore[union-attr]
+
+        # Set a render as default if the item has NO is_default image
+        default_result = await db.execute(  # type: ignore[union-attr]
+            sa.select(Image).where(
+                Image.item_id == item_id,
+                Image.is_default.is_(True),
+            ).limit(1)
+        )
+        has_default = default_result.scalar_one_or_none() is not None
+        if not has_default and current_render_paths:
+            first_render_result = await db.execute(  # type: ignore[union-attr]
+                sa.select(Image).where(
+                    Image.item_id == item_id,
+                    Image.source == ImageSource.render,
+                ).order_by(Image.order).limit(1)
+            )
+            first_render = first_render_result.scalar_one_or_none()
+            if first_render is not None:
+                first_render.is_default = True
+                log.info(
+                    "_reconcile_render_images: set render %s as default for item %s",
+                    first_render.path, item_id,
+                )
+
+        log.info(
+            "_reconcile_render_images: item=%s current_renders=%d",
+            item_id, len(current_render_paths),
+        )
+
+    if _db is not None:
+        # Test/caller-supplied session: run core logic without commit
+        await _do_reconcile(_db)
+    else:
+        # Production: open a fresh session, commit on success
+        async with SessionLocal() as db:
+            await _do_reconcile(db)
+            await db.commit()
+
+
+# ---------------------------------------------------------------------------
 # Phase 4 tasks
 # ---------------------------------------------------------------------------
 
@@ -407,6 +557,15 @@ async def render_item(ctx: dict, item_id: int) -> None:
             async with SessionLocal() as db:
                 await update_job_progress(db, job_id, pct)
                 await db.commit()
+
+        # Reconcile render Image rows to match current renders/*.png files.
+        # This is best-effort: a DB hiccup must not crash the worker.
+        try:
+            await _reconcile_render_images(item_id, item_dir, renders_dir)
+        except Exception:
+            log.exception(
+                "render_item: reconcile_render_images failed for item %s (non-fatal)", item_id
+            )
 
         # Final job status
         log_lines = []

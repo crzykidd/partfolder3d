@@ -17,6 +17,7 @@ from .base import Base
 class ImageSource(str, enum.Enum):
     scraped = "scraped"
     uploaded = "uploaded"
+    render = "render"
 
 
 class Image(Base):
