@@ -509,6 +509,8 @@ export interface TagSummary {
   name: string
   category: string | null
   popularity_count: number
+  /** Real item count from COUNT(item_tags.item_id) join — accurate even if popularity_count drifted. */
+  item_count: number
 }
 
 export interface PaginatedTags {
@@ -671,12 +673,14 @@ export const listTags = (params: {
   category?: string
   page?: number
   per_page?: number
+  in_use_only?: boolean
 } = {}): Promise<PaginatedTags> => {
   const sp = new URLSearchParams()
   if (params.q) sp.set('q', params.q)
   if (params.category) sp.set('category', params.category)
   if (params.page != null) sp.set('page', String(params.page))
   if (params.per_page != null) sp.set('per_page', String(params.per_page))
+  if (params.in_use_only) sp.set('in_use_only', 'true')
   const qs = sp.toString()
   return apiFetch<PaginatedTags>(`/api/tags${qs ? `?${qs}` : ''}`)
 }
@@ -1808,9 +1812,21 @@ export interface LoadDefaultTagsResponse {
   skipped: number
 }
 
+export interface DeleteTagResponse {
+  deleted: boolean
+  items_untagged: number
+}
+
 /** Seed the catalog with the curated starter tag vocabulary (admin, idempotent). */
 export const loadDefaultTags = (): Promise<LoadDefaultTagsResponse> =>
   apiFetch<LoadDefaultTagsResponse>('/api/tags/load-defaults', { method: 'POST' })
+
+/**
+ * Delete a tag regardless of status.  Removes all ItemTag links (untags items —
+ * never deletes items) and all aliases, then deletes the tag.
+ */
+export const deleteTag = (id: number): Promise<DeleteTagResponse> =>
+  apiFetch<DeleteTagResponse>(`/api/admin/tags/${id}`, { method: 'DELETE' })
 
 // ---------------------------------------------------------------------------
 // Phase 9 — Admin site capabilities (admin-only; distinct from Phase 5 non-admin)

@@ -24,7 +24,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import csrf_protect, get_db, require_admin
-from ..models.tag import Tag, TagStatus
+from ..models.tag import ItemTag, Tag, TagStatus
 from ..models.user import User
 
 log = logging.getLogger(__name__)
@@ -42,6 +42,10 @@ class TagSummary(BaseModel):
     name: str
     category: str | None
     popularity_count: int
+    # Real usage count from COUNT(item_tags.item_id) — authoritative even if
+    # popularity_count has drifted.  Added for the tag cloud (in_use filter +
+    # display).  Defaults to 0 so existing callers that don't request it are safe.
+    item_count: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -66,15 +70,42 @@ async def list_tags(
     q: str | None = Query(default=None, description="Filter by name prefix"),
     category: str | None = Query(default=None, description="Filter by category namespace"),
     active_only: bool = Query(default=True, description="Only return active tags"),
+    in_use_only: bool = Query(
+        default=False,
+        description="Only return tags that have at least one item (count > 0). "
+        "Uses the real join count, not the denormalized popularity_count.",
+    ),
 ) -> PaginatedTags:
-    """List tags with popularity counts, ordered by popularity desc."""
-    query = select(Tag)
+    """List tags with real per-tag usage counts, ordered by popularity desc.
+
+    ``item_count`` is computed from a live COUNT(item_tags.item_id) join and is
+    always accurate even if ``popularity_count`` has drifted.  Pass
+    ``in_use_only=true`` to get only tags that are actually in use (the tag
+    cloud uses this to hide zero-item tags).
+    """
+    # Subquery: real per-tag item count (no duplicates thanks to PK uniqueness).
+    item_count_sq = (
+        select(
+            ItemTag.tag_id,
+            func.count(ItemTag.item_id).label("item_count"),
+        )
+        .group_by(ItemTag.tag_id)
+        .subquery()
+    )
+
+    query = (
+        select(Tag, func.coalesce(item_count_sq.c.item_count, 0).label("item_count"))
+        .outerjoin(item_count_sq, Tag.id == item_count_sq.c.tag_id)
+    )
+
     if active_only:
         query = query.where(Tag.status == TagStatus.active)
     if q:
         query = query.where(Tag.name.ilike(f"%{q}%"))
     if category:
         query = query.where(Tag.category.ilike(f"{category}%"))
+    if in_use_only:
+        query = query.where(func.coalesce(item_count_sq.c.item_count, 0) > 0)
 
     total_result = await db.execute(
         select(func.count()).select_from(query.subquery())
@@ -82,18 +113,28 @@ async def list_tags(
     total = total_result.scalar_one()
 
     offset = (page - 1) * per_page
-    result = await db.execute(
+    rows = await db.execute(
         query.order_by(Tag.popularity_count.desc(), Tag.name)
         .offset(offset)
         .limit(per_page)
     )
-    tags = list(result.scalars().all())
+
+    tags = [
+        TagSummary(
+            id=tag.id,
+            name=tag.name,
+            category=tag.category,
+            popularity_count=tag.popularity_count,
+            item_count=item_count,
+        )
+        for tag, item_count in rows.all()
+    ]
 
     return PaginatedTags(
         total=total,
         page=page,
         per_page=per_page,
-        tags=tags,  # type: ignore[arg-type]
+        tags=tags,
     )
 
 

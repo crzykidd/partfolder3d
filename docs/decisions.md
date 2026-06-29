@@ -2,6 +2,34 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-29 — Tag delete semantics + cloud real-count join
+
+### Delete tag untags items; never deletes them
+
+`DELETE /api/admin/tags/{id}` removes any tag regardless of status.  Semantics:
+
+1. Count the `ItemTag` rows for the tag (= items that will be untagged).
+2. Delete all `ItemTag` rows (unlinks tag from items; items themselves are unaffected).
+3. Delete all `TagAlias` rows for the tag.
+4. Delete the `Tag` row itself.
+5. Return `{ deleted: true, items_untagged: <count> }`.
+
+The existing `reject` endpoint is kept (pending-only, 409 on active); the existing
+`merge-into` endpoint is kept.  The new delete is the only way to hard-delete an
+active tag without a merge target.
+
+### Cloud uses real join count, not popularity_count
+
+`popularity_count` on `Tag` is a denormalized counter that can drift (e.g. if an
+import session is cancelled after tagging).  The tag cloud in `CatalogPage` and
+the `in_use_only` filter both need accurate counts, so `GET /api/tags` now computes
+`item_count` via a `COUNT(item_tags.item_id)` outer-join subquery grouped by
+`tag_id`.  `popularity_count` is still returned for callers that rely on it, and
+is still used for popularity-ordering in the response.
+
+`in_use_only=true` (default: false) lets the cloud request only tags with
+`item_count > 0`, hiding zero-item tags without a schema change or migration.
+
 ## 2026-06-29 — Phase 17: per-library × per-OS local path prefixes
 
 ### Model: per-user JSONB map keyed by library ID and OS

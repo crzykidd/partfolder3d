@@ -477,6 +477,8 @@ function AllTagRow({ tag, allTags }: AllTagRowProps) {
   const [categoryInput, setCategoryInput] = useState(tag.category ?? '')
   const [categoryError, setCategoryError] = useState<string | null>(null)
   const [categorySaved, setCategorySaved] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const categoryMutation = useMutation({
     mutationFn: (cat: string | null) => api.adminSetTagCategory(tag.id, cat),
@@ -488,6 +490,19 @@ function AllTagRow({ tag, allTags }: AllTagRowProps) {
     },
     onError: (err) =>
       setCategoryError(err instanceof Error ? err.message : 'Failed to set category.'),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => api.deleteTag(tag.id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin-tags-all'] })
+      void queryClient.invalidateQueries({ queryKey: ['admin-tags-pending'] })
+      void queryClient.invalidateQueries({ queryKey: ['tags'] })
+    },
+    onError: (err) => {
+      setDeleteError(err instanceof Error ? err.message : 'Delete failed.')
+      setConfirmDelete(false)
+    },
   })
 
   const handleCategorySave = () => {
@@ -567,7 +582,7 @@ function AllTagRow({ tag, allTags }: AllTagRowProps) {
 
         {/* Actions */}
         <Td>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <Button
               variant="ghost"
               size="sm"
@@ -588,7 +603,43 @@ function AllTagRow({ tag, allTags }: AllTagRowProps) {
             >
               {showMerge ? 'Cancel merge' : 'Merge into…'}
             </Button>
+
+            {confirmDelete ? (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 11, color: 'var(--aurora-muted)', whiteSpace: 'nowrap' }}>
+                  Delete &ldquo;{tag.name}&rdquo;? Removes it from {tag.item_count} item{tag.item_count === 1 ? '' : 's'}.
+                </span>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  disabled={deleteMutation.isPending}
+                  onClick={() => {
+                    setDeleteError(null)
+                    deleteMutation.mutate()
+                  }}
+                >
+                  {deleteMutation.isPending ? 'Deleting…' : 'Confirm delete'}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(false)}>
+                  Cancel
+                </Button>
+              </span>
+            ) : (
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => {
+                  setConfirmDelete(true)
+                  setDeleteError(null)
+                }}
+              >
+                Delete
+              </Button>
+            )}
           </div>
+          {deleteError && (
+            <p style={{ marginTop: 4, fontSize: 11, color: 'var(--aurora-danger)', margin: '4px 0 0' }}>{deleteError}</p>
+          )}
         </Td>
       </TableRow>
 

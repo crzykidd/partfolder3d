@@ -27,7 +27,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import csrf_protect, get_db, require_admin
@@ -76,6 +76,11 @@ class MergeResponse(BaseModel):
     source_name: str
     items_repointed: int
     aliases_repointed: int
+
+
+class DeleteTagResponse(BaseModel):
+    deleted: bool
+    items_untagged: int
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +154,49 @@ async def reject_tag(
         )
     await db.delete(tag)
     await db.flush()
+
+
+@router.delete(
+    "/{tag_id}",
+    response_model=DeleteTagResponse,
+    summary="Delete a tag (any status)",
+)
+async def delete_tag(
+    tag_id: int,
+    _admin: Annotated[User, Depends(require_admin)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> DeleteTagResponse:
+    """Delete any tag regardless of status.
+
+    Removes all ItemTag links (untags affected items — items themselves are
+    never deleted), removes all TagAlias rows, then deletes the Tag row.
+    Returns ``{ deleted: true, items_untagged: <count> }``.
+    404 if the tag does not exist.
+    """
+    result = await db.execute(select(Tag).where(Tag.id == tag_id))
+    tag = result.scalar_one_or_none()
+    if tag is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found.")
+
+    # Count ItemTag rows before deletion (= items that will be untagged)
+    count_result = await db.execute(
+        select(func.count()).select_from(ItemTag).where(ItemTag.tag_id == tag_id)
+    )
+    items_untagged: int = count_result.scalar_one()
+
+    # Explicit deletes (mirror merge_into cleanup; avoids loading rows into memory)
+    await db.execute(delete(ItemTag).where(ItemTag.tag_id == tag_id))
+    await db.execute(delete(TagAlias).where(TagAlias.tag_id == tag_id))
+    await db.delete(tag)
+    await db.flush()
+
+    log.info(
+        "delete_tag: deleted tag %r (id=%d); items_untagged=%d",
+        tag.name, tag_id, items_untagged,
+    )
+
+    return DeleteTagResponse(deleted=True, items_untagged=items_untagged)
 
 
 @router.patch(
