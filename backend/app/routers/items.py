@@ -330,6 +330,13 @@ async def _build_sidecar_data(
 
 async def _write_item_sidecar(db: AsyncSession, item: Item) -> None:
     """Write (or overwrite) the sidecar for an item."""
+    # created_at / updated_at are server-generated (server_default / onupdate), so a
+    # preceding flush EXPIRES them. build_sidecar() reads them synchronously, which
+    # would trigger an illegal lazy reload in the async session
+    # (MissingGreenlet: "greenlet_spawn has not been called"). Reload just these two
+    # scalars here, in the async context, before the sync build. We scope to these
+    # attribute names so already-loaded relationships (e.g. item.creator) stay intact.
+    await db.refresh(item, attribute_names=["created_at", "updated_at"])
     tags, files, images, default_img = await _build_sidecar_data(db, item)
     data = build_sidecar(
         item, tags=tags, files=files, images=images, default_image=default_img
