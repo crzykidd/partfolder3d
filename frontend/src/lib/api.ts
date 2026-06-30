@@ -650,6 +650,11 @@ export const uploadItemImage = (key: string, file: File): Promise<ImageOut> => {
   return apiFetchForm<ImageOut>(`/api/items/${key}/images`, form)
 }
 
+// Delete an item from the catalog. The server moves its directory to
+// /data/trash/ (recoverable, never hard-deleted) and removes the DB row.
+export const deleteItem = (key: string): Promise<void> =>
+  apiFetch<void>(`/api/items/${key}`, { method: 'DELETE' })
+
 export const deleteItemImage = (key: string, imageId: number): Promise<void> => {
   const headers = new Headers()
   const csrf = getCsrfToken()

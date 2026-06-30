@@ -1992,6 +1992,16 @@ export function ItemPage() {
     },
   })
 
+  // Delete item (moves the directory to trash server-side, removes the DB row)
+  const [confirmDeleteItem, setConfirmDeleteItem] = useState(false)
+  const deleteItemMutation = useMutation({
+    mutationFn: () => api.deleteItem(key!),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['items'] })
+      navigate('/catalog', { replace: true })
+    },
+  })
+
   if (isLoading) {
     return (
       <div style={{ padding: '96px 0', textAlign: 'center', fontSize: 13, color: 'var(--aurora-muted)' }}>
@@ -2054,6 +2064,59 @@ export function ItemPage() {
         >
           {item.title}
         </span>
+
+        {/* Delete item (moves to trash) */}
+        {isOwnerOrAdmin && (
+          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+            {deleteItemMutation.isError && (
+              <span style={{ fontSize: 11, color: 'var(--aurora-danger)' }}>Delete failed</span>
+            )}
+            {!confirmDeleteItem ? (
+              <button
+                onClick={() => setConfirmDeleteItem(true)}
+                title="Move this item to trash"
+                style={{
+                  ...AURORA_BTN_GHOST,
+                  fontSize: 11,
+                  padding: '4px 10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  color: 'var(--aurora-danger)',
+                  cursor: 'pointer',
+                }}
+              >
+                <Trash2 size={12} />
+                Delete
+              </button>
+            ) : (
+              <>
+                <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>Move to trash?</span>
+                <button
+                  onClick={() => deleteItemMutation.mutate()}
+                  disabled={deleteItemMutation.isPending}
+                  style={{
+                    ...AURORA_BTN_PRIMARY,
+                    fontSize: 11,
+                    padding: '4px 10px',
+                    background: 'var(--aurora-danger)',
+                    opacity: deleteItemMutation.isPending ? 0.6 : 1,
+                    cursor: deleteItemMutation.isPending ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {deleteItemMutation.isPending ? 'Deleting…' : 'Confirm delete'}
+                </button>
+                <button
+                  onClick={() => setConfirmDeleteItem(false)}
+                  disabled={deleteItemMutation.isPending}
+                  style={{ ...AURORA_BTN_GHOST, fontSize: 11, padding: '4px 10px', cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+              </>
+            )}
+          </span>
+        )}
       </nav>
 
       {/* Hero: images + metadata side by side */}
