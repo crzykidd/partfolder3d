@@ -19,6 +19,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Check, Copy, Download, Trash2, Upload, X as XIcon } from 'lucide-react'
 
 import * as api from '@/lib/api'
+import { buildCarouselPagerItems } from '@/lib/carousel-utils'
 import { detectOS, mapBundleStatus, rewriteLocalPath, shouldContinuePolling, type ZipPollStatus } from '@/lib/catalog-utils'
 import { formatPrintTime, formatFilamentLength, formatFilamentWeight, renderStars } from '@/lib/print-utils'
 import { useAuth } from '@/context/AuthContext'
@@ -127,6 +128,9 @@ function AuroraSection({ title, children }: { title: string; children: React.Rea
 // Image carousel
 // ---------------------------------------------------------------------------
 
+/** Number of thumbnails visible at one time in the strip. */
+const THUMBS_VISIBLE = 6
+
 interface ImageCarouselProps {
   images: api.ImageOut[]
   itemKey: string
@@ -147,11 +151,22 @@ function ImageCarousel({
   isOwner,
 }: ImageCarouselProps) {
   const [activeIdx, setActiveIdx] = useState(0)
+  // thumbOffset: index of the leftmost visible thumbnail in the strip
+  const [thumbOffset, setThumbOffset] = useState(0)
   const [lightbox, setLightbox] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null)
 
   // Keep activeIdx in bounds when images list changes
   const clampedIdx = Math.min(activeIdx, Math.max(0, images.length - 1))
+
+  // Auto-scroll the strip so the active thumbnail is always visible
+  useEffect(() => {
+    setThumbOffset((prev) => {
+      if (clampedIdx < prev) return clampedIdx
+      if (clampedIdx >= prev + THUMBS_VISIBLE) return Math.max(0, clampedIdx - THUMBS_VISIBLE + 1)
+      return prev
+    })
+  }, [clampedIdx])
 
   if (!images.length) {
     return (
@@ -170,15 +185,49 @@ function ImageCarousel({
   }
 
   const active = images[clampedIdx]
+  const maxThumbOffset = Math.max(0, images.length - THUMBS_VISIBLE)
+  const totalPages = Math.ceil(images.length / THUMBS_VISIBLE)
+  const currentPage = Math.floor(clampedIdx / THUMBS_VISIBLE)
+  const pagerItems = buildCarouselPagerItems(currentPage, totalPages)
+  const visibleThumbs = images.slice(thumbOffset, thumbOffset + THUMBS_VISIBLE)
+  const emptySlots = Math.max(0, THUMBS_VISIBLE - visibleThumbs.length)
 
   function handleDeleteConfirm(imageId: number) {
     setConfirmDelete(null)
     onDeleteImage(imageId)
   }
 
+  function scrollThumbsLeft() {
+    setThumbOffset((o) => Math.max(0, o - 1))
+  }
+
+  function scrollThumbsRight() {
+    setThumbOffset((o) => Math.min(maxThumbOffset, o + 1))
+  }
+
+  function jumpToPage(page: number) {
+    const firstIdx = page * THUMBS_VISIBLE
+    setActiveIdx(firstIdx)
+    setThumbOffset(Math.min(firstIdx, maxThumbOffset))
+  }
+
+  const arrowBtnStyle: React.CSSProperties = {
+    ...AURORA_BTN_GHOST,
+    width: 28,
+    height: 60,
+    padding: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    fontSize: 18,
+    lineHeight: 1,
+    borderRadius: 8,
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {/* Main image */}
+      {/* Main image — fixed height so it never dominates the hero */}
       <div
         style={{
           ...AURORA_CARD,
@@ -187,14 +236,13 @@ function ImageCarousel({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          aspectRatio: '16/9',
-          minHeight: 200,
+          height: 300,
         }}
       >
         <img
           src={`/api/items/${itemKey}/files/${active.path}`}
           alt={`Image ${clampedIdx + 1}`}
-          style={{ maxHeight: 320, maxWidth: '100%', objectFit: 'contain', cursor: 'zoom-in' }}
+          style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain', cursor: 'zoom-in' }}
           onClick={() => setLightbox(true)}
           loading="lazy"
         />
@@ -314,55 +362,166 @@ function ImageCarousel({
             )}
           </div>
         )}
+
+        {/* Bottom-right: image counter */}
+        {images.length > 1 && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 8,
+              right: 8,
+              background: 'rgba(0,0,0,0.45)',
+              color: '#fff',
+              borderRadius: 20,
+              fontSize: 11,
+              padding: '2px 8px',
+              lineHeight: 1.4,
+            }}
+          >
+            {clampedIdx + 1} / {images.length}
+          </div>
+        )}
       </div>
 
-      {/* Thumbnail strip */}
+      {/* Compact thumbnail strip + pager (only when > 1 image) */}
       {images.length > 1 && (
-        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
-          {images.map((img, idx) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          {/* Strip row: ‹ [thumb slots] › */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            {/* Left scroll arrow */}
             <button
-              key={img.id}
-              onClick={() => setActiveIdx(idx)}
+              onClick={scrollThumbsLeft}
+              disabled={thumbOffset === 0}
+              aria-label="Scroll thumbnails left"
               style={{
-                flexShrink: 0,
-                height: 56,
-                width: 56,
-                borderRadius: 8,
-                overflow: 'hidden',
-                border: `2px solid ${idx === clampedIdx ? 'var(--aurora-accent)' : 'var(--aurora-glass-border)'}`,
-                boxShadow: idx === clampedIdx ? 'var(--aurora-glow)' : 'none',
-                cursor: 'pointer',
-                padding: 0,
-                transition: 'all 0.15s',
-                position: 'relative',
+                ...arrowBtnStyle,
+                opacity: thumbOffset === 0 ? 0.3 : 1,
+                cursor: thumbOffset === 0 ? 'default' : 'pointer',
               }}
             >
-              <img
-                src={`/api/items/${itemKey}/files/${img.path}`}
-                alt={`Thumbnail ${idx + 1}`}
-                style={{ height: '100%', width: '100%', objectFit: 'cover', display: 'block' }}
-                loading="lazy"
-              />
-              {img.source === 'render' && (
-                <span
-                  style={{
-                    position: 'absolute',
-                    bottom: 2,
-                    right: 2,
-                    background: 'rgba(139,92,246,0.85)',
-                    color: '#fff',
-                    borderRadius: 4,
-                    fontSize: 8,
-                    fontWeight: 700,
-                    padding: '1px 3px',
-                    lineHeight: 1.2,
-                  }}
-                >
-                  R
-                </span>
-              )}
+              ‹
             </button>
-          ))}
+
+            {/* Visible thumbnail slots (always THUMBS_VISIBLE wide) */}
+            <div style={{ display: 'flex', gap: 5, flex: 1, minWidth: 0 }}>
+              {visibleThumbs.map((img, slotIdx) => {
+                const idx = thumbOffset + slotIdx
+                const isActive = idx === clampedIdx
+                return (
+                  <button
+                    key={img.id}
+                    onClick={() => setActiveIdx(idx)}
+                    aria-label={`Select image ${idx + 1}`}
+                    aria-pressed={isActive}
+                    style={{
+                      flex: '1 1 0',
+                      minWidth: 0,
+                      height: 60,
+                      borderRadius: 8,
+                      overflow: 'hidden',
+                      border: `2px solid ${isActive ? 'var(--aurora-accent)' : 'var(--aurora-glass-border)'}`,
+                      boxShadow: isActive ? 'var(--aurora-glow)' : 'none',
+                      cursor: 'pointer',
+                      padding: 0,
+                      transition: 'all 0.15s',
+                      position: 'relative',
+                      background: 'var(--aurora-glass)',
+                    }}
+                  >
+                    <img
+                      src={`/api/items/${itemKey}/files/${img.path}`}
+                      alt={`Thumbnail ${idx + 1}`}
+                      style={{ height: '100%', width: '100%', objectFit: 'cover', display: 'block' }}
+                      loading="lazy"
+                    />
+                    {img.source === 'render' && (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          bottom: 2,
+                          right: 2,
+                          background: 'rgba(139,92,246,0.85)',
+                          color: '#fff',
+                          borderRadius: 4,
+                          fontSize: 8,
+                          fontWeight: 700,
+                          padding: '1px 3px',
+                          lineHeight: 1.2,
+                        }}
+                      >
+                        R
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+              {/* Empty spacer slots to keep strip width stable */}
+              {Array.from({ length: emptySlots }).map((_, i) => (
+                <div key={`empty-${i}`} style={{ flex: '1 1 0', minWidth: 0, height: 60 }} />
+              ))}
+            </div>
+
+            {/* Right scroll arrow */}
+            <button
+              onClick={scrollThumbsRight}
+              disabled={thumbOffset >= maxThumbOffset}
+              aria-label="Scroll thumbnails right"
+              style={{
+                ...arrowBtnStyle,
+                opacity: thumbOffset >= maxThumbOffset ? 0.3 : 1,
+                cursor: thumbOffset >= maxThumbOffset ? 'default' : 'pointer',
+              }}
+            >
+              ›
+            </button>
+          </div>
+
+          {/* Jump nav: page number buttons (only when totalPages > 1) */}
+          {pagerItems.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+              {pagerItems.map((pageItem, i) =>
+                pageItem === 'ellipsis' ? (
+                  <span
+                    key={`ellipsis-${i}`}
+                    style={{ fontSize: 11, color: 'var(--aurora-muted)', userSelect: 'none', padding: '0 1px' }}
+                  >
+                    …
+                  </span>
+                ) : (
+                  <button
+                    key={`page-${pageItem}`}
+                    onClick={() => jumpToPage(pageItem)}
+                    aria-label={`Jump to images ${pageItem * THUMBS_VISIBLE + 1}–${Math.min((pageItem + 1) * THUMBS_VISIBLE, images.length)}`}
+                    aria-pressed={pageItem === currentPage}
+                    style={{
+                      width: 24,
+                      height: 24,
+                      borderRadius: 6,
+                      border: pageItem === currentPage
+                        ? '1px solid var(--aurora-accent)'
+                        : '1px solid var(--aurora-glass-border)',
+                      background: pageItem === currentPage
+                        ? 'rgba(15,164,171,0.15)'
+                        : 'var(--aurora-glass)',
+                      color: pageItem === currentPage
+                        ? 'var(--aurora-accent)'
+                        : 'var(--aurora-text-dim)',
+                      fontSize: 11,
+                      fontWeight: pageItem === currentPage ? 700 : 400,
+                      cursor: 'pointer',
+                      padding: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {pageItem + 1}
+                  </button>
+                ),
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -2119,8 +2278,8 @@ export function ItemPage() {
         )}
       </nav>
 
-      {/* Hero: images + metadata side by side */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      {/* Hero: images + metadata — 2 columns on wide, stacks on narrow */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
         {/* Left: images */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <ImageCarousel
