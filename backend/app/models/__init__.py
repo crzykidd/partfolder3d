@@ -30,6 +30,7 @@ from .password_reset import PasswordResetToken
 from .print_record import PrintRecord
 from .review_item import ReviewItem, ReviewStatus
 from .scheduled_job import ScheduledJob
+from .scraper_usage import ScraperUsage
 from .session import UserSession
 from .setting import Setting
 from .share_audit_event import ShareAuditEvent
@@ -51,6 +52,7 @@ __all__ = [
     "AiProvider",
     "AiProviderType",
     "AiUsage",
+    "ScraperUsage",
     "UserSession",
     # Phase 2
     "Library",

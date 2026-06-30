@@ -2074,6 +2074,35 @@ export function ImportWizardPage() {
         </div>
       )}
 
+      {/* Scrape note — AgentQL fetch notice or blocked/budget message */}
+      {session.scrape_note && (
+        <div
+          style={{
+            background: session.scrape_note.startsWith('Fetched via AgentQL')
+              ? 'rgba(15,164,171,0.06)'
+              : 'rgba(245,158,11,0.07)',
+            border: `1px solid ${session.scrape_note.startsWith('Fetched via AgentQL')
+              ? 'rgba(15,164,171,0.25)'
+              : 'rgba(245,158,11,0.25)'}`,
+            borderRadius: 10,
+            padding: '10px 14px',
+          }}
+        >
+          <p
+            style={{
+              fontSize: 12,
+              color: session.scrape_note.startsWith('Fetched via AgentQL')
+                ? 'var(--aurora-accent)'
+                : '#D97706',
+              margin: 0,
+              lineHeight: 1.5,
+            }}
+          >
+            {session.scrape_note}
+          </p>
+        </div>
+      )}
+
       {/* Processing spinner */}
       {processing ? (
         <div style={AURORA_CARD}>

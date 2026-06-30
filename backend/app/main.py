@@ -81,6 +81,7 @@ app.add_middleware(
 # Routers
 # ---------------------------------------------------------------------------
 from .routers import (  # noqa: E402  # noqa: E402
+    agentql,
     ai_actions,
     ai_providers,
     ai_usage,
@@ -147,6 +148,8 @@ app.include_router(backup.router)
 app.include_router(export.router)
 app.include_router(site_capabilities.router)
 app.include_router(tag_admin.router)
+# Phase 18 — AgentQL fallback scraper
+app.include_router(agentql.router)
 
 
 # ---------------------------------------------------------------------------

@@ -22,11 +22,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as api from '@/lib/api'
 import {
   AdminPage, PageHeader,
+  Card, SectionHeader,
   Badge,
   Button,
   AuroraToggle,
   DataTable, TableRow, Td,
   AuroraInput,
+  Field,
 } from '@/components/ui'
 
 // ---------------------------------------------------------------------------
@@ -396,6 +398,259 @@ function SiteCapRow({ cap }: { cap: api.AdminSiteCapabilityOut }) {
 }
 
 // ---------------------------------------------------------------------------
+// AgentQL fallback scraper card
+// ---------------------------------------------------------------------------
+
+function AgentQLCard() {
+  const queryClient = useQueryClient()
+  const [apiKeyInput, setApiKeyInput] = useState('')
+  const [saveStatus, setSaveStatus] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const { data: settings, isLoading: settingsLoading } = useQuery({
+    queryKey: ['admin-agentql-settings'],
+    queryFn: api.getAgentQLSettings,
+  })
+
+  const { data: usage, isLoading: usageLoading } = useQuery({
+    queryKey: ['admin-scraper-usage'],
+    queryFn: api.getScraperUsage,
+  })
+
+  const [formEnabled, setFormEnabled] = useState<boolean | undefined>(undefined)
+  const [formAllowance, setFormAllowance] = useState<string>('')
+  const [formBudgetMode, setFormBudgetMode] = useState<string>('')
+  const [formCapUsd, setFormCapUsd] = useState<string>('')
+  const [formPerCall, setFormPerCall] = useState<string>('')
+
+  // Populate form from loaded settings (once)
+  React.useEffect(() => {
+    if (settings && formEnabled === undefined) {
+      setFormEnabled(settings.enabled)
+      setFormAllowance(String(settings.free_allowance))
+      setFormBudgetMode(settings.budget_mode)
+      setFormCapUsd(settings.monthly_cap_usd != null ? String(settings.monthly_cap_usd) : '')
+      setFormPerCall(String(settings.per_call_usd))
+    }
+  }, [settings, formEnabled])
+
+  const updateMutation = useMutation({
+    mutationFn: (body: api.AgentQLSettingsUpdate) => api.updateAgentQLSettings(body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin-agentql-settings'] })
+      void queryClient.invalidateQueries({ queryKey: ['admin-scraper-usage'] })
+      setSaveStatus('Saved.')
+      setApiKeyInput('')
+      setTimeout(() => setSaveStatus(null), 2500)
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : 'Save failed.')
+    },
+  })
+
+  function handleSave() {
+    setError(null)
+    const body: api.AgentQLSettingsUpdate = {}
+    if (formEnabled !== undefined) body.enabled = formEnabled
+    if (apiKeyInput.trim()) body.api_key = apiKeyInput.trim()
+    const allowNum = parseInt(formAllowance, 10)
+    if (!isNaN(allowNum)) body.free_allowance = allowNum
+    if (formBudgetMode) body.budget_mode = formBudgetMode
+    if (formBudgetMode === 'cap' && formCapUsd.trim()) {
+      const capNum = parseFloat(formCapUsd)
+      if (!isNaN(capNum)) body.monthly_cap_usd = capNum
+    }
+    const perCallNum = parseFloat(formPerCall)
+    if (!isNaN(perCallNum)) body.per_call_usd = perCallNum
+    updateMutation.mutate(body)
+  }
+
+  const effectiveEnabled = formEnabled !== undefined ? formEnabled : (settings?.enabled ?? false)
+  const effectiveBudgetMode = formBudgetMode || settings?.budget_mode || 'free_only'
+
+  return (
+    <Card style={{ marginBottom: 24 }}>
+      <SectionHeader>Scraper — AgentQL Fallback</SectionHeader>
+
+      <p style={{ fontSize: 13, color: 'var(--aurora-text-dim)', marginBottom: 16, lineHeight: 1.6 }}>
+        Optional BYO-key fallback for Cloudflare-gated sites (e.g. MakerWorld). Invoked{' '}
+        <strong>only when the built-in scraper is blocked.</strong> Bring your own key at{' '}
+        <a
+          href="https://agentql.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ color: 'var(--aurora-accent)' }}
+        >
+          agentql.com
+        </a>. Off by default.
+      </p>
+
+      {settingsLoading ? (
+        <p style={{ fontSize: 13, color: 'var(--aurora-muted)' }}>Loading…</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Enable toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <AuroraToggle
+              checked={effectiveEnabled}
+              onChange={() => {
+                setFormEnabled(!effectiveEnabled)
+                setError(null)
+              }}
+              disabled={updateMutation.isPending}
+              ariaLabel="Enable AgentQL fallback"
+            />
+            <span style={{ fontSize: 13, color: 'var(--aurora-text)' }}>
+              {effectiveEnabled ? 'Enabled' : 'Disabled'}
+            </span>
+            {settings && (
+              <Badge variant={settings.enabled ? 'success' : 'muted'}>
+                {settings.enabled ? 'Active' : 'Off'}
+              </Badge>
+            )}
+          </div>
+
+          {/* API Key (write-only) */}
+          <Field label={`API Key ${settings?.has_key ? '(key set — paste to rotate)' : '(not set)'}`}>
+            <AuroraInput
+              type="password"
+              value={apiKeyInput}
+              onChange={(e) => {
+                setApiKeyInput(e.target.value)
+                setError(null)
+              }}
+              placeholder={settings?.has_key ? '••••••••••••••••••••' : 'Paste AgentQL API key'}
+              autoComplete="new-password"
+            />
+            <p style={{ fontSize: 11, color: 'var(--aurora-muted)', marginTop: 4 }}>
+              Stored encrypted. Never returned. Leave blank to keep existing key.
+            </p>
+          </Field>
+
+          {/* Free allowance */}
+          <Field label="Free allowance (calls / month)">
+            <AuroraInput
+              type="number"
+              value={formAllowance}
+              onChange={(e) => setFormAllowance(e.target.value)}
+              style={{ width: 100 }}
+              min={0}
+            />
+            <p style={{ fontSize: 11, color: 'var(--aurora-muted)', marginTop: 4 }}>
+              Starter plan = 50 calls/month. Check your plan at agentql.com.
+            </p>
+          </Field>
+
+          {/* Budget mode */}
+          <Field label="Budget mode">
+            <div style={{ display: 'flex', gap: 8 }}>
+              {(['free_only', 'cap'] as const).map((mode) => (
+                <Button
+                  key={mode}
+                  variant={effectiveBudgetMode === mode ? 'primary' : 'ghost'}
+                  size="sm"
+                  onClick={() => {
+                    setFormBudgetMode(mode)
+                    setError(null)
+                  }}
+                >
+                  {mode === 'free_only' ? 'Free only' : 'Monthly $ cap'}
+                </Button>
+              ))}
+            </div>
+          </Field>
+
+          {/* Monthly cap (shown only in cap mode) */}
+          {effectiveBudgetMode === 'cap' && (
+            <Field label="Monthly cap (USD)">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 13, color: 'var(--aurora-text-dim)' }}>$</span>
+                <AuroraInput
+                  type="number"
+                  value={formCapUsd}
+                  onChange={(e) => setFormCapUsd(e.target.value)}
+                  style={{ width: 100 }}
+                  min={0}
+                  step={0.01}
+                />
+              </div>
+            </Field>
+          )}
+
+          {/* Per-call rate */}
+          <Field label="Estimated cost per call (USD)">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 13, color: 'var(--aurora-text-dim)' }}>$</span>
+              <AuroraInput
+                type="number"
+                value={formPerCall}
+                onChange={(e) => setFormPerCall(e.target.value)}
+                style={{ width: 100 }}
+                min={0}
+                step={0.001}
+              />
+            </div>
+            <p style={{ fontSize: 11, color: 'var(--aurora-muted)', marginTop: 4 }}>
+              Default $0.02 (AgentQL Starter rate). Used for local budget tracking only.
+            </p>
+          </Field>
+
+          {/* Usage display */}
+          <div
+            style={{
+              background: 'var(--aurora-glass)',
+              border: '1px solid var(--aurora-glass-border)',
+              borderRadius: 8,
+              padding: '12px 14px',
+            }}
+          >
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+              This month's usage
+            </span>
+            {usageLoading ? (
+              <p style={{ fontSize: 13, color: 'var(--aurora-muted)', marginTop: 6 }}>Loading…</p>
+            ) : usage ? (
+              <>
+                <p style={{ fontSize: 13, color: 'var(--aurora-text)', marginTop: 6, marginBottom: 4 }}>
+                  <strong>{usage.calls}</strong>
+                  {usage.mode === 'free_only' ? ` / ${usage.allowance}` : ''} call{usage.calls !== 1 ? 's' : ''}
+                  {' · '}~${usage.est_cost_usd.toFixed(2)} est.
+                  {' · '}resets on the {usage.resets_on.split('-')[2] === '01' ? '1st' : usage.resets_on}
+                </p>
+                {usage.mode === 'cap' && usage.cap != null && (
+                  <p style={{ fontSize: 12, color: 'var(--aurora-text-dim)', marginBottom: 4 }}>
+                    Cap: ${usage.cap.toFixed(2)} / month
+                  </p>
+                )}
+                <p style={{ fontSize: 11, color: 'var(--aurora-muted)', fontStyle: 'italic' }}>
+                  AgentQL dashboard is authoritative for billing. This count is local.
+                </p>
+              </>
+            ) : null}
+          </div>
+
+          {/* Actions */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <Button
+              onClick={handleSave}
+              disabled={updateMutation.isPending}
+            >
+              {updateMutation.isPending ? 'Saving…' : 'Save settings'}
+            </Button>
+            {saveStatus && (
+              <span style={{ fontSize: 12, color: '#16A34A' }}>{saveStatus}</span>
+            )}
+            {error && (
+              <span style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>{error}</span>
+            )}
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -414,6 +669,9 @@ export function SiteCapabilitiesPage() {
         description="Per-domain scraping capabilities, authentication tokens, and manual-override settings used by the import wizard."
         meta={isLoading ? undefined : `${caps.length} domain${caps.length === 1 ? '' : 's'}`}
       />
+
+      {/* AgentQL fallback scraper card */}
+      <AgentQLCard />
 
       {isError && (
         <div style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>

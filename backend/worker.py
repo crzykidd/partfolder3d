@@ -919,6 +919,164 @@ async def _db_backup_core(_ctx: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+async def _try_agentql_fallback(
+    url: str,
+    db: object,
+    scrape_max_images: int = 20,
+) -> "ScrapeResultT | None":
+    """Try AgentQL fallback scraping for a blocked URL.
+
+    Checks enabled/key/budget, calls agentql_scrape (in an executor),
+    records a scraper_usage row, and returns a ScrapeResult.
+
+    Returns None on unexpected error (caller treats as graceful failure).
+    Returns a ScrapeResult with blocked=True when agentql is disabled/no-key/budget.
+    Best-effort: never raises.
+    """
+    import asyncio as _asyncio  # noqa: PLC0415
+    import json as _json  # noqa: PLC0415
+
+    import sqlalchemy as sa  # noqa: PLC0415
+
+    from app.crypto import InvalidToken, decrypt  # noqa: PLC0415
+    from app.models.scraper_usage import ScraperUsage  # noqa: PLC0415
+    from app.models.setting import Setting  # noqa: PLC0415
+    from app.storage.agentql_client import agentql_scrape  # noqa: PLC0415
+    from app.storage.scraper import ScrapeResult  # noqa: PLC0415
+
+    RESET_DAY = 1  # matches AGENTQL_RESET_DAY in agentql router
+
+    async def _setting(key: str) -> object:
+        r = await db.execute(sa.select(Setting).where(Setting.key == key))  # type: ignore[union-attr]
+        row = r.scalar_one_or_none()
+        return _json.loads(row.value) if row else None
+
+    try:
+        enabled = bool(await _setting("agentql.enabled") or False)
+        if not enabled:
+            return ScrapeResult(
+                url=url, domain="",
+                blocked=True,
+                note=(
+                    "Automated fetch blocked; AgentQL fallback is not enabled — "
+                    "enter details manually."
+                ),
+            )
+
+        api_key_enc = await _setting("agentql.api_key_enc")
+        if not api_key_enc:
+            return ScrapeResult(
+                url=url, domain="",
+                blocked=True,
+                note=(
+                    "Automated fetch blocked; AgentQL API key not configured — "
+                    "enter details manually."
+                ),
+            )
+
+        try:
+            api_key = decrypt(str(api_key_enc))
+        except InvalidToken:
+            log.warning("_try_agentql_fallback: key decryption failed for %s", url)
+            return ScrapeResult(
+                url=url, domain="",
+                blocked=True,
+                note="AgentQL key decryption failed — re-enter the key in settings.",
+            )
+
+        free_allowance = int(await _setting("agentql.free_allowance") or 50)
+        budget_mode = str(await _setting("agentql.budget_mode") or "free_only")
+        monthly_cap_usd_val = await _setting("agentql.monthly_cap_usd")
+        monthly_cap_usd = float(monthly_cap_usd_val) if monthly_cap_usd_val is not None else None
+        per_call_usd = float(await _setting("agentql.per_call_usd") or 0.02)
+
+        # Compute budget window start (most recent RESET_DAY at/before now)
+        from datetime import UTC, datetime  # noqa: PLC0415
+        now = datetime.now(UTC)
+        if now.day >= RESET_DAY:
+            window_start = now.replace(
+                day=RESET_DAY, hour=0, minute=0, second=0, microsecond=0
+            )
+        elif now.month == 1:
+            window_start = now.replace(
+                year=now.year - 1, month=12, day=RESET_DAY,
+                hour=0, minute=0, second=0, microsecond=0,
+            )
+        else:
+            window_start = now.replace(
+                month=now.month - 1, day=RESET_DAY,
+                hour=0, minute=0, second=0, microsecond=0,
+            )
+
+        # Query current window usage
+        usage_result = await db.execute(  # type: ignore[union-attr]
+            sa.select(
+                sa.func.count(ScraperUsage.id),
+                sa.func.coalesce(sa.func.sum(ScraperUsage.est_cost_usd), 0.0),
+            ).where(
+                ScraperUsage.created_at >= window_start,
+                ScraperUsage.provider == "agentql",
+            )
+        )
+        window_calls_raw, window_cost_raw = usage_result.one()
+        window_calls = int(window_calls_raw)
+        window_cost = float(window_cost_raw)
+
+        # Budget enforcement
+        if budget_mode == "free_only":
+            if window_calls >= free_allowance:
+                return ScrapeResult(
+                    url=url, domain="",
+                    blocked=True,
+                    note=(
+                        f"Automated fetch blocked; AgentQL free allowance "
+                        f"({free_allowance} calls/month) reached — enter details manually."
+                    ),
+                )
+        elif budget_mode == "cap":
+            if monthly_cap_usd is not None and window_cost + per_call_usd > monthly_cap_usd:
+                return ScrapeResult(
+                    url=url, domain="",
+                    blocked=True,
+                    note=(
+                        f"Automated fetch blocked; AgentQL monthly $ cap "
+                        f"(${monthly_cap_usd:.2f}) would be exceeded — enter details manually."
+                    ),
+                )
+
+        # Call AgentQL (sync HTTP → run in thread executor)
+        sr = await _asyncio.get_event_loop().run_in_executor(
+            None, lambda: agentql_scrape(url, api_key)
+        )
+
+        # Record usage (best-effort: never crash the import)
+        try:
+            usage_row = ScraperUsage(
+                provider="agentql",
+                source_url=url,
+                success=not sr.blocked,
+                est_cost_usd=per_call_usd,
+            )
+            db.add(usage_row)  # type: ignore[union-attr]
+            await db.flush()  # type: ignore[union-attr]
+        except Exception:
+            log.warning(
+                "_try_agentql_fallback: could not record usage row for %s", url
+            )
+
+        return sr
+
+    except Exception as exc:
+        log.warning(
+            "_try_agentql_fallback: unexpected error for %s: %s", url, exc
+        )
+        return None
+
+
+# Type alias hint (avoids importing ScrapeResult at module level in the worker)
+ScrapeResultT = object
+
+
 async def process_import_session(ctx: dict, session_id: str) -> None:
     """Pre-fill an ImportSession: scrape URL, read sidecar, reconcile tags.
 
@@ -1047,6 +1205,46 @@ async def process_import_session(ctx: dict, session_id: str) -> None:
                         scraped_source_site = sr.source_site
                         raw_tags = sr.raw_tags
                         image_urls = sr.image_urls
+                    else:
+                        # Static scraper was blocked — try AgentQL fallback
+                        fallback_sr = await _try_agentql_fallback(
+                            session.source_url,
+                            db,
+                            scrape_max_images=_settings.SCRAPE_MAX_IMAGES,
+                        )
+                        if fallback_sr is not None and not fallback_sr.blocked:
+                            scraped_title = fallback_sr.title
+                            scraped_description = fallback_sr.description
+                            scraped_creator = getattr(fallback_sr, "creator_name", None)
+                            scraped_creator_url = getattr(fallback_sr, "creator_profile_url", None)
+                            scraped_license = getattr(fallback_sr, "license", None)
+                            scraped_source_site = getattr(fallback_sr, "source_site", None)
+                            raw_tags = getattr(fallback_sr, "raw_tags", []) or []
+                            image_urls = fallback_sr.image_urls
+                            session.scrape_note = "Fetched via AgentQL"
+                            log.info(
+                                "process_import_session: AgentQL fallback succeeded for %s "
+                                "(title=%r images=%d)",
+                                session.source_url,
+                                scraped_title,
+                                len(image_urls),
+                            )
+                        else:
+                            # Both blocked — set a helpful note
+                            note_msg = (
+                                getattr(fallback_sr, "note", None)
+                                if fallback_sr is not None
+                                else None
+                            )
+                            if not note_msg:
+                                note_msg = (
+                                    "Automated fetch was blocked; enter details manually."
+                                )
+                            session.scrape_note = note_msg
+                            log.info(
+                                "process_import_session: static + AgentQL both blocked for %s: %s",
+                                session.source_url, note_msg,
+                            )
 
             # ---- Inbox folder sidecar read ----
             if session.source_type == ImportSourceType.inbox and session.inbox_folder:

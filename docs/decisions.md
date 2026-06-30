@@ -2,6 +2,62 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-29 — Phase 18: AgentQL optional BYO-key fallback scraper
+
+### AgentQL as REST-only fallback (no Playwright/SDK, no Chromium)
+
+The built-in static scraper (`scraper.py`) cannot reach Cloudflare-gated pages
+(MakerWorld returns a 403 JS-challenge).  AgentQL's cloud browser service can
+(proven: POST `/v1/query-data` with `browser_profile=stealth` + `proxy.type=tetra`
+returns HTTP 200 with title + description + 12 images in ~21s).
+
+Design choices:
+- **REST API only** (`POST https://api.agentql.com/v1/query-data`).  No Playwright,
+  no Chromium in the Docker image.  The REST endpoint is sufficient and avoids
+  adding a multi-GB browser dependency.
+- **Fallback only**.  AgentQL is called _only_ when `scrape_url` returns
+  `blocked=True`.  Sites that scrape fine (Printables, Thingiverse) never
+  incur an AgentQL call.
+- **Off by default**.  `agentql_enabled` defaults to `false`.  The admin must
+  explicitly enable it and paste their BYO key.
+- **Stealth + Tetra proxy as configurable defaults**.  These are the params
+  confirmed to defeat Cloudflare; they're configurable (proxy can be disabled)
+  but default to the working combination.
+- **Sync HTTP client** (`httpx.Client` with 120 s timeout) run via
+  `asyncio.run_in_executor` from the arq worker — same pattern as the static
+  scraper.
+
+### Local usage tracking (no AgentQL usage API)
+
+AgentQL's REST API has no `/usage` or `/quota` endpoint (verified as of 2026-06).
+We count our own calls in the `scraper_usage` table (one row per call) and use
+that count for budget enforcement.  Our key is the sole consumer, so our count
+≈ real usage; the AgentQL dashboard remains authoritative for billing.
+
+### Fixed reset day (1st of month) — not yet in UI
+
+The budget window resets on the 1st of each month.  This is stored as
+`AGENTQL_RESET_DAY = 1` in both `app/routers/agentql.py` and `worker.py`.
+It is deliberately NOT exposed as a UI field yet; it can be promoted to a
+settings field later without a migration.
+
+### Budget modes: free_only / cap
+
+- `free_only` (default): counts calls; stops when `window_calls >= free_allowance`
+  (default 50 — the AgentQL Starter free tier).
+- `cap`: stops when `window_cost + per_call_usd > monthly_cap_usd`.
+  Requires setting `monthly_cap_usd`.
+Both modes use the `per_call_usd` rate (default $0.02) for cost estimation.
+
+### scrape_note on import_sessions
+
+A new nullable `scrape_note` column on `import_sessions` (migration 0018)
+communicates the scrape source to the frontend wizard:
+- "Fetched via AgentQL" — agentql fallback succeeded.
+- Human-readable blocked/budget reason — both static + agentql were blocked.
+- `null` — standard static scrape (no special annotation needed).
+Shown as a subtle banner in the import wizard.
+
 ## 2026-06-29 — Tag delete semantics + cloud real-count join
 
 ### Delete tag untags items; never deletes them

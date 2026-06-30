@@ -159,6 +159,9 @@ class ImportSessionOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     error: str | None
+    # Worker-set annotation: "Fetched via AgentQL" on agentql success, or a
+    # blocked/budget message.  None for standard static scrapes.
+    scrape_note: str | None
     files: list[ImportSessionFileOut]
     images: list[ImportSessionImageOut]
 
@@ -242,6 +245,7 @@ def _session_out(
         created_at=session.created_at,
         updated_at=session.updated_at,
         error=session.error,
+        scrape_note=session.scrape_note,
         files=[
             ImportSessionFileOut(
                 id=f.id,

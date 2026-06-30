@@ -138,6 +138,11 @@ class ImportSession(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Annotation set by the worker:
+    # • "Fetched via AgentQL" when agentql fallback succeeded.
+    # • A blocked/budget reason when static scrape was blocked and agentql unavailable.
+    # • None for standard static scrapes.
+    scrape_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # ---- Relationships ----
     files: Mapped[list["ImportSessionFile"]] = relationship(
