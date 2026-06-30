@@ -2,6 +2,34 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-29 — Split backend monoliths: worker.py → tasks/, items.py → services/, import_sessions.py → package
+
+Three backend monoliths extracted into smaller modules — pure token-efficiency refactor, no behavior change.
+
+**worker.py** (1,741 → thin entrypoint ≈ 110 lines): Task functions moved to `app/worker/tasks/` package:
+`render.py` (`render_item`, `_reconcile_render_images`), `analysis.py` (`analyze_item`),
+`bundles.py` (`build_zip_bundle`, `_cleanup_expired_bundles_core`), `backup.py` (`_db_backup_core`),
+`import_session.py` (`process_import_session`, `_try_agentql_fallback`), `reviews.py` (`apply_review_item`),
+`scheduled.py` (`exec_scheduled_job`, cron wrappers, `_sj_start`/`_sj_finish`, `_inbox_scan_core`,
+`_library_reconcile_scan_core`, `_share_link_expiry_cleanup_core`).
+arq task names are registered by function `__name__`; they were not renamed. Two symbols
+(`_try_agentql_fallback`, `_reconcile_render_images`) are re-exported from `worker.py` with `# noqa: F401`
+for test backward-compat (`from worker import _try_agentql_fallback`).
+
+**items.py** (1,350 → ≈ 1,100 lines): Seven cross-imported helpers extracted to `app/services/item_helpers.py`:
+`_get_or_create_tag`, `_attach_tags`, `_update_search_vector`, `_build_sidecar_data`,
+`_write_item_sidecar`, `_enqueue_render`, `_enqueue_analyze`.
+`_effective_is_modified` STAYS in items.py (test imports it from `app.routers.items`).
+All import sites in `import_sessions.py` and task modules updated to `from ..services.item_helpers import …`.
+
+**import_sessions.py** (1,648 → package): Converted to `app/routers/import_sessions/` package:
+`schemas.py` (Pydantic models), `helpers.py` (`reconcile_tags`, `_session_out`, `_load_session`,
+`_ensure_creator`, `_get_staging_dir`, `_enqueue_import_job`), `sessions.py` (10 CRUD endpoints),
+`site_caps.py` (3 site-cap endpoints), `__init__.py` (combined router + `_share_link_fetcher` module-level
+variable + `_get_fetcher` + `import_from_share_link` + re-export of `reconcile_tags`).
+`_share_link_fetcher` kept at package `__init__` scope so `import app.routers.import_sessions as m; m._share_link_fetcher = mock` still works.
+`reconcile_tags` re-exported from `__init__` for `from app.routers.import_sessions import reconcile_tags`.
+
 ## 2026-06-29 — Split ImportWizardPage.tsx into import-wizard/* step components
 
 `frontend/src/pages/ImportWizardPage.tsx` (2,389 lines) split into per-step component files

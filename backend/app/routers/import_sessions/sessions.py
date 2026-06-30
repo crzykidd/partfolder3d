@@ -1,23 +1,4 @@
-"""Import wizard API endpoints (Phase 5).
-
-Manages ImportSession lifecycle: create → process → wizard review → commit.
-
-POST   /api/import-sessions                    → create session (upload / URL)
-GET    /api/import-sessions                    → list pending sessions (mine or admin=all)
-GET    /api/import-sessions/{id}               → get one session
-PATCH  /api/import-sessions/{id}               → update wizard fields
-POST   /api/import-sessions/{id}/commit        → finalize → Item
-POST   /api/import-sessions/{id}/cancel        → discard
-
-GET    /api/site-capabilities                  → list per-domain capabilities
-GET    /api/site-capabilities/{domain}         → get one
-PATCH  /api/site-capabilities/{domain}         → set token / update flags
-
-POST   /api/import-sessions/from-share-link    → STUB (Phase 7)
-
-Auth: all endpoints require authentication.  Admin users can list/manage all sessions.
-"""
-
+"""Import session CRUD endpoints."""
 from __future__ import annotations
 
 import logging
@@ -27,7 +8,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
-import sqlalchemy as sa
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -38,402 +18,53 @@ from fastapi import (
     UploadFile,
     status,
 )
-from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import csrf_protect, get_current_user, get_db
-from ..config import settings
-from ..models.creator import Creator
-from ..models.file import File as FileModel
-from ..models.image import Image, ImageSource
-from ..models.import_session import (
+from ...auth.deps import csrf_protect, get_current_user, get_db
+from ...config import settings
+from ...models.creator import Creator
+from ...models.file import File as FileModel
+from ...models.image import Image, ImageSource
+from ...models.import_session import (
     ImportSession,
     ImportSessionFile,
     ImportSessionImage,
     ImportSessionStatus,
     ImportSourceType,
 )
-from ..models.item import Item
-from ..models.library import Library
-from ..models.site_capability import SiteCapability, SiteToken
-from ..models.tag import Tag, TagAlias, TagStatus
-from ..models.user import User
-from ..storage.inventory import inventory_item
-from ..storage.keys import generate_unique_key
-from ..storage.paths import item_dir_path, item_slug, sidecar_name
-
-# Import helpers from items router (reuse, don't duplicate)
-from .items import (
+from ...models.item import Item
+from ...models.library import Library
+from ...models.tag import Tag, TagStatus
+from ...models.user import User
+from ...services.item_helpers import (
     _attach_tags,
     _enqueue_render,
     _update_search_vector,
     _write_item_sidecar,
 )
+from ...storage.inventory import inventory_item
+from ...storage.keys import generate_unique_key
+from ...storage.paths import item_dir_path, item_slug, sidecar_name
+from .helpers import (
+    _enqueue_import_job,
+    _ensure_creator,
+    _get_staging_dir,
+    _load_session,
+    _session_out,
+    reconcile_tags,
+)
+from .schemas import (
+    CommitResponse,
+    CreateSessionRequest,
+    ImportSessionOut,
+    PaginatedSessions,
+    PatchSessionRequest,
+)
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["import"])
-
-
-# ---------------------------------------------------------------------------
-# Schemas
-# ---------------------------------------------------------------------------
-
-
-class CreateSessionRequest(BaseModel):
-    source_type: str  # "url" or "upload" (multipart handled separately)
-    source_url: str | None = None
-    library_id: int | None = None
-    # Optional pre-filled metadata
-    title: str | None = None
-    description: str | None = None
-    license: str | None = None
-
-
-class PatchSessionRequest(BaseModel):
-    confirmed_title: str | None = None
-    description: str | None = None
-    license: str | None = None
-    source_url: str | None = None
-    # Creator: either named or "own design"
-    creator_name: str | None = None
-    creator_profile_url: str | None = None
-    creator_source_site: str | None = None
-    creator_is_own_design: bool | None = None
-    # Tag reconciliation: user-confirmed final tag list
-    confirmed_tags: list[str] | None = None
-    # Default image (path or URL from session images)
-    default_image_path: str | None = None
-    library_id: int | None = None
-
-
-class ImportSessionFileOut(BaseModel):
-    id: int
-    staged_path: str
-    original_name: str
-    role: str
-    size: int
-
-    model_config = {"from_attributes": True}
-
-
-class ImportSessionImageOut(BaseModel):
-    id: int
-    path: str
-    is_url: bool
-    source: str
-    order: int
-    is_default: bool
-
-    model_config = {"from_attributes": True}
-
-
-class TagStateOut(BaseModel):
-    confirmed: list[str] = []
-    pending: list[str] = []
-
-
-class ImportSessionOut(BaseModel):
-    id: str
-    status: str
-    source_type: str
-    source_url: str | None
-    inbox_folder: str | None
-    staging_dir: str | None
-    suggested_title: str | None
-    confirmed_title: str | None
-    description: str | None
-    license: str | None
-    source_site: str | None
-    creator_name: str | None
-    creator_profile_url: str | None
-    creator_source_site: str | None
-    creator_is_own_design: bool
-    creator_id: int | None
-    tag_state: TagStateOut | None
-    default_image_path: str | None
-    library_id: int | None
-    job_id: str | None
-    item_id: int | None
-    created_by_id: int
-    created_at: datetime
-    updated_at: datetime
-    error: str | None
-    # Worker-set annotation: "Fetched via AgentQL" on agentql success, or a
-    # blocked/budget message.  None for standard static scrapes.
-    scrape_note: str | None
-    files: list[ImportSessionFileOut]
-    images: list[ImportSessionImageOut]
-
-    model_config = {"from_attributes": False}
-
-
-class PaginatedSessions(BaseModel):
-    total: int
-    page: int
-    per_page: int
-    sessions: list[ImportSessionOut]
-
-
-class SiteCapabilityOut(BaseModel):
-    domain: str
-    can_scrape_metadata: bool
-    can_scrape_images: bool
-    requires_token: bool
-    is_manual_only: bool
-    last_probed_at: datetime | None
-    notes: str | None
-    has_token: bool = False
-
-    model_config = {"from_attributes": False}
-
-
-class PatchSiteCapabilityRequest(BaseModel):
-    can_scrape_metadata: bool | None = None
-    can_scrape_images: bool | None = None
-    requires_token: bool | None = None
-    is_manual_only: bool | None = None
-    notes: str | None = None
-    # Provide a plaintext token — it will be encrypted before storage
-    token: str | None = None
-
-
-class CommitResponse(BaseModel):
-    item_key: str
-    item_id: int
-    session_id: str
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _session_out(
-    session: ImportSession, has_token_domains: set[str] | None = None
-) -> ImportSessionOut:
-    """Convert an ImportSession ORM object to ImportSessionOut."""
-    tag_state: TagStateOut | None = None
-    if session.tag_state:
-        tag_state = TagStateOut(
-            confirmed=session.tag_state.get("confirmed", []),
-            pending=session.tag_state.get("pending", []),
-        )
-    return ImportSessionOut(
-        id=str(session.id),
-        status=session.status.value if session.status else "draft",
-        source_type=session.source_type.value if session.source_type else "upload",
-        source_url=session.source_url,
-        inbox_folder=session.inbox_folder,
-        staging_dir=session.staging_dir,
-        suggested_title=session.suggested_title,
-        confirmed_title=session.confirmed_title,
-        description=session.description,
-        license=session.license,
-        source_site=session.source_site,
-        creator_name=session.creator_name,
-        creator_profile_url=session.creator_profile_url,
-        creator_source_site=session.creator_source_site,
-        creator_is_own_design=session.creator_is_own_design or False,
-        creator_id=session.creator_id,
-        tag_state=tag_state,
-        default_image_path=session.default_image_path,
-        library_id=session.library_id,
-        job_id=str(session.job_id) if session.job_id else None,
-        item_id=session.item_id,
-        created_by_id=session.created_by_id,
-        created_at=session.created_at,
-        updated_at=session.updated_at,
-        error=session.error,
-        scrape_note=session.scrape_note,
-        files=[
-            ImportSessionFileOut(
-                id=f.id,
-                staged_path=f.staged_path,
-                original_name=f.original_name,
-                role=f.role,
-                size=f.size,
-            )
-            for f in (session.files or [])
-        ],
-        images=[
-            ImportSessionImageOut(
-                id=img.id,
-                path=img.path,
-                is_url=img.is_url,
-                source=img.source,
-                order=img.order,
-                is_default=img.is_default,
-            )
-            for img in (session.images or [])
-        ],
-    )
-
-
-async def _load_session(
-    session_id: str,
-    db: AsyncSession,
-    user: User,
-) -> ImportSession:
-    """Load a session by UUID, enforcing ownership (admin can access all)."""
-    try:
-        sid = uuid.UUID(session_id)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Invalid session ID",
-        ) from exc
-
-    from sqlalchemy.orm import selectinload  # noqa: PLC0415
-
-    result = await db.execute(
-        select(ImportSession)
-        .options(
-            selectinload(ImportSession.files),
-            selectinload(ImportSession.images),
-        )
-        .where(ImportSession.id == sid)
-    )
-    session = result.scalar_one_or_none()
-    if session is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Import session not found."
-        )
-
-    from ..models.user import UserRole  # noqa: PLC0415
-
-    if user.role != UserRole.admin and session.created_by_id != user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Not your session."
-        )
-    return session
-
-
-async def reconcile_tags(
-    db: AsyncSession,
-    raw_tags: list[str],
-) -> dict[str, list[str]]:
-    """Map raw tag strings to canonical names via aliases; unknown → pending.
-
-    Returns {"confirmed": [...], "pending": [...]}:
-      confirmed = mapped to canonical (active or existing) tags
-      pending   = unknown tags that would be created as TagStatus.pending
-    """
-    confirmed: list[str] = []
-    pending: list[str] = []
-
-    for raw in raw_tags:
-        raw = raw.strip()
-        if not raw:
-            continue
-
-        # 1. Direct name match (active or pending tag)
-        result = await db.execute(select(Tag).where(Tag.name == raw))
-        tag = result.scalar_one_or_none()
-        if tag is not None:
-            confirmed.append(tag.name)
-            continue
-
-        # 2. Alias lookup
-        alias_result = await db.execute(
-            select(TagAlias).where(TagAlias.alias == raw)
-        )
-        alias = alias_result.scalar_one_or_none()
-        if alias is not None:
-            # Resolve to the canonical tag's name
-            tag_result = await db.execute(
-                select(Tag).where(Tag.id == alias.tag_id)
-            )
-            canonical = tag_result.scalar_one_or_none()
-            if canonical is not None:
-                if canonical.name not in confirmed:
-                    confirmed.append(canonical.name)
-                continue
-
-        # 3. Unknown → pending suggestion
-        if raw not in pending and raw not in confirmed:
-            pending.append(raw)
-
-    return {"confirmed": confirmed, "pending": pending}
-
-
-async def _ensure_creator(
-    db: AsyncSession,
-    name: str,
-    profile_url: str | None = None,
-    source_site: str | None = None,
-    user_id: int | None = None,  # set for "own design"
-) -> Creator:
-    """Find or create a Creator by name (case-insensitive dedup).
-
-    Reuses an existing Creator with the same name and source_site when possible.
-    If user_id is set (own-design), links the creator to that user.
-    """
-    # Look up by exact name (case-insensitive)
-    result = await db.execute(
-        select(Creator).where(
-            sa.func.lower(Creator.name) == name.lower()
-        )
-    )
-    existing = result.scalars().all()
-
-    # Narrow by source_site if provided
-    if existing and source_site:
-        by_site = [c for c in existing if c.source_site == source_site]
-        if by_site:
-            creator = by_site[0]
-            # If own-design and not yet linked to this user, link now
-            if user_id is not None and creator.user_id is None:
-                creator.user_id = user_id
-                await db.flush()
-            return creator
-
-    if existing:
-        creator = existing[0]
-        if user_id is not None and creator.user_id is None:
-            creator.user_id = user_id
-            await db.flush()
-        return creator
-
-    # Create new
-    creator = Creator(
-        name=name,
-        profile_url=profile_url,
-        source_site=source_site,
-        user_id=user_id,
-    )
-    db.add(creator)
-    await db.flush()
-    return creator
-
-
-def _get_staging_dir() -> Path:
-    """Return the staging directory for uploaded files."""
-    staging = Path(settings.DATA_DIR) / "staging"
-    staging.mkdir(parents=True, exist_ok=True)
-    return staging
-
-
-async def _enqueue_import_job(session_id: str) -> None:
-    """Fire-and-forget: enqueue a process_import_session arq task."""
-    try:
-        from arq import create_pool  # noqa: PLC0415
-        from arq.connections import RedisSettings  # noqa: PLC0415
-
-        redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-        await redis.enqueue_job("process_import_session", session_id)
-        await redis.aclose()
-        log.debug("_enqueue_import_job: enqueued for session %s", session_id)
-    except Exception:
-        log.exception(
-            "_enqueue_import_job: failed to enqueue for session %s", session_id
-        )
-
-
-# ---------------------------------------------------------------------------
-# Import session endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.post(
@@ -469,7 +100,7 @@ async def create_import_session(
 
     # SSRF guard — validate the scrape target URL before persisting or scraping
     if src == "url" and body.source_url:
-        from ..storage.ssrf_guard import SSRFBlockedError, assert_safe_url  # noqa: PLC0415
+        from ...storage.ssrf_guard import SSRFBlockedError, assert_safe_url  # noqa: PLC0415
 
         try:
             assert_safe_url(body.source_url)
@@ -575,7 +206,7 @@ async def upload_session_files(
     staging.mkdir(parents=True, exist_ok=True)
 
     # Infer roles
-    from ..storage.inventory import infer_role  # noqa: PLC0415
+    from ...storage.inventory import infer_role  # noqa: PLC0415
 
     for upload in files:
         filename = (upload.filename or "file").replace("/", "_").replace("..", "_")
@@ -665,7 +296,7 @@ async def list_import_sessions(
     """List import sessions (own sessions; admin can request all_users=true)."""
     from sqlalchemy.orm import selectinload  # noqa: PLC0415
 
-    from ..models.user import UserRole  # noqa: PLC0415
+    from ...models.user import UserRole  # noqa: PLC0415
 
     query = select(ImportSession).options(
         selectinload(ImportSession.files),
@@ -967,7 +598,7 @@ async def commit_import_session(
         # Only when the item has a source_url — this is the "original online version"
         # reference.  Capture the sha256 of model files only (role=model).
         if session.source_url:
-            from ..models.file import FileRole  # noqa: PLC0415
+            from ...models.file import FileRole  # noqa: PLC0415
             baseline: dict[str, str] = {}
             for rec in records:
                 if rec.role == FileRole.model and rec.sha256:
@@ -1257,392 +888,3 @@ async def delete_import_session_image(
         .where(ImportSession.id == session_id)
     )
     return _session_out(result.scalar_one())
-
-
-# ---------------------------------------------------------------------------
-# Share-link import (Phase 7 — implements the Phase 5 stub)
-# ---------------------------------------------------------------------------
-
-# Mockable network fetch for instance-to-instance import.
-# Override this in tests (monkeypatch) to avoid hitting a live instance.
-# Signature: (url: str, timeout: int) -> dict
-_share_link_fetcher: object = None  # set at module level; None → use real httpx
-
-
-def _get_fetcher() -> object:
-    return _share_link_fetcher
-
-
-async def _fetch_remote_share(url: str, timeout: int) -> dict:
-    """Fetch a remote share link's JSON metadata.
-
-    Uses httpx if available; returns the parsed JSON dict.
-    Raises HTTPException on network/parse errors so the caller can surface them.
-    """
-    fetcher = _get_fetcher()
-    if fetcher is not None:
-        # Injected mock — call it synchronously
-        return fetcher(url, timeout)  # type: ignore[operator]
-
-    try:
-        import httpx  # noqa: PLC0415
-
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            return resp.json()  # type: ignore[return-value]
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to fetch remote share link: {exc}",
-        ) from exc
-
-
-class ShareLinkImportRequest(BaseModel):
-    """Request body for POST /api/import-sessions/from-share-link."""
-    share_url: str
-    library_id: int | None = None
-    # Granular options for what public print history to pull
-    include_public_notes: bool = True
-    include_gcode: bool = False       # gcode files can be large; default off
-    include_photos: bool = True
-    include_settings: bool = True
-
-
-@router.post(
-    "/api/import-sessions/from-share-link",
-    response_model=ImportSessionOut,
-    status_code=201,
-)
-async def import_from_share_link(
-    body: ShareLinkImportRequest,
-    user: Annotated[User, Depends(get_current_user)],
-    _csrf: Annotated[None, Depends(csrf_protect)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> ImportSessionOut:
-    """Import a design from another PartFolder 3D instance's share link.
-
-    Given a share link URL from another PartFolder 3D instance, fetches the
-    design's public metadata and creates an import session that can be reviewed
-    in the wizard and committed to this library.
-
-    Granular pull options control which public print history is included:
-      include_public_notes   — pull public print notes and settings
-      include_gcode          — download gcode files (can be large)
-      include_photos         — download print photos
-      include_settings       — pull structured settings (printer, material, etc.)
-
-    SECURITY: private records are NEVER transferred — the remote instance's
-    public endpoint already filters them; this endpoint requests only public data.
-    Network fetch is mockable via the _share_link_fetcher module variable.
-    """
-    # --- Parse the share URL ---
-    # Expected formats:
-    #   https://otherinstance.com/share/<token>
-    #   https://otherinstance.com/api/public/share/<token>
-    import re as _re  # noqa: PLC0415
-    import urllib.parse as _urlparse  # noqa: PLC0415
-
-    share_url = body.share_url.strip()
-    if not share_url:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="share_url is required.",
-        )
-
-    # Extract token from URL path.  Both UI and API URL forms are accepted.
-    token_match = _re.search(r"/share/([a-f0-9]{64})(?:/|$)", share_url)
-    if not token_match:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                "Could not extract a valid share token from the URL. "
-                "Expected format: https://instance.example.com/share/<64-char-hex-token>"
-            ),
-        )
-    token = token_match.group(1)
-
-    # Build the remote API URL
-    parsed = _urlparse.urlparse(share_url)
-    api_base = f"{parsed.scheme}://{parsed.netloc}"
-    api_url = f"{api_base}/api/public/share/{token}"
-
-    # SSRF guard — block internal/link-local/cloud-metadata IPs
-    from ..storage.ssrf_guard import SSRFBlockedError, assert_safe_url  # noqa: PLC0415
-
-    try:
-        assert_safe_url(api_url)
-    except SSRFBlockedError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Blocked: {exc}",
-        ) from exc
-
-    # --- Fetch remote metadata ---
-    remote_data = await _fetch_remote_share(api_url, timeout=settings.INSTANCE_IMPORT_TIMEOUT)
-
-    if not isinstance(remote_data, dict):
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Unexpected response format from remote instance.",
-        )
-
-    # --- Extract metadata ---
-    item_data = remote_data.get("item") or remote_data  # support both wrapped + flat
-    remote_title: str | None = (
-        item_data.get("title")
-        if isinstance(item_data, dict)
-        else remote_data.get("title")
-    )
-    remote_description: str | None = (
-        item_data.get("description")
-        if isinstance(item_data, dict)
-        else remote_data.get("description")
-    )
-    remote_license: str | None = (
-        item_data.get("license")
-        if isinstance(item_data, dict)
-        else remote_data.get("license")
-    )
-    remote_source_url: str | None = (
-        item_data.get("source_url")
-        if isinstance(item_data, dict)
-        else remote_data.get("source_url")
-    )
-    remote_tags: list[str] = list(
-        (item_data.get("tags") or remote_data.get("tags") or [])
-        if isinstance(item_data, dict)
-        else (remote_data.get("tags") or [])
-    )
-
-    # Public print records (only if requested)
-    public_print_records: list[dict] = []
-    if body.include_public_notes or body.include_settings:
-        raw_records = remote_data.get("public_print_records") or []
-        if isinstance(raw_records, list):
-            public_print_records = raw_records
-
-    # --- Resolve library ---
-    target_library_id = body.library_id
-    if target_library_id is None:
-        from ..models.library import Library  # noqa: PLC0415
-
-        lib_result = await db.execute(
-            select(Library).where(Library.enabled.is_(True)).limit(1)
-        )
-        lib = lib_result.scalar_one_or_none()
-        if lib is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No enabled library found. Please specify library_id.",
-            )
-        target_library_id = lib.id
-
-    # --- Tag reconciliation ---
-    tag_state = (
-        await reconcile_tags(db, remote_tags) if remote_tags else {"confirmed": [], "pending": []}
-    )
-
-    # --- Store public print history as session metadata ---
-    # We embed this in a custom field on the session's tag_state extended object.
-    # (Phase 7b frontend wizard will use this to let the user review + confirm.)
-    extended_tag_state: dict = dict(tag_state)
-    if public_print_records:
-        extended_tag_state["imported_print_records"] = [
-            {
-                "note": r.get("note") if body.include_public_notes else None,
-                "date": r.get("date"),
-                "printer": r.get("printer") if body.include_settings else None,
-                "material": r.get("material") if body.include_settings else None,
-                "filament_color": r.get("filament_color") if body.include_settings else None,
-                "nozzle_diameter": r.get("nozzle_diameter") if body.include_settings else None,
-                "layer_height": r.get("layer_height") if body.include_settings else None,
-                "supports": r.get("supports") if body.include_settings else None,
-                "success": r.get("success") if body.include_settings else None,
-                "rating": r.get("rating") if body.include_public_notes else None,
-                "filament_length_mm": r.get("filament_length_mm"),
-                "filament_weight_g": r.get("filament_weight_g"),
-                "estimated_print_time_s": r.get("estimated_print_time_s"),
-            }
-            for r in public_print_records
-        ]
-
-    # --- Create ImportSession ---
-    session = ImportSession(
-        status=ImportSessionStatus.pending_wizard,
-        source_type=ImportSourceType.url,
-        source_url=remote_source_url or share_url,
-        suggested_title=remote_title or "Imported from share link",
-        confirmed_title=remote_title or "Imported from share link",
-        description=remote_description,
-        license=remote_license,
-        tag_state=extended_tag_state,
-        library_id=target_library_id,
-        created_by_id=user.id,
-    )
-    db.add(session)
-    await db.flush()
-    await db.refresh(session)
-
-    log.info(
-        "import_from_share_link: created session %s from %s "
-        "(tags confirmed=%d pending=%d print_records=%d)",
-        session.id,
-        api_url,
-        len(tag_state.get("confirmed", [])),
-        len(tag_state.get("pending", [])),
-        len(public_print_records),
-    )
-
-    from sqlalchemy.orm import selectinload  # noqa: PLC0415
-
-    result = await db.execute(
-        select(ImportSession)
-        .options(
-            selectinload(ImportSession.files),
-            selectinload(ImportSession.images),
-        )
-        .where(ImportSession.id == session.id)
-    )
-    session = result.scalar_one()
-    return _session_out(session)
-
-
-# ---------------------------------------------------------------------------
-# Site capability endpoints
-# ---------------------------------------------------------------------------
-
-
-@router.get("/api/site-capabilities", response_model=list[SiteCapabilityOut])
-async def list_site_capabilities(
-    _user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> list[SiteCapabilityOut]:
-    """List all known site capabilities."""
-    result = await db.execute(
-        select(SiteCapability).order_by(SiteCapability.domain)
-    )
-    caps = result.scalars().all()
-
-    # Check which domains have tokens
-    token_result = await db.execute(
-        select(SiteToken.domain)
-    )
-    token_domains = {row[0] for row in token_result.all()}
-
-    return [
-        SiteCapabilityOut(
-            domain=c.domain,
-            can_scrape_metadata=c.can_scrape_metadata,
-            can_scrape_images=c.can_scrape_images,
-            requires_token=c.requires_token,
-            is_manual_only=c.is_manual_only,
-            last_probed_at=c.last_probed_at,
-            notes=c.notes,
-            has_token=c.domain in token_domains,
-        )
-        for c in caps
-    ]
-
-
-@router.get("/api/site-capabilities/{domain}", response_model=SiteCapabilityOut)
-async def get_site_capability(
-    domain: str,
-    _user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> SiteCapabilityOut:
-    """Get site capability for a domain."""
-    result = await db.execute(
-        select(SiteCapability).where(SiteCapability.domain == domain)
-    )
-    cap = result.scalar_one_or_none()
-    if cap is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No capability record for domain '{domain}'.",
-        )
-
-    token_res = await db.execute(
-        select(SiteToken).where(SiteToken.domain == domain)
-    )
-    has_token = token_res.scalar_one_or_none() is not None
-
-    return SiteCapabilityOut(
-        domain=cap.domain,
-        can_scrape_metadata=cap.can_scrape_metadata,
-        can_scrape_images=cap.can_scrape_images,
-        requires_token=cap.requires_token,
-        is_manual_only=cap.is_manual_only,
-        last_probed_at=cap.last_probed_at,
-        notes=cap.notes,
-        has_token=has_token,
-    )
-
-
-@router.patch("/api/site-capabilities/{domain}", response_model=SiteCapabilityOut)
-async def patch_site_capability(
-    domain: str,
-    body: PatchSiteCapabilityRequest,
-    _user: Annotated[User, Depends(get_current_user)],
-    _csrf: Annotated[None, Depends(csrf_protect)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> SiteCapabilityOut:
-    """Update site capability flags, or store a new auth token (encrypted)."""
-    result = await db.execute(
-        select(SiteCapability).where(SiteCapability.domain == domain)
-    )
-    cap = result.scalar_one_or_none()
-    if cap is None:
-        # Auto-create
-        cap = SiteCapability(domain=domain)
-        db.add(cap)
-
-    if body.can_scrape_metadata is not None:
-        cap.can_scrape_metadata = body.can_scrape_metadata
-    if body.can_scrape_images is not None:
-        cap.can_scrape_images = body.can_scrape_images
-    if body.requires_token is not None:
-        cap.requires_token = body.requires_token
-    if body.is_manual_only is not None:
-        cap.is_manual_only = body.is_manual_only
-    if body.notes is not None:
-        cap.notes = body.notes
-
-    cap.updated_at = datetime.now(UTC)
-    await db.flush()
-
-    # Store encrypted token if provided
-    has_token = False
-    if body.token:
-        from ..crypto import encrypt  # noqa: PLC0415
-
-        encrypted = encrypt(body.token)
-
-        token_res = await db.execute(
-            select(SiteToken).where(SiteToken.domain == domain)
-        )
-        token_row = token_res.scalar_one_or_none()
-        if token_row is None:
-            token_row = SiteToken(domain=domain, encrypted_token=encrypted)
-            db.add(token_row)
-        else:
-            token_row.encrypted_token = encrypted
-            token_row.updated_at = datetime.now(UTC)
-        await db.flush()
-        has_token = True
-    else:
-        token_res = await db.execute(
-            select(SiteToken).where(SiteToken.domain == domain)
-        )
-        has_token = token_res.scalar_one_or_none() is not None
-
-    return SiteCapabilityOut(
-        domain=cap.domain,
-        can_scrape_metadata=cap.can_scrape_metadata,
-        can_scrape_images=cap.can_scrape_images,
-        requires_token=cap.requires_token,
-        is_manual_only=cap.is_manual_only,
-        last_probed_at=cap.last_probed_at,
-        notes=cap.notes,
-        has_token=has_token,
-    )
