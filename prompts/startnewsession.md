@@ -8,7 +8,37 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-06-28 (UI REVAMP COMPLETE — A1/A2/B1-B4 + libraries on `dev`; final backend suite re-confirming; frontend green: tsc + 185 vitest)
+**Last updated:** 2026-06-30 (post UI-revamp deep feature/fix run on `dev`; about to do the FIRST push to origin/dev)
+
+> ## CURRENT STATE & ROADMAP (2026-06-30)
+> UI revamp (Aurora) DONE. A large owner-driven run of features/fixes has since landed on `dev`,
+> **all committed but never pushed** (`dev` was ~87 commits ahead of origin). Highlights: AgentQL
+> fallback scraper (MakerWorld/Cloudflare, BYO key + budget, mig 0018), per-object asset analysis
+> (colors+grams, 0016), local-modified tracking + public-share notice (0015), renders-as-gallery-
+> images (0014), per-library×per-OS path prefixes (0017), image upload/delete, item delete-to-trash
+> (cross-device fix), tag delete/autocomplete/starter-tags, browse-cloud Alpha/Number sort + real
+> counts, AI usage+$cost, job retry, Quick Start page, import management. **Migrations at 0018.**
+> ~465 backend / 228 vitest, vite build green.
+>
+> **Owner-approved sequence (do in order):**
+> 1. **Push `dev`** → first-ever CI run (ci.yml on push:[dev]) + publish.yml `:dev` image. Watch `gh`, fix failures.
+> 2. **Modularization refactor** (behavior-preserving; sequential; verify+commit each): split `api.ts`
+>    (2k) → `lib/api/*`+barrel; split `ItemPage.tsx` (2.6k) + `ImportWizardPage.tsx` (2.3k) into
+>    subcomponents; split `worker.py` (1.7k) → `worker/tasks/*`, carve `import_sessions.py`/`items.py`;
+>    retire `examples/` from src.
+> 3. **Full test pass** (whole backend suite on ephemeral PG + frontend gates).
+> 4. **Nav reorg**: admin 17 → 5 tabbed sections (Content · Users&Access · AI&Scraping · Jobs&Activity ·
+>    Data&Backups); merge Tag Admin+Pending, AI Providers+Usage+Site-Caps.
+> 5. **Docs pass** (post-nav, final tab names): README features (8 new) + Getting-started; `.env.example`;
+>    `docs/build-plan.md` (stale "Phase 0"); QuickStart route links; add `docs/features-overview.md` +
+>    `docs/nav-architecture.md`. (Full docs audit already done.)
+> 6. **v0.1.0 release**: `/release-prep 0.1.0` → dev→main PR → CI **+ first CodeQL run** green → make
+>    **CodeQL gating** (branch protection — owner click / `gh api`) → merge → images publish → `/release-cut v0.1.0`.
+>
+> **Verify discipline:** backend = `ruff check backend/` (config lives in `backend/pyproject.toml` —
+> running ruff WITHOUT it yields false UP042/F841 errors) + ephemeral-PG pytest; frontend = tsc +
+> vitest + **`npx vite build`** (the real gate — tsc/vitest miss babel parse errors). Worker has NO
+> hot-reload (restart it for worker.py/scraper changes); backend uses uvicorn --reload.
 
 > **UI REVAMP underway (owner-directed, autonomous run).** Owner chose **Aurora** (`/example3`)
 > as the real look. Locked spec:
