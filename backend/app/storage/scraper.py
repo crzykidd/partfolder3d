@@ -256,6 +256,12 @@ def scrape_url(
 
         if resp.status_code != 200:
             result.note = f"HTTP {resp.status_code}"
+            # Anti-bot / access-denied codes (Cloudflare et al. answer 403 with a
+            # "Just a moment" JS challenge) mean a smarter fetcher might succeed —
+            # flag as blocked so the AgentQL fallback (if enabled) is triggered.
+            # 404/500-class stay unblocked (a fallback wouldn't help).
+            if resp.status_code in (401, 403, 429, 503):
+                result.blocked = True
             return result
 
         content_type = resp.headers.get("content-type", "")
