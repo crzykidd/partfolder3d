@@ -12,6 +12,7 @@ import { describe, it, expect } from 'vitest'
 import {
   getTagFontSize,
   getTagFontWeight,
+  sortTags,
   toPathStyle,
   rewritePath,
   detectOS,
@@ -34,13 +35,13 @@ describe('getTagFontSize', () => {
     expect(result).toBe('0.75rem')
   })
 
-  it('returns largest size for the maximum count', () => {
+  it('returns largest size for the maximum count (capped at ~22 px / 1.375rem)', () => {
     const result = getTagFontSize(100, 1, 100)
-    expect(result).toBe('2rem')
+    expect(result).toBe('1.375rem')
   })
 
-  it('scales linearly between min and max', () => {
-    // With a 0–100 range, count=50 should be roughly in the middle
+  it('scales monotonically between min and max (log scale)', () => {
+    // With a 0–100 range, count=50 should sit between min and max
     const sizeMin = getTagFontSize(0, 0, 100)
     const sizeMid = getTagFontSize(50, 0, 100)
     const sizeMax = getTagFontSize(100, 0, 100)
@@ -51,6 +52,8 @@ describe('getTagFontSize', () => {
 
     expect(minVal).toBeLessThan(midVal)
     expect(midVal).toBeLessThan(maxVal)
+    // Log scale compresses high-count outliers — mid is above 50% of the range
+    expect(midVal).toBeGreaterThan((minVal + maxVal) / 2)
   })
 
   it('handles count equal to minCount', () => {
@@ -60,7 +63,7 @@ describe('getTagFontSize', () => {
 
   it('handles count equal to maxCount', () => {
     const size = getTagFontSize(50, 10, 50)
-    expect(size).toBe('2rem')
+    expect(size).toBe('1.375rem')
   })
 })
 
@@ -85,6 +88,65 @@ describe('getTagFontWeight', () => {
     const weights = ['font-normal', 'font-medium', 'font-semibold', 'font-bold']
     expect(weights.indexOf(w80)).toBeGreaterThan(weights.indexOf(w50))
     expect(weights.indexOf(w50)).toBeGreaterThan(weights.indexOf(w10))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// sortTags — tag cloud ordering
+// ---------------------------------------------------------------------------
+
+describe('sortTags', () => {
+  // Minimal tag shapes compatible with TagForSort
+  const tags = [
+    { name: 'banana', item_count: 5 },
+    { name: 'apple', item_count: 10 },
+    { name: 'cherry', item_count: 5 },
+    { name: 'date', item_count: 1 },
+  ]
+
+  it('alpha mode sorts A→Z by name', () => {
+    const sorted = sortTags(tags, 'alpha')
+    expect(sorted.map((t) => t.name)).toEqual(['apple', 'banana', 'cherry', 'date'])
+  })
+
+  it('number mode sorts by item_count descending', () => {
+    const sorted = sortTags(tags, 'number')
+    expect(sorted[0].name).toBe('apple') // 10
+    expect(sorted[3].name).toBe('date')  // 1
+  })
+
+  it('number mode breaks ties by name A→Z', () => {
+    // banana and cherry both have item_count=5
+    const sorted = sortTags(tags, 'number')
+    expect(sorted[1].name).toBe('banana')
+    expect(sorted[2].name).toBe('cherry')
+  })
+
+  it('does not mutate the original array', () => {
+    const original = [...tags]
+    sortTags(tags, 'alpha')
+    expect(tags).toEqual(original)
+  })
+
+  it('handles an empty array', () => {
+    expect(sortTags([], 'alpha')).toEqual([])
+    expect(sortTags([], 'number')).toEqual([])
+  })
+
+  it('handles a single-element array', () => {
+    const single = [{ name: 'solo', item_count: 3 }]
+    expect(sortTags(single, 'alpha')).toEqual(single)
+    expect(sortTags(single, 'number')).toEqual(single)
+  })
+
+  it('alpha mode is case-insensitive', () => {
+    const mixed = [
+      { name: 'Zebra', item_count: 1 },
+      { name: 'apple', item_count: 1 },
+      { name: 'Mango', item_count: 1 },
+    ]
+    const sorted = sortTags(mixed, 'alpha')
+    expect(sorted.map((t) => t.name)).toEqual(['apple', 'Mango', 'Zebra'])
   })
 })
 

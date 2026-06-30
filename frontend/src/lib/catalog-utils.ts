@@ -7,12 +7,16 @@
 // Tag cloud weighting (PRD §5.2)
 // ---------------------------------------------------------------------------
 
-/** Font-size steps (rem) for the popularity tag cloud. */
-const TAG_SIZE_SCALE = [0.75, 0.875, 1.0, 1.125, 1.25, 1.5, 1.75, 2.0]
+/** Minimum tag font size (rem ≈ 12 px at 16 px base). */
+const MIN_TAG_FONT_REM = 0.75
+/** Maximum tag font size (rem ≈ 22 px at 16 px base) — keeps the cloud balanced. */
+const MAX_TAG_FONT_REM = 1.375
 
 /**
- * Map a tag's popularity count to a CSS font-size string.
- * Scales linearly between minCount and maxCount across the size buckets.
+ * Map a tag's item count to a CSS font-size string.
+ *
+ * Uses a log scale so high-count outliers do not balloon disproportionately.
+ * Clamps between MIN_TAG_FONT_REM and MAX_TAG_FONT_REM.
  * When minCount === maxCount all tags return 1rem.
  */
 export function getTagFontSize(
@@ -21,9 +25,12 @@ export function getTagFontSize(
   maxCount: number,
 ): string {
   if (maxCount <= minCount) return '1rem'
-  const normalized = (count - minCount) / (maxCount - minCount)
-  const idx = Math.round(normalized * (TAG_SIZE_SCALE.length - 1))
-  return `${TAG_SIZE_SCALE[Math.min(idx, TAG_SIZE_SCALE.length - 1)]}rem`
+  const range = maxCount - minCount
+  // Log-normalise: gentle curve, count=minCount → 0, count=maxCount → 1
+  const logNorm = Math.log(count - minCount + 1) / Math.log(range + 1)
+  const size = MIN_TAG_FONT_REM + logNorm * (MAX_TAG_FONT_REM - MIN_TAG_FONT_REM)
+  // Strip trailing zeros (e.g. 0.750 → 0.75)
+  return `${parseFloat(size.toFixed(3))}rem`
 }
 
 /**
@@ -40,6 +47,37 @@ export function getTagFontWeight(
   if (normalized >= 0.4) return 'font-semibold'
   if (normalized >= 0.15) return 'font-medium'
   return 'font-normal'
+}
+
+// ---------------------------------------------------------------------------
+// Tag cloud sort (PRD §5.2)
+// ---------------------------------------------------------------------------
+
+/** Sort mode for the tag cloud: A→Z by name or by item_count descending. */
+export type TagSortMode = 'alpha' | 'number'
+
+/** Minimal duck type accepted by sortTags — compatible with api.TagSummary. */
+export interface TagForSort {
+  name: string
+  item_count: number
+}
+
+/**
+ * Return a new sorted copy of `tags`.
+ *   alpha  — A→Z by name (locale, case-insensitive)
+ *   number — item_count descending; ties → name A→Z
+ */
+export function sortTags<T extends TagForSort>(tags: T[], mode: TagSortMode): T[] {
+  if (mode === 'alpha') {
+    return [...tags].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+    )
+  }
+  return [...tags].sort(
+    (a, b) =>
+      b.item_count - a.item_count ||
+      a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+  )
 }
 
 // ---------------------------------------------------------------------------
