@@ -52,6 +52,7 @@ export const WIDGET_REGISTRY: WidgetDef[] = [
     color: 'var(--aurora-stat1)',
     defaultForRoles: ['admin', 'user'],
     getValue: (c) => (c.totalAssets != null ? c.totalAssets.toLocaleString() : '—'),
+    linkTo: '/catalog',
   },
 
   {
@@ -63,6 +64,7 @@ export const WIDGET_REGISTRY: WidgetDef[] = [
     defaultForRoles: ['admin', 'user'],
     getValue: (c) =>
       c.printStats?.total_prints != null ? c.printStats.total_prints.toLocaleString() : '—',
+    linkTo: '/admin/content/print-stats',
   },
 
   {
@@ -76,6 +78,7 @@ export const WIDGET_REGISTRY: WidgetDef[] = [
       c.printStats?.total_filament_weight_g != null
         ? `${(c.printStats.total_filament_weight_g / 1000).toFixed(1)} kg`
         : '—',
+    linkTo: '/admin/content/print-stats',
   },
 
   {
@@ -89,6 +92,7 @@ export const WIDGET_REGISTRY: WidgetDef[] = [
       c.printStats?.success_rate != null
         ? `${Math.round(c.printStats.success_rate * 100)}%`
         : '—',
+    linkTo: '/admin/content/print-stats',
   },
 
   {
@@ -99,6 +103,7 @@ export const WIDGET_REGISTRY: WidgetDef[] = [
     color: 'var(--aurora-stat5)',
     defaultForRoles: ['admin', 'user'],
     getValue: (c) => (c.jobsRunning != null ? String(c.jobsRunning) : '—'),
+    linkTo: '/admin/activity/jobs',
   },
 
   {
@@ -110,6 +115,7 @@ export const WIDGET_REGISTRY: WidgetDef[] = [
     defaultForRoles: ['admin'],
     requiresAdmin: true,
     getValue: (c) => (c.openIssues != null ? String(c.openIssues) : '—'),
+    linkTo: '/admin/activity/issues',
   },
 
   {
@@ -121,6 +127,7 @@ export const WIDGET_REGISTRY: WidgetDef[] = [
     defaultForRoles: ['admin'],
     requiresAdmin: true,
     getValue: (c) => (c.pendingReviews != null ? String(c.pendingReviews) : '—'),
+    linkTo: '/admin/activity/reviews',
   },
 
   {
@@ -137,6 +144,7 @@ export const WIDGET_REGISTRY: WidgetDef[] = [
       }
       return '—'
     },
+    linkTo: '/admin/content/tags',
   },
 
   {
@@ -147,6 +155,7 @@ export const WIDGET_REGISTRY: WidgetDef[] = [
     color: '#ef4444',
     defaultForRoles: [],
     getValue: (c) => (c.favoritesCount != null ? String(c.favoritesCount) : '—'),
+    linkTo: '/catalog?favorited=true',
   },
 
   {

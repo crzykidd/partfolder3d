@@ -21,6 +21,7 @@
  */
 
 import React, { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Settings2, ChevronUp, ChevronDown, X, Plus, Check } from 'lucide-react'
 
@@ -47,6 +48,8 @@ interface StatTileBaseProps {
   onMoveUp?: () => void
   onMoveDown?: () => void
   onRemove?: () => void
+  /** React-router path to navigate to on click. Omitted = non-clickable. Ignored in editMode. */
+  linkTo?: string
 }
 
 function StatTileBase({
@@ -61,38 +64,46 @@ function StatTileBase({
   onMoveUp,
   onMoveDown,
   onRemove,
+  linkTo,
 }: StatTileBaseProps) {
   const pad = compact ? '6px 10px' : '10px 14px'
   const valueFontSize = compact ? 15 : 20
+  const isLinked = !!linkTo && !editMode
 
-  return (
-    <div
-      style={{
-        position: 'relative',
-        background: 'var(--aurora-card)',
-        border: editMode ? '1px dashed var(--aurora-pill-border)' : '1px solid var(--aurora-card-border)',
-        borderRadius: 12,
-        padding: pad,
-        backdropFilter: 'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
-        flex: '1 1 120px',
-        minWidth: compact ? 100 : 110,
-        transition: 'border-color 0.15s, box-shadow 0.15s',
-        cursor: editMode ? 'default' : 'default',
-      } as React.CSSProperties}
-      onMouseEnter={(e) => {
-        if (!editMode) {
-          ;(e.currentTarget as HTMLDivElement).style.borderColor = `${color}40`
-          ;(e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 20px ${color}20`
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!editMode) {
-          ;(e.currentTarget as HTMLDivElement).style.borderColor = 'var(--aurora-card-border)'
-          ;(e.currentTarget as HTMLDivElement).style.boxShadow = 'none'
-        }
-      }}
-    >
+  const tileStyle: React.CSSProperties = {
+    position: 'relative',
+    background: 'var(--aurora-card)',
+    border: editMode ? '1px dashed var(--aurora-pill-border)' : '1px solid var(--aurora-card-border)',
+    borderRadius: 12,
+    padding: pad,
+    backdropFilter: 'blur(16px)',
+    WebkitBackdropFilter: 'blur(16px)',
+    flex: '1 1 120px',
+    minWidth: compact ? 100 : 110,
+    transition: 'border-color 0.15s, box-shadow 0.15s',
+    cursor: isLinked ? 'pointer' : 'default',
+    // Reset anchor defaults when rendered as <Link>
+    textDecoration: 'none',
+    color: 'inherit',
+    display: 'block',
+  }
+
+  const handleMouseEnter = (e: React.MouseEvent<HTMLElement>) => {
+    if (!editMode) {
+      ;(e.currentTarget as HTMLElement).style.borderColor = `${color}40`
+      ;(e.currentTarget as HTMLElement).style.boxShadow = `0 0 20px ${color}20`
+    }
+  }
+
+  const handleMouseLeave = (e: React.MouseEvent<HTMLElement>) => {
+    if (!editMode) {
+      ;(e.currentTarget as HTMLElement).style.borderColor = 'var(--aurora-card-border)'
+      ;(e.currentTarget as HTMLElement).style.boxShadow = 'none'
+    }
+  }
+
+  const tileContent = (
+    <>
       <div
         style={{
           display: 'flex',
@@ -144,6 +155,29 @@ function StatTileBase({
           </EditBtn>
         </div>
       )}
+    </>
+  )
+
+  if (isLinked) {
+    return (
+      <Link
+        to={linkTo!}
+        style={tileStyle}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
+        {tileContent}
+      </Link>
+    )
+  }
+
+  return (
+    <div
+      style={tileStyle}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
+      {tileContent}
     </div>
   )
 }
@@ -463,6 +497,7 @@ export function WidgetStatStrip() {
               onMoveUp={() => moveUp(idx)}
               onMoveDown={() => moveDown(idx)}
               onRemove={() => removeTile(tile.id)}
+              linkTo={tile.linkTo}
             />
           )
         })}

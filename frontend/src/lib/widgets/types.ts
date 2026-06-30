@@ -41,6 +41,12 @@ export interface StatWidgetDef {
   requiresAdmin?: boolean
   /** Derive the display value from the pre-fetched data cache. */
   getValue: (cache: StatDataCache) => string
+  /**
+   * Optional react-router path to navigate to when the tile is clicked.
+   * Omit for tiles with no sensible detail page (e.g. storage-used, creators).
+   * Tiles without linkTo remain non-clickable.
+   */
+  linkTo?: string
 }
 
 /** Panel (right rail) widget definition. */

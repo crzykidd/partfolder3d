@@ -2,6 +2,15 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-30 — Clickable stat-strip tiles
+
+Made the global `WidgetStatStrip` tiles navigate to their detail pages. Added an optional
+`linkTo` to the tile registry; `StatTileBase` renders as a react-router `<Link>` only when
+`linkTo` is set AND the strip is not in edit mode (edit mode keeps tiles draggable/removable).
+Two tiles intentionally have no `linkTo`: `creators` (only a `/creators/:id` detail route
+exists, no list page) and `storage-used` (backend not implemented; shows `—`). `favorites`
+links to `/catalog?favorited=true` — `CatalogPage` already honors that query param.
+
 ## 2026-06-30 — Fix scraped-image filename collision on import commit
 
 **Root cause:** the URL-image download loop derived `img_name` from `Path(si.path).name`, so every MakerWorld CDN URL ending in `.../image/format,webp` resolved to the filename `format,webp` — each successive image overwrote the previous one, leaving N `Image` rows all pointing to the same single file.
