@@ -2,6 +2,28 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-29 — Split ItemPage.tsx into item/* subcomponents
+
+`frontend/src/pages/ItemPage.tsx` (2,589 lines) split into 8 subcomponent files under
+`frontend/src/pages/item/` — pure token-efficiency refactor, no behavior change.
+
+Subcomponents extracted: `styles.ts` (aurora constants + formatters), `AuroraSection.tsx`
+(section wrapper), `ImageCarousel.tsx` (carousel + pager/thumbs/lightbox),
+`PathDisplay.tsx` (path rewrite + OS override), `DownloadsPanel.tsx` (single files + ZIP
+queue/poll + include-history), `PrintHistory.tsx` (PrintRecordForm + PrintRecordCard +
+PrintHistorySection), `ObjectBreakdown.tsx` (ColorSwatch + ObjectBreakdownSection),
+`ShareControls.tsx` (mint/list/revoke/copy), `ItemMetadata.tsx` (title, creator, tags,
+source/license, modified badge + override, description, timestamps).
+
+`ItemPage.tsx` now 300 lines — owns the top-level query, image mutations (set-default,
+upload, delete), delete-to-trash, breadcrumb, and layout. `overrideMutation` lives in
+`ItemMetadata` since it updates the same `['item', key]` query key. All TanStack query
+keys, mutations, carousel paging, upload/delete/set-default, print-history forms, share
+flow, ZIP poll, and object breakdown behavior preserved verbatim.
+
+`AuroraSection` was initially placed in `styles.ts` (.ts extension); build failed because
+esbuild does not parse JSX in `.ts` files. Fixed by extracting to `AuroraSection.tsx`.
+
 ## 2026-06-29 — Split api.ts into per-domain modules under lib/api/
 
 `frontend/src/lib/api.ts` (2,011 lines) split into 22 domain modules under
