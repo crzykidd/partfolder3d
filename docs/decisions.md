@@ -2,6 +2,10 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-30 — Docs refresh: README features + getting-started, .env.example, build-plan, + new features-overview/nav-architecture
+
+Updated README features section (8 post-Phase-10 feature groups: AgentQL fallback, AI usage/cost, asset analysis, modification tracking, per-library/OS path prefixes, image management, tag improvements, import management, Aurora UI) and rewrote Getting Started to the real dev-stack flow; replaced stale "Admin → Libraries" wording in `.env.example`; updated `docs/build-plan.md` status; added `docs/features-overview.md` (per-feature reference with admin routes) and `docs/nav-architecture.md` (5-section IA, tab/route table, back-compat redirects).
+
 ## 2026-06-29 — Admin nav reorg: 17-item menu → 5 tabbed sections
 
 **Problem:** The admin sidebar/dropdown had two groups (Operations + Admin) totalling 17 entries —

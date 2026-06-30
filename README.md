@@ -83,6 +83,9 @@ transfer, and resilience against database loss.
 - Item page: image carousel + default-image picker, full metadata, source link,
   license, full directory path with a configurable **path-prefix rewrite** and copy
   button to jump to the source folder on your machine.
+- **Per-library × per-OS local path prefixes** — each library carries independent
+  Windows `\` and Linux/macOS `/` prefixes; the browser auto-detects your OS and picks
+  the right one (overridable in Settings).
 - Theme: dark / light / **system default**, with a persisted per-user override.
 
 ### 🏷️ Tagging
@@ -92,6 +95,14 @@ transfer, and resilience against database loss.
 - **New-tag approval queue** keeps the vocabulary clean.
 - **Virtual tag-browse tree** derived from the most-used tags, N levels deep
   (default 4) — purely a DB/UI construct; tags never move files on disk.
+- **Tag delete** — removes a tag from all items that use it (items are never deleted);
+  safe to run on active or pending tags.
+- **Typeahead autocomplete** in the import-wizard Tags step — prefix search on existing
+  tags with keyboard navigation.
+- **Starter-tags loader** — seeds a curated 57-tag vocabulary (7 categories: type,
+  function, feature, theme, process, audience, mechanical) from the Tags page
+  (Content section).
+- Tag-cloud **Alpha / Number sort** toggle; **in-use-only** filter hides zero-item tags.
 
 ### 📥 Import & inbox
 - **Inbox folder drop** — drop model files + a URL/link + an optional sidecar; a
@@ -108,6 +119,18 @@ transfer, and resilience against database loss.
 - Blender / Fusion / STEP / CAD: generic icon + any scraped/manual image (optional
   add-on renderer containers later).
 - Renders cached per file hash; re-rendered automatically when a file changes.
+- Renders are **surfaced as gallery images** in the item carousel alongside scraped and
+  uploaded images.
+- **Per-item image upload and delete** — add or remove curated images at any time;
+  stored in `images/` next to the model files.
+- **Delete to trash** — moves an item directory to a recoverable trash folder inside
+  `DATA_DIR` rather than permanently removing it.
+
+### 📐 Asset analysis
+- **Estimated filament use** — per-object grams and color count for STL and 3MF files,
+  computed from mesh volume (filament density and infill % are configurable site-wide
+  settings).
+- Non-watertight meshes are flagged with a **low-confidence** badge on the item page.
 
 ### 🔄 Reconciliation / scan engine
 - Bidirectional **sidecar ⇄ DB sync**; conflicts raised as Issues.
@@ -117,6 +140,9 @@ transfer, and resilience against database loss.
   and a live **job/queue monitor**.
 - **Atomic, all-or-nothing** directory operations with crash-safe rollback.
 - Per-item **"Rescan disk"** button for on-demand reconciliation.
+- **Modification tracking** — detects when local model files have been changed from the
+  originally downloaded versions; items show a "modified copy" notice on public share
+  pages when flagged.
 
 ### 🖨️ Print history
 - Per-item print records (all fields optional): note + **private/public** visibility,
@@ -139,6 +165,11 @@ transfer, and resilience against database loss.
 - Tag suggestion/matching, description cleanup, web-scrape summarization.
 - Prefers existing canonical tags; routes a few genuinely new tags to the queue.
 - **Manual-only always works** with zero AI configured.
+- Optional **AgentQL fallback scraper** — for Cloudflare-gated sites (e.g. MakerWorld)
+  that block the built-in static scraper; BYO API key with configurable free-allowance
+  and monthly $ cap (AI & Scraping section).
+- **AI usage tracking** — per-provider call log with input/output token counts and
+  estimated cost per 24 h / 7 d / 30 d window (AI & Scraping section).
 
 ### 🛠️ Admin & multi-user
 - First-run wizard creates the admin; **no open registration** — users join via a
@@ -149,6 +180,16 @@ transfer, and resilience against database loss.
 - **Scheduled backup of DB + config** (library files are *not* backed up by design).
 - Full-catalog **JSON export**; library, tag, and site-capability administration.
 - **Scheduled-jobs** view (last run / next run / running now) + manual triggers.
+- **Aurora UI** — switchable **top-bar or side navigation** (per-user preference in
+  Settings); **customizable widget dashboard** on the home page; **Quick Start**
+  onboarding page.
+- **5-section admin nav** — Content · Users & Access · AI & Scraping · Jobs & Activity ·
+  Data & Backups — consolidates 17+ old entries into a tabbed layout; old `/admin/*`
+  paths redirect automatically to their new locations.
+- **Failed-job retry** — re-enqueue a failed render job directly from the Jobs page
+  (Jobs & Activity section).
+- **Import management** — delete an in-progress import session, remove a staged image,
+  or clear an inbox folder from the Imports page.
 
 ### 🔌 API
 - **Full REST API** covering everything the UI can do.
@@ -285,7 +326,7 @@ See the [CHANGELOG](CHANGELOG.md) for the full delivered feature list.
 ## Getting started
 
 > [!NOTE]
-> **Alpha — no published image yet.** The code and `docker-compose.yml` exist; a
+> **Alpha — no published image yet.** The code and `docker-compose.dev.yml` exist; a
 > tagged release and registry images are coming with v0.1.0. For now, build locally
 > from source.
 
@@ -293,30 +334,29 @@ See the [CHANGELOG](CHANGELOG.md) for the full delivered feature list.
 <summary><strong>Build from source (dev stack)</strong></summary>
 
 ```bash
-# clone and start the stack
+# clone and start the dev stack
 git clone https://github.com/crzykidd/partfolder3d.git
 cd partfolder3d
 cp .env.example .env
-docker compose up -d --build          # production stack
-# or, for local dev with hot reload (one self-contained file):
-#   docker compose -f docker-compose.dev.yml up --build
+docker compose -f docker-compose.dev.yml up -d --build
 ```
 
 Database migrations run automatically on startup — the backend's image
 entrypoint runs `alembic upgrade head` before uvicorn (the worker waits for the
 backend to be healthy), so there is no manual migration step and no extra
-container. The dev stack additionally bind-mounts all storage under
+container. The dev stack bind-mounts all storage under
 `./private_data/data/` (Postgres, Redis, app data) for easy host inspection.
 
 Then open **http://localhost:8973** and complete the **first-run wizard**:
 
 1. Create the admin account + instance basics (name, external URL/port, time zone).
-2. Navigate to **Admin → Libraries** and add your first library — give it a name and
-   set the mount path to the container path of the mounted volume (e.g. `/library`
+2. Add your first library on the **Libraries** page (Content section) — give it a name
+   and set the mount path to the container path of the mounted volume (e.g. `/library`
    for the dev stack, or `/library/main` for a custom prod mount).
-3. *(Optional, skippable)* configure an AI provider, seed tags, or set up a backup schedule.
+3. *(Optional, skippable)* Load Starter Tags (Tags page, Content section), enable an AI
+   provider (AI & Scraping section), or schedule backups (Data & Backups section).
 
-The default external port is **`8973`** and is changeable in `docker-compose.yml`.
+The default external port is **`8973`** and is changeable in `docker-compose.dev.yml`.
 
 </details>
 

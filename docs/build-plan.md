@@ -5,8 +5,10 @@ shippable increment with explicit exit criteria. The central Opus planning sessi
 this by writing a handoff prompt per phase (or per slice of a large phase) and dispatching
 a Sonnet agent (see [`CLAUDE.md`](../CLAUDE.md) operating model).
 
-> **Status:** not started. Next up = **Phase 0**.
-> Phase prompts live in `prompts/`; completed ones in `prompts/done/`.
+> **Status:** Phases 0–10 shipped in the v0.1.0 alpha. A post-revamp feature/fix run,
+> modularization refactor, and admin nav reorganization are on `dev`. Phase prompts live in
+> `prompts/`; completed ones in `prompts/done/`. Full decision history in
+> [`decisions.md`](decisions.md).
 
 ---
 
