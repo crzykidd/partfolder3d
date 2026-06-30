@@ -675,6 +675,8 @@ export const deleteItemImage = (key: string, imageId: number): Promise<void> => 
 
 export const listTags = (params: {
   q?: string
+  /** Typeahead prefix search — filters Tag.name ILIKE '<search>%', active only. */
+  search?: string
   category?: string
   page?: number
   per_page?: number
@@ -682,6 +684,7 @@ export const listTags = (params: {
 } = {}): Promise<PaginatedTags> => {
   const sp = new URLSearchParams()
   if (params.q) sp.set('q', params.q)
+  if (params.search) sp.set('search', params.search)
   if (params.category) sp.set('category', params.category)
   if (params.page != null) sp.set('page', String(params.page))
   if (params.per_page != null) sp.set('per_page', String(params.per_page))

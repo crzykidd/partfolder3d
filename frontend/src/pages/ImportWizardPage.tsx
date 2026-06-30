@@ -892,6 +892,13 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
   const [aiTagSuggestions, setAiTagSuggestions] = useState<api.AiTagSuggestionOut | null>(null)
   const [tagAiStatus, setTagAiStatus] = useState<string | null>(null)
 
+  // Autocomplete state
+  const [acResults, setAcResults] = useState<api.TagSummary[]>([])
+  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [activeIdx, setActiveIdx] = useState(-1)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const acContainerRef = useRef<HTMLDivElement>(null)
+
   const patchMutation = useMutation({
     mutationFn: (tags: string[]) =>
       api.patchImportSession(session.id, { confirmed_tags: tags }),
@@ -961,6 +968,75 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
     return () => window.removeEventListener('keydown', handler)
   }, [showPendingPrompt])
 
+  // Debounced tag search for autocomplete
+  useEffect(() => {
+    const trimmed = input.trim()
+    if (!trimmed) {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      setAcResults([])
+      setDropdownOpen(false)
+      setActiveIdx(-1)
+      return
+    }
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      api.listTags({ search: trimmed, per_page: 10 })
+        .then((res) => {
+          setAcResults(res.tags)
+          setDropdownOpen(true)
+          setActiveIdx(-1)
+        })
+        .catch(() => {
+          // Best-effort — don't surface network errors in the autocomplete
+        })
+    }, 200)
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [input])
+
+  // Close dropdown on click-outside
+  useEffect(() => {
+    if (!dropdownOpen) return
+    const handler = (e: MouseEvent) => {
+      if (acContainerRef.current && !acContainerRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false)
+        setActiveIdx(-1)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [dropdownOpen])
+
+  // Autocomplete: filter out already-confirmed tags and compute dropdown items
+  const filteredAc = acResults.filter((t) => !confirmed.includes(t.name))
+  const inputNorm = input.trim().toLowerCase()
+  const hasExactMatch = filteredAc.some((t) => t.name.toLowerCase() === inputNorm)
+  const showCreateNew = inputNorm.length > 0 && !hasExactMatch
+  const totalAcItems = filteredAc.length + (showCreateNew ? 1 : 0)
+
+  // Select an existing tag from the autocomplete dropdown
+  const selectExistingTag = (tagName: string) => {
+    setConfirmed((c) => addConfirmedTag(c, tagName))
+    setInput('')
+    setDropdownOpen(false)
+    setAcResults([])
+    setActiveIdx(-1)
+  }
+
+  // Select "Create new tag" from the autocomplete dropdown — same flow as manual Add
+  const selectCreateNew = () => {
+    const newConfirmed = addConfirmedTag(confirmed, input)
+    if (newConfirmed !== confirmed) {
+      setConfirmed(newConfirmed)
+      setInput('')
+    }
+    setDropdownOpen(false)
+    setAcResults([])
+    setActiveIdx(-1)
+  }
+
   const handleAccept = (tag: string) => {
     const [c, p] = acceptPendingTag(confirmed, pending, tag)
     setConfirmed(c)
@@ -986,6 +1062,34 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
   }
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Autocomplete keyboard navigation (when dropdown is open)
+    if (dropdownOpen && totalAcItems > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setActiveIdx((i) => Math.min(i + 1, totalAcItems - 1))
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setActiveIdx((i) => Math.max(i - 1, -1))
+        return
+      }
+      if (e.key === 'Enter' && activeIdx >= 0) {
+        e.preventDefault()
+        if (activeIdx < filteredAc.length) {
+          selectExistingTag(filteredAc[activeIdx].name)
+        } else {
+          selectCreateNew()
+        }
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setDropdownOpen(false)
+        setActiveIdx(-1)
+        return
+      }
+    }
     if (e.key === 'Enter') {
       e.preventDefault()
       handleAddTag()
@@ -1328,32 +1432,111 @@ function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
         </div>
       )}
 
-      {/* Manual tag input */}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleInputKeyDown}
-          placeholder="Add a tag and press Enter"
-          style={{ ...AURORA_INPUT, flex: 1 }}
-          onFocus={onAuroraFocus}
-          onBlur={onAuroraBlur}
-        />
-        <button
-          type="button"
-          onClick={handleAddTag}
-          disabled={!input.trim()}
-          style={{
-            ...AURORA_BTN_GHOST,
-            opacity: !input.trim() ? 0.4 : 1,
-            cursor: !input.trim() ? 'not-allowed' : 'pointer',
-          }}
-          onMouseEnter={(e) => { if (input.trim()) (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
-        >
-          Add
-        </button>
+      {/* Manual tag input with typeahead autocomplete */}
+      <div ref={acContainerRef} style={{ position: 'relative' }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleInputKeyDown}
+            placeholder="Type to search existing tags or add new"
+            style={{ ...AURORA_INPUT, flex: 1 }}
+            onFocus={onAuroraFocus}
+            onBlur={onAuroraBlur}
+            aria-autocomplete="list"
+            aria-expanded={dropdownOpen && totalAcItems > 0}
+            aria-haspopup="listbox"
+            role="combobox"
+          />
+          <button
+            type="button"
+            onClick={handleAddTag}
+            disabled={!input.trim()}
+            style={{
+              ...AURORA_BTN_GHOST,
+              opacity: !input.trim() ? 0.4 : 1,
+              cursor: !input.trim() ? 'not-allowed' : 'pointer',
+            }}
+            onMouseEnter={(e) => { if (input.trim()) (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
+          >
+            Add
+          </button>
+        </div>
+
+        {/* Autocomplete dropdown */}
+        {dropdownOpen && totalAcItems > 0 && (
+          <div
+            role="listbox"
+            aria-label="Tag suggestions"
+            style={{
+              position: 'absolute',
+              top: '100%',
+              left: 0,
+              right: 40, // stop before the Add button
+              zIndex: 100,
+              marginTop: 4,
+              background: 'var(--aurora-card)',
+              border: '1px solid var(--aurora-card-border)',
+              borderRadius: 8,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.28)',
+              overflow: 'hidden',
+            }}
+          >
+            {filteredAc.map((tag, idx) => (
+              <div
+                key={tag.id}
+                role="option"
+                aria-selected={idx === activeIdx}
+                onMouseDown={(e) => { e.preventDefault(); selectExistingTag(tag.name) }}
+                onMouseEnter={() => setActiveIdx(idx)}
+                style={{
+                  padding: '8px 12px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: 13,
+                  color: idx === activeIdx ? 'var(--aurora-accent)' : 'var(--aurora-text)',
+                  background: idx === activeIdx ? 'var(--aurora-glass)' : 'transparent',
+                  transition: 'background 0.1s',
+                  borderBottom: idx < filteredAc.length - 1 || showCreateNew ? '1px solid var(--aurora-glass-border)' : 'none',
+                }}
+              >
+                <span>#{tag.name}</span>
+                {tag.item_count > 0 && (
+                  <span style={{ fontSize: 11, color: 'var(--aurora-muted)', flexShrink: 0 }}>
+                    {tag.item_count} item{tag.item_count !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+            ))}
+            {showCreateNew && (
+              <div
+                role="option"
+                aria-selected={activeIdx === filteredAc.length}
+                onMouseDown={(e) => { e.preventDefault(); selectCreateNew() }}
+                onMouseEnter={() => setActiveIdx(filteredAc.length)}
+                style={{
+                  padding: '8px 12px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 13,
+                  color: activeIdx === filteredAc.length ? 'var(--aurora-accent)' : 'var(--aurora-text-dim)',
+                  background: activeIdx === filteredAc.length ? 'var(--aurora-glass)' : 'transparent',
+                  transition: 'background 0.1s',
+                  fontStyle: 'italic',
+                }}
+              >
+                <span>+</span>
+                <span>Create new tag: &ldquo;{input.trim()}&rdquo;</span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {error && (

@@ -67,7 +67,12 @@ async def list_tags(
     db: Annotated[AsyncSession, Depends(get_db)],
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=50, ge=1, le=500),
-    q: str | None = Query(default=None, description="Filter by name prefix"),
+    q: str | None = Query(default=None, description="Filter by name substring"),
+    search: str | None = Query(
+        default=None,
+        description="Typeahead prefix search: filters Tag.name ILIKE '<search>%', "
+        "active only, ordered by popularity. Intended for autocomplete (per_page=10 recommended).",
+    ),
     category: str | None = Query(default=None, description="Filter by category namespace"),
     active_only: bool = Query(default=True, description="Only return active tags"),
     in_use_only: bool = Query(
@@ -102,6 +107,9 @@ async def list_tags(
         query = query.where(Tag.status == TagStatus.active)
     if q:
         query = query.where(Tag.name.ilike(f"%{q}%"))
+    if search:
+        # Prefix match for typeahead — active_only filter still applies above.
+        query = query.where(Tag.name.ilike(f"{search}%"))
     if category:
         query = query.where(Tag.category.ilike(f"{category}%"))
     if in_use_only:
