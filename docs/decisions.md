@@ -2,6 +2,83 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-30 — Delete-to-trash must be cross-device safe
+
+`move_to_trash` used `Path.replace` (os.replace), which is atomic but raises EXDEV across
+filesystems. Items live under a **library mount** (e.g. `/library`) while trash is under
+`DATA_DIR` (`/data`) — usually separate devices — so every real item delete 500'd. Fixed: try
+`os.replace` first (fast, same-device), fall back to `shutil.move` (copy+delete) on `OSError`.
+
+## 2026-06-29 — Import wizard Tags step: tag typeahead autocomplete
+
+### `GET /api/tags?search=<prefix>` — new param alongside existing `?q=`
+
+The existing `?q=` param does a substring match (`ILIKE '%q%'`) for the tag
+cloud / admin browse.  A second `?search=` param was added for the autocomplete
+typeahead: it does a prefix match (`ILIKE 'search%'`) and respects the existing
+`active_only=true` default.  No per-page cap is enforced server-side; the
+frontend requests `per_page=10` when calling as a typeahead.
+
+Chose a separate `?search=` param (rather than reusing `?q=`) so the two call
+sites remain independent: the cloud uses substring-everywhere; the autocomplete
+wants prefix-anchored results (users type from the start of a tag name).
+
+### Autocomplete in `ImportWizardPage.tsx` — debounced, keyboard accessible
+
+A 200 ms debounced search fires on every keystroke in the tag input.  Results
+are shown in an absolute-positioned dropdown attached to the input container
+(click-outside closes it).  The dropdown lists:
+
+- **Matching existing active tags** (click or Enter on highlighted item → adds
+  directly to `confirmed`, skipping the new-tag → pending path since the tag
+  already exists).
+- **"Create new tag: '<typed>'"** when the typed text is non-empty and does not
+  exactly match any result (selecting it goes through the existing `handleAddTag`
+  new-tag path).
+
+All existing Tags-step behaviors are preserved: AI suggestions card, manual
+Enter-to-add, the pending-tag-on-Next confirmation prompt, and the
+pending-from-session accept/reject chips.  `onMouseDown` + `e.preventDefault()`
+on each dropdown item prevents input blur before selection fires.
+
+## 2026-06-29 — Item page: carousel layout + controlled thumbnail strip
+
+### Fixed-height main image (300 px, no aspect-ratio)
+
+The previous main-image container used `aspectRatio: '16/9'` + `minHeight: 200`.
+On a 900 px max-width page the 1fr column is ~440 px wide, so 16:9 = ~247 px — fine
+by itself, but the unbounded thumbnail strip below (rendering all 16+ thumbnails with
+`overflow: auto`) pushed the image block to dominate the hero.  Fix: fixed `height: 300`
+with no aspect-ratio.  The image inside uses `objectFit: contain` so any shape fits
+without cropping.
+
+### Controlled thumbnail strip: THUMBS_VISIBLE = 6 + scroll arrows + page jump nav
+
+Instead of rendering all images as a scrollable `overflowX: auto` row, the new strip:
+- Shows exactly `THUMBS_VISIBLE = 6` thumbnails at a time (flex-equal-width slots,
+  with empty spacer divs to keep the strip width stable when fewer than 6 remain).
+- ‹ / › buttons scroll the window by 1 thumbnail (`thumbOffset` state).
+- A `useEffect` on `clampedIdx` calls `setThumbOffset` (functional updater) to
+  auto-scroll the strip whenever the active image moves outside the visible window —
+  no `thumbOffset` in the effect dep array, avoiding infinite loop.
+- Jump nav below the strip: `buildCarouselPagerItems(currentPage, totalPages)` returns
+  0-based page indices and `'ellipsis'` markers.  Clicking a page number jumps `activeIdx`
+  to the first image on that page and snaps the strip to show it.
+
+### Responsive hero grid: auto-fit minmax(320 px, 1fr)
+
+Changed from `gridTemplateColumns: '1fr 1fr'` (always two columns, details column gets
+squished) to `repeat(auto-fit, minmax(320px, 1fr))`.  When the viewport is narrower than
+~680 px (2 × 320 + 16 gap + margins) the grid auto-stacks to a single column with the
+image above the details — pure CSS, no media query, no Tailwind class needed.
+
+### buildCarouselPagerItems extracted to carousel-utils.ts
+
+The pager math is a pure function (no DOM, no React), so it lives in
+`frontend/src/lib/carousel-utils.ts` and is covered by 7 unit tests in
+`frontend/src/test/carousel.test.ts`.  This keeps the component clean and
+the boundary logic verifiable without spinning up a browser.
+
 ## 2026-06-29 — Phase 18: AgentQL optional BYO-key fallback scraper
 
 ### AgentQL as REST-only fallback (no Playwright/SDK, no Chromium)

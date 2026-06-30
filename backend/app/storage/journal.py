@@ -35,6 +35,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -426,5 +427,12 @@ def move_to_trash(item_dir: Path, key: str) -> Path:
 
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     dest = trash_dir / f"{ts}-{key}"
-    item_dir.replace(dest)
+    # os.replace is atomic but fails cross-device (EXDEV) — and items live under a
+    # library mount (e.g. /library) while trash is under DATA_DIR (/data), which are
+    # usually separate filesystems. Try the fast atomic rename first, then fall back
+    # to shutil.move (copy + delete) which spans devices.
+    try:
+        item_dir.replace(dest)
+    except OSError:
+        shutil.move(str(item_dir), str(dest))
     return dest
