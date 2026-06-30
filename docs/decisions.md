@@ -2,6 +2,19 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-29 — Split api.ts into per-domain modules under lib/api/
+
+`frontend/src/lib/api.ts` (2,011 lines) split into 22 domain modules under
+`frontend/src/lib/api/` with a barrel `api/index.ts` that re-exports everything.
+The old `api.ts` was deleted; `@/lib/api` now resolves to the barrel. No consumer
+changes required — pure token-efficiency refactor, zero behavior change.
+
+Modules created: `core`, `setup`, `auth`, `users`, `invites`, `password-reset`,
+`settings`, `me`, `api-keys`, `items`, `libraries`, `import`, `print-records`,
+`shares`, `jobs`, `scheduled-jobs`, `issues`, `changes`, `reviews`, `ai`,
+`backups`, `export`, `tag-admin`, `agentql`. `shares.ts` imports `BundleOut`
+type-only from `items.ts` (single cross-module dep).
+
 ## 2026-06-29 — Import management: delete-session-image semantics + SQLAlchemy identity-map caveat
 
 ### Staged-file cleanup safety check
