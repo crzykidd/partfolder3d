@@ -1761,6 +1761,8 @@ export interface TagAdminOut {
   name: string
   category: string | null
   popularity_count: number
+  /** Real item count from COUNT(item_tags.item_id) join — always accurate. */
+  item_count: number
   /** 'active' | 'pending' */
   status: string
 }

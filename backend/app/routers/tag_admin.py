@@ -49,6 +49,7 @@ class TagAdminOut(BaseModel):
     name: str
     category: str | None
     popularity_count: int
+    item_count: int = 0
     status: str
 
     model_config = {"from_attributes": True}
@@ -93,13 +94,36 @@ async def list_pending_tags(
     _admin: Annotated[User, Depends(require_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[TagAdminOut]:
-    """Return all tags in 'pending' status awaiting admin approval."""
+    """Return all tags in 'pending' status awaiting admin approval.
+
+    ``item_count`` is computed from a live COUNT(item_tags.item_id) outer join
+    and is always accurate even though ``popularity_count`` is never maintained.
+    """
+    item_count_sq = (
+        select(
+            ItemTag.tag_id,
+            func.count(ItemTag.item_id).label("item_count"),
+        )
+        .group_by(ItemTag.tag_id)
+        .subquery()
+    )
     result = await db.execute(
-        select(Tag)
+        select(Tag, func.coalesce(item_count_sq.c.item_count, 0).label("item_count"))
+        .outerjoin(item_count_sq, Tag.id == item_count_sq.c.tag_id)
         .where(Tag.status == TagStatus.pending)
         .order_by(Tag.name)
     )
-    return [TagAdminOut.model_validate(t) for t in result.scalars().all()]
+    return [
+        TagAdminOut(
+            id=tag.id,
+            name=tag.name,
+            category=tag.category,
+            popularity_count=tag.popularity_count,
+            item_count=item_count,
+            status=tag.status,
+        )
+        for tag, item_count in result.all()
+    ]
 
 
 @router.post(

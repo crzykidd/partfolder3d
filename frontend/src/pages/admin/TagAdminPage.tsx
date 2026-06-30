@@ -133,7 +133,7 @@ function PendingTagRow({ tag }: { tag: api.TagAdminOut }) {
     <TableRow>
       <Td style={{ fontWeight: 600 }}>{tag.name}</Td>
       <Td style={{ color: 'var(--aurora-muted)' }}>{tag.category ?? '—'}</Td>
-      <Td style={{ color: 'var(--aurora-muted)' }}>{tag.popularity_count}</Td>
+      <Td style={{ color: 'var(--aurora-muted)' }}>{tag.item_count}</Td>
       <Td>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <Button
@@ -416,7 +416,7 @@ function MergePanel({ tag, allTags, onClose }: MergePanelProps) {
             <option value="">— select target tag —</option>
             {options.map((t) => (
               <option key={t.id} value={t.id}>
-                {t.name} ({t.popularity_count} uses)
+                {t.name} ({t.item_count} uses)
               </option>
             ))}
           </AuroraSelect>
@@ -578,7 +578,7 @@ function AllTagRow({ tag, allTags }: AllTagRowProps) {
           )}
         </Td>
 
-        <Td style={{ color: 'var(--aurora-muted)' }}>{tag.popularity_count}</Td>
+        <Td style={{ color: 'var(--aurora-muted)' }}>{tag.item_count}</Td>
 
         {/* Actions */}
         <Td>

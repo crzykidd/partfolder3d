@@ -284,3 +284,54 @@ async def test_tag_in_use_only_false_returns_all(
     tag_names = {t["name"] for t in data["tags"]}
     assert "with-items-tag" in tag_names
     assert "no-items-tag" in tag_names, "in_use_only defaults to false → all tags returned"
+
+
+# ---------------------------------------------------------------------------
+# Part 3 — Admin pending list: item_count is accurate (real join count)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_admin_pending_list_item_count(
+    client: AsyncClient, tmp_path: Path, db_session: AsyncSession
+) -> None:
+    """GET /api/admin/tags/pending returns accurate item_count from real join.
+
+    A pending tag applied to N items reports item_count==N; an unused pending
+    tag reports item_count==0 (popularity_count stays 0 throughout).
+    """
+    await _setup_and_login(client, tmp_path)
+
+    lib = await _make_library(db_session, tmp_path, suffix="pending-counts")
+    item1 = await _make_item(db_session, lib.id, "eeeeee01", "Item E1")
+    item2 = await _make_item(db_session, lib.id, "eeeeee02", "Item E2")
+
+    # Two pending tags; one used, one unused
+    tag_used = Tag(name="pending-used-tag", status=TagStatus.pending, popularity_count=0)
+    tag_empty = Tag(name="pending-empty-tag", status=TagStatus.pending, popularity_count=0)
+    db_session.add(tag_used)
+    db_session.add(tag_empty)
+    await db_session.flush()
+
+    # Link 2 items to the used tag; leave empty tag unlinked
+    db_session.add(ItemTag(item_id=item1.id, tag_id=tag_used.id))
+    db_session.add(ItemTag(item_id=item2.id, tag_id=tag_used.id))
+    await db_session.flush()
+
+    resp = await client.get("/api/admin/tags/pending")
+    assert resp.status_code == 200
+    rows = resp.json()
+
+    used_row = next((t for t in rows if t["name"] == "pending-used-tag"), None)
+    empty_row = next((t for t in rows if t["name"] == "pending-empty-tag"), None)
+
+    assert used_row is not None, "pending-used-tag should appear in pending list"
+    assert used_row["item_count"] == 2, (
+        f"item_count should be 2 (real join count), got {used_row['item_count']}"
+    )
+    assert used_row["popularity_count"] == 0, "popularity_count is never maintained"
+
+    assert empty_row is not None, "pending-empty-tag should appear in pending list"
+    assert empty_row["item_count"] == 0, (
+        f"unused pending tag should have item_count==0, got {empty_row['item_count']}"
+    )

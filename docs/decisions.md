@@ -2,6 +2,56 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-29 — Tag Admin: real item_count via join (popularity_count unmaintained)
+
+The Tag Admin page ("Pending tags" section and "All tags" table) was showing 0 uses for
+every tag because it displayed `popularity_count`, a denormalized field that is never
+updated in any write path.
+
+Fix: `GET /api/admin/tags/pending` now computes `item_count` via an outer join
+`COUNT(item_tags.item_id)` per tag (same approach as the public `/api/tags` endpoint /
+tag cloud). `item_count: int = 0` is added to `TagAdminOut`; the "Uses" column in both
+the pending section and the all-tags table (and the merge dropdown) now shows `item_count`
+instead of `popularity_count`.
+
+`popularity_count` is deliberately **not** backfilled or maintained; it is superseded by
+the computed join count for display purposes and would require write-path hooks to keep
+in sync (out of scope). It remains in the schema for historical compatibility.
+
+## 2026-06-29 — Catalog: tag-cloud log scale, Alpha/Number sort toggle, dark-mode select fix
+
+### Tag cloud font sizing — log scale, capped max
+
+The previous `getTagFontSize` used a linear step-bucket scale with a max of 2 rem (32 px).
+With a typical collection where a handful of tags dominate by count, even 2–3 items on a
+single tag pushed it into the top bucket, making the cloud look chaotic.
+
+Fix: replaced the step buckets with a **log-normalised continuous scale** (`logNorm =
+log(count − min + 1) / log(max − min + 1)`) clamped between **0.75 rem (~12 px)** and
+**1.375 rem (~22 px)**. The log curve compresses high-count outliers so they scale
+proportionally without exploding. Min stays at 12 px (readable), max stays at 22 px
+(prominent but not enormous). All existing tests updated; a new log-scale monotonicity
+assertion (`midVal > (minVal + maxVal) / 2`) is added to verify the curve direction.
+
+### Tag cloud Alpha / Number sort toggle
+
+Added a compact segmented toggle ("A–Z" | "#") at the top of the tag-cloud card. Default
+is Number (`item_count` desc, ties → name A→Z) which matches prior behaviour; Alpha sorts
+A→Z by name. The toggle is rendered inside `TagCloud` (inline with the "Browse by tag"
+label) to keep all tag-cloud UI self-contained. Choice is persisted in `localStorage`
+(`pf3d-tag-sort`). Sorting is client-side via `sortTags<T>(tags, mode)` in
+`catalog-utils.ts` (pure, immutable, unit-tested with 7 new tests).
+
+### Dark-mode native `<select>` fix — `colorScheme` style property
+
+The catalog sort `<select>` rendered with OS-default white dropdown options in dark mode
+because no `color-scheme` hint was provided to the browser. Fix: read the active theme
+via `useTheme()`, compute `isDark` (handles `'system'` by querying `matchMedia`), and
+set `colorScheme: isDark ? 'dark' : 'light'` as an inline style on the select element.
+This instructs the browser to render native controls (including the dropdown list) in the
+matching OS colour scheme. No global CSS changes, no new dependencies; `colorScheme` is a
+standard `React.CSSProperties` key.
+
 ## 2026-06-30 — Delete-to-trash must be cross-device safe
 
 `move_to_trash` used `Path.replace` (os.replace), which is atomic but raises EXDEV across
