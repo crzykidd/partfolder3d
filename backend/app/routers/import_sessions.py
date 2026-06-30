@@ -50,6 +50,7 @@ from ..models.image import Image, ImageSource
 from ..models.import_session import (
     ImportSession,
     ImportSessionFile,
+    ImportSessionImage,
     ImportSessionStatus,
     ImportSourceType,
 )
@@ -1110,6 +1111,152 @@ async def cancel_import_session(
     session.status = ImportSessionStatus.cancelled
     session.updated_at = datetime.now(UTC)
     await db.flush()
+
+
+@router.delete(
+    "/api/import-sessions/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+)
+async def delete_import_session(
+    session_id: str,
+    user: Annotated[User, Depends(get_current_user)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Permanently delete an import session and clean up its staging area.
+
+    Removes the ImportSession row (cascading to ImportSessionImage /
+    ImportSessionFile) and best-effort removes the staging_dir if it exists
+    under DATA_DIR.
+
+    Does NOT touch any committed Item or library files.
+    Returns 204 on success; 404 if the session is not found or not owned.
+    """
+    session = await _load_session(session_id, db, user)
+
+    # Best-effort: remove staging dir — only under DATA_DIR, never item dirs
+    if session.staging_dir:
+        staging_path = Path(session.staging_dir)
+        if staging_path.is_dir():
+            try:
+                staging_path.relative_to(Path(settings.DATA_DIR))
+                shutil.rmtree(str(staging_path))
+            except ValueError:
+                log.warning(
+                    "delete_session: staging_dir %s is outside DATA_DIR — skipping removal",
+                    staging_path,
+                )
+            except Exception:
+                log.warning(
+                    "delete_session: failed to clean staging dir %s", staging_path
+                )
+
+    await db.delete(session)
+    await db.flush()
+
+
+@router.delete(
+    "/api/import-sessions/{session_id}/images/{image_id}",
+    response_model=ImportSessionOut,
+    status_code=status.HTTP_200_OK,
+)
+async def delete_import_session_image(
+    session_id: str,
+    image_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ImportSessionOut:
+    """Remove an image from an import session.
+
+    Deletes the ImportSessionImage row and best-effort removes the local staged
+    file if it lives inside the session's staging_dir.  For scraped URL images
+    (is_url=True) only the row is dropped — there is no local file.
+
+    If the deleted image was the default, reassigns is_default to the first
+    remaining image (lowest order) and updates default_image_path on the
+    session, or clears default_image_path when no images remain.
+
+    Returns the updated session.
+    404 if the image doesn't exist or doesn't belong to this session.
+    """
+    session = await _load_session(session_id, db, user)
+
+    # Verify the image belongs to this session
+    img_result = await db.execute(
+        select(ImportSessionImage).where(
+            ImportSessionImage.id == image_id,
+            ImportSessionImage.session_id == session.id,
+        )
+    )
+    img = img_result.scalar_one_or_none()
+    if img is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Image not found in this session.",
+        )
+
+    was_default = img.is_default
+    img_path = img.path
+    img_is_url = img.is_url
+
+    # Delete the image row
+    await db.delete(img)
+    await db.flush()
+
+    # Reassign default to the first remaining image if we just removed the default
+    if was_default:
+        remaining_result = await db.execute(
+            select(ImportSessionImage)
+            .where(ImportSessionImage.session_id == session.id)
+            .order_by(ImportSessionImage.order)
+            .limit(1)
+        )
+        first_remaining = remaining_result.scalar_one_or_none()
+        if first_remaining is not None:
+            first_remaining.is_default = True
+            session.default_image_path = first_remaining.path
+        else:
+            session.default_image_path = None
+        await db.flush()
+
+    # Best-effort: remove local staged file (skip URL images)
+    if not img_is_url and session.staging_dir:
+        try:
+            file_path = Path(img_path)
+            staging_path = Path(session.staging_dir)
+            # Only remove if the file is inside the staging dir
+            file_path.relative_to(staging_path)
+            if file_path.is_file():
+                file_path.unlink()
+        except ValueError:
+            pass  # file is not under staging_dir — don't touch it
+        except Exception:
+            log.warning(
+                "delete_session_image: could not remove staged file %s", img_path
+            )
+
+    session.updated_at = datetime.now(UTC)
+    await db.flush()
+
+    # Expire only the relationship collections so the reload SELECT re-fetches
+    # fresh data from the DB.  We must capture session.id before expiring to
+    # avoid triggering lazy-load on the scalar PK column.
+    session_id = session.id
+    db.expire(session, ["images", "files"])
+
+    from sqlalchemy.orm import selectinload  # noqa: PLC0415
+
+    result = await db.execute(
+        select(ImportSession)
+        .options(
+            selectinload(ImportSession.files),
+            selectinload(ImportSession.images),
+        )
+        .where(ImportSession.id == session_id)
+    )
+    return _session_out(result.scalar_one())
 
 
 # ---------------------------------------------------------------------------

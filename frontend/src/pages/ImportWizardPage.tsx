@@ -670,6 +670,16 @@ function ImagesStep({ session, onNext, onPrev }: ImagesStepProps) {
       setError(err instanceof Error ? err.message : 'Failed to set default image.'),
   })
 
+  const removeImageMutation = useMutation({
+    mutationFn: (imageId: number) =>
+      api.deleteImportSessionImage(session.id, imageId),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['import-session', session.id], updated)
+    },
+    onError: (err) =>
+      setError(err instanceof Error ? err.message : 'Failed to remove image.'),
+  })
+
   const uploadMutation = useMutation({
     mutationFn: (files: File[]) => api.uploadSessionFiles(session.id, files),
     onSuccess: (updated) => {
@@ -701,6 +711,44 @@ function ImagesStep({ session, onNext, onPrev }: ImagesStepProps) {
             .sort((a, b) => a.order - b.order)
             .map((img) => (
               <div key={img.id} style={{ position: 'relative', flexShrink: 0 }}>
+                {/* Remove (✕) button — top-right corner */}
+                <button
+                  type="button"
+                  aria-label="Remove image"
+                  disabled={removeImageMutation.isPending}
+                  onClick={() => { setError(null); removeImageMutation.mutate(img.id) }}
+                  style={{
+                    position: 'absolute',
+                    top: 4,
+                    right: 4,
+                    zIndex: 10,
+                    width: 22,
+                    height: 22,
+                    borderRadius: '50%',
+                    background: 'rgba(0,0,0,0.55)',
+                    border: 'none',
+                    color: '#fff',
+                    fontSize: 12,
+                    lineHeight: 1,
+                    cursor: removeImageMutation.isPending ? 'not-allowed' : 'pointer',
+                    opacity: removeImageMutation.isPending ? 0.5 : 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'background 0.15s',
+                    padding: 0,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!removeImageMutation.isPending)
+                      (e.currentTarget as HTMLButtonElement).style.background = 'rgba(220,38,38,0.85)'
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,0,0,0.55)'
+                  }}
+                >
+                  ✕
+                </button>
+
                 <div
                   style={{
                     width: 160,

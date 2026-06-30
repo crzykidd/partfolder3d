@@ -23,6 +23,7 @@ Phase 13: AI usage tracking — record token counts per call, 24h/7d/30d usage
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -52,6 +53,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await recover_stale_journals(db)
     except Exception:
         log.exception("Startup journal recovery failed (non-fatal)")
+
+    # Auto-create inbox dir so the scanner works out of the box.
+    # Best-effort: log on failure, never crash startup.
+    try:
+        inbox = Path(settings.INBOX_DIR)
+        inbox.mkdir(parents=True, exist_ok=True)
+        log.debug("Startup: ensured inbox dir %s", inbox)
+    except Exception:
+        log.warning(
+            "Startup: could not create inbox dir %s (non-fatal)", settings.INBOX_DIR
+        )
+
     yield
 
 

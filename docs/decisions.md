@@ -2,6 +2,49 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-29 — Import management: delete-session-image semantics + SQLAlchemy identity-map caveat
+
+### Staged-file cleanup safety check
+
+Both the delete-session (`DELETE /api/import-sessions/{id}`) and delete-session-image
+(`DELETE /api/import-sessions/{id}/images/{image_id}`) endpoints remove local files
+best-effort. To prevent path-traversal bugs, every removal is gated by
+`Path.relative_to(...)`:
+
+- Delete session: `staging_path.relative_to(Path(settings.DATA_DIR))` before `shutil.rmtree`
+- Delete image: `file_path.relative_to(staging_path)` before `file_path.unlink()`
+
+If either check raises `ValueError` (path is outside the expected root), the removal is
+silently skipped (logged as a warning). Committed Items/library files are never touched.
+
+### Default-image reassignment on delete
+
+When the deleted image had `is_default=True`, the endpoint queries remaining images
+`ORDER BY order ASC LIMIT 1` and promotes that image (`is_default = True`,
+`session.default_image_path = first_remaining.path`). If no images remain,
+`default_image_path` is cleared to `None`. This avoids dangling default pointers while
+keeping the reassignment deterministic (lowest `order` wins).
+
+### SQLAlchemy async identity-map cache bust before response reload
+
+After `await db.delete(img)` + `await db.flush()`, a follow-up
+`select(ImportSession).options(selectinload(images))` can return the stale in-memory
+collection when the parent session object is already in the ORM identity map with the
+`images` attribute loaded (e.g. from `_load_session`). The fix is
+`db.expire(session, ["images", "files"])` before the reload; this marks those
+attributes as expired so the next `selectinload` re-fetches from the DB.
+
+The scalar `id` attribute must be captured into a local variable _before_ expiring
+the object, because `expire()` marks it stale and accessing it later triggers a
+lazy-load (which raises `MissingGreenlet` in an async context).
+
+### Inbox dir auto-creation at startup
+
+`INBOX_DIR` (default `/data/inbox`) is created in the FastAPI lifespan hook next to the
+existing journal-recovery logic. `mkdir(parents=True, exist_ok=True)` is wrapped in a
+broad `except` so any permission or FS error produces a warning rather than crashing
+startup. The scanner skips a missing inbox but now the directory is guaranteed present.
+
 ## 2026-06-29 — Tag Admin: real item_count via join (popularity_count unmaintained)
 
 The Tag Admin page ("Pending tags" section and "All tags" table) was showing 0 uses for

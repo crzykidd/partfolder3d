@@ -1035,6 +1035,17 @@ export const cancelImportSession = (id: string): Promise<void> =>
     method: 'POST',
   })
 
+export const deleteImportSession = (id: string): Promise<void> =>
+  apiFetch<void>(`/api/import-sessions/${id}`, { method: 'DELETE' })
+
+export const deleteImportSessionImage = (
+  sessionId: string,
+  imageId: number,
+): Promise<ImportSession> =>
+  apiFetch<ImportSession>(`/api/import-sessions/${sessionId}/images/${imageId}`, {
+    method: 'DELETE',
+  })
+
 export const listSiteCapabilities = (): Promise<SiteCapability[]> =>
   apiFetch<SiteCapability[]>('/api/site-capabilities')
 

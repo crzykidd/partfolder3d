@@ -14,7 +14,7 @@
 
 import React, { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/context/AuthContext'
 import * as api from '@/lib/api'
 
@@ -188,6 +188,25 @@ function SourceTypeBadge({ type }: { type: string }) {
 // ---------------------------------------------------------------------------
 
 function SessionRow({ session }: { session: api.ImportSession }) {
+  const queryClient = useQueryClient()
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  const deleteMutation = useMutation({
+    mutationFn: () => api.deleteImportSession(session.id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['import-sessions'] })
+    },
+    onError: (err) => {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete session.')
+    },
+  })
+
+  const handleDelete = () => {
+    if (!window.confirm('Delete this import session? This cannot be undone.')) return
+    setDeleteError(null)
+    deleteMutation.mutate()
+  }
+
   const displayTitle =
     session.confirmed_title ?? session.suggested_title ?? (
       <em style={{ color: 'var(--aurora-muted)' }}>Untitled</em>
@@ -242,32 +261,66 @@ function SessionRow({ session }: { session: api.ImportSession }) {
             {session.error.slice(0, 80)}{session.error.length > 80 ? '…' : ''}
           </p>
         )}
+        {deleteError && (
+          <p style={{ fontSize: 11, color: 'var(--aurora-danger)', margin: '2px 0 0' }}>
+            {deleteError}
+          </p>
+        )}
       </td>
       <td style={{ padding: '10px 14px', borderTop: '1px solid var(--aurora-divider)', fontSize: 11, color: 'var(--aurora-muted)', whiteSpace: 'nowrap' }}>
         {formatDate(session.created_at)}
       </td>
       <td style={{ padding: '10px 14px', borderTop: '1px solid var(--aurora-divider)' }}>
-        {canOpenWizard ? (
-          <Link
-            to={`/import/${session.id}`}
-            style={AURORA_BTN_PRIMARY}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = '0.85' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = '1' }}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {canOpenWizard ? (
+            <Link
+              to={`/import/${session.id}`}
+              style={AURORA_BTN_PRIMARY}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = '0.85' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = '1' }}
+            >
+              Open Wizard →
+            </Link>
+          ) : session.status === 'committed' && session.item_id ? (
+            <a
+              href={`/items/${session.item_id}`}
+              style={{ fontSize: 12, color: 'var(--aurora-accent)', textDecoration: 'none', transition: 'opacity 0.15s' }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = '0.8' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = '1' }}
+            >
+              View item →
+            </a>
+          ) : (
+            <span style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>—</span>
+          )}
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={deleteMutation.isPending}
+            style={{
+              background: 'transparent',
+              border: '1px solid rgba(220,38,38,0.35)',
+              borderRadius: 16,
+              color: 'var(--aurora-danger)',
+              fontSize: 11,
+              fontWeight: 600,
+              padding: '4px 11px',
+              cursor: deleteMutation.isPending ? 'not-allowed' : 'pointer',
+              opacity: deleteMutation.isPending ? 0.5 : 1,
+              transition: 'all 0.15s',
+              whiteSpace: 'nowrap',
+            }}
+            onMouseEnter={(e) => {
+              if (!deleteMutation.isPending)
+                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(220,38,38,0.06)'
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'transparent'
+            }}
           >
-            Open Wizard →
-          </Link>
-        ) : session.status === 'committed' && session.item_id ? (
-          <a
-            href={`/items/${session.item_id}`}
-            style={{ fontSize: 12, color: 'var(--aurora-accent)', textDecoration: 'none', transition: 'opacity 0.15s' }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = '0.8' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = '1' }}
-          >
-            View item →
-          </a>
-        ) : (
-          <span style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>—</span>
-        )}
+            {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>
       </td>
     </tr>
   )
