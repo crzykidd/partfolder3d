@@ -25,7 +25,10 @@ jobs:
           python-version: "3.12"
       - name: Lint backend (ruff)
         run: |
-          pip install ruff
+          # Pin ruff to the project's version so CI matches local dev (an
+          # unpinned install drifts to the latest ruff, which enforces newer
+          # rules like UP042 that our pinned version + config don't).
+          pip install "$(grep -iE '^ruff==' backend/requirements.txt)"
           ruff check backend/
 
       - uses: actions/setup-node@v5
@@ -163,6 +166,11 @@ jobs:
           python-version: "3.12"
       - name: Install backend deps
         run: pip install -r backend/requirements.txt
+      - name: Apply migrations (tests require schema at head)
+        env:
+          DATABASE_URL: postgresql+asyncpg://partfolder3d:ci_test_password@localhost:5432/partfolder3d
+          DATA_DIR: /tmp/pytest-data
+        run: cd backend && alembic upgrade head
       - name: Run pytest
         env:
           DATABASE_URL: postgresql+asyncpg://partfolder3d:ci_test_password@localhost:5432/partfolder3d
