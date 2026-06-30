@@ -2,6 +2,27 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-29 — Split ImportWizardPage.tsx into import-wizard/* step components
+
+`frontend/src/pages/ImportWizardPage.tsx` (2,389 lines) split into per-step component files
+under `frontend/src/pages/import-wizard/` — pure token-efficiency refactor, no behavior change.
+
+Files extracted: `styles.ts` (Aurora style constants + focus/blur handlers, JSX-free),
+`StepProgress.tsx` (Aurora stepper indicator), `SiteSetupBanner.tsx` (site API token banner),
+`AiTextPreview.tsx` (AI text suggestion preview panel), `TitleStep.tsx` (confirmed title +
+description + AI cleanup/summarize + source URL + site-setup token banner), `ImagesStep.tsx`
+(scrollable strip + set-default + remove-image ✕ + upload), `TagsStep.tsx` (confirmed chips +
+reconcile accept/reject chips + AI suggestions click-to-add box + typeahead autocomplete +
+pending-tag-on-Next prompt), `CreatorStep.tsx` (own-design toggle + attributed creator),
+`SummaryStep.tsx` (read-only review table + commit/cancel + SummaryRow helper),
+`ProcessingOverlay.tsx` (spinner shown while status=processing).
+
+`ImportWizardPage.tsx` now 289 lines — owns the session query + 3s polling, step state machine
+(`useState<WizardStep>` + `nextStep`/`prevStep` lambdas), all terminal states
+(committed/cancelled/failed/processing), scrape_note banner, and composes step components via
+props. All query keys, polling logic, per-step PATCH mutations, AI-assist calls, tag
+autocomplete debounce, pending-tag-on-Next flow, and commit/cancel navigation preserved exactly.
+
 ## 2026-06-29 — Split ItemPage.tsx into item/* subcomponents
 
 `frontend/src/pages/ItemPage.tsx` (2,589 lines) split into 8 subcomponent files under
