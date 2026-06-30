@@ -66,6 +66,33 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["import"])
 
+# Content-Type → safe file extension map (used for scraped image downloads).
+_CT_TO_EXT: dict[str, str] = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
+
+
+def _scraped_image_ext(url: str, content_type: str) -> str:
+    """Return a safe file extension for a scraped image.
+
+    Priority:
+    1. Content-Type header (most reliable — CDN paths like ``format,webp`` have no dot).
+    2. URL path suffix after stripping any ``?query`` (e.g. ``.jpg`` in a clean URL).
+    3. Fallback: ``.jpg``.
+    """
+    ct = content_type.split(";")[0].strip().lower()
+    if ct in _CT_TO_EXT:
+        return _CT_TO_EXT[ct]
+    # Try URL path suffix
+    url_path = url.split("?")[0]
+    suffix = Path(url_path).suffix.lower()
+    if suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        return suffix if suffix != ".jpeg" else ".jpg"
+    return ".jpg"
+
 
 @router.post(
     "/api/import-sessions",
@@ -616,11 +643,15 @@ async def commit_import_session(
 
                     images_dir = item_dir / "images"
                     images_dir.mkdir(exist_ok=True)
-                    img_name = Path(si.path).name.split("?")[0] or f"img_{img_order}.jpg"
-                    img_dest = images_dir / img_name
                     with _httpx.Client(timeout=settings.SCRAPE_TIMEOUT) as c:
                         r = c.get(si.path, follow_redirects=True)
                         if r.status_code == 200:
+                            ext = _scraped_image_ext(
+                                si.path,
+                                r.headers.get("content-type", ""),
+                            )
+                            img_name = f"scraped_{img_order:02d}{ext}"
+                            img_dest = images_dir / img_name
                             img_dest.write_bytes(r.content)
                             rel_path = str(img_dest.relative_to(item_dir))
                             img_obj = Image(

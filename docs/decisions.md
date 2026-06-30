@@ -2,6 +2,14 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-30 — Fix scraped-image filename collision on import commit
+
+**Root cause:** the URL-image download loop derived `img_name` from `Path(si.path).name`, so every MakerWorld CDN URL ending in `.../image/format,webp` resolved to the filename `format,webp` — each successive image overwrote the previous one, leaving N `Image` rows all pointing to the same single file.
+
+**Fix:** moved the httpx fetch before filename construction; added `_scraped_image_ext(url, content_type)` helper that prefers `Content-Type` (reliable), falls back to the URL path suffix (good for normal CDNs), then falls back to `.jpg`; renamed every downloaded file `scraped_{order:02d}{ext}` to guarantee uniqueness within a commit. The non-URL (staged/inbox) branch is unchanged.
+
+**Recovery:** the already-imported Dahlia item (`private_data/data/library/ey/dahlia-eymipoa`) is corrupted on disk (1 file, 9 `Image` rows all pointing to it). It must be deleted and re-imported after this fix lands.
+
 ## 2026-06-30 — Docs refresh: README features + getting-started, .env.example, build-plan, + new features-overview/nav-architecture
 
 Updated README features section (8 post-Phase-10 feature groups: AgentQL fallback, AI usage/cost, asset analysis, modification tracking, per-library/OS path prefixes, image management, tag improvements, import management, Aurora UI) and rewrote Getting Started to the real dev-stack flow; replaced stale "Admin → Libraries" wording in `.env.example`; updated `docs/build-plan.md` status; added `docs/features-overview.md` (per-feature reference with admin routes) and `docs/nav-architecture.md` (5-section IA, tab/route table, back-compat redirects).

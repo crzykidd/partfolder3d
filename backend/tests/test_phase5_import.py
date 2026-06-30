@@ -640,3 +640,179 @@ def test_infer_role_render() -> None:
     from app.storage.inventory import infer_role  # noqa: PLC0415
 
     assert infer_role("renders/abc123.png") == FileRole.render
+
+
+# ---------------------------------------------------------------------------
+# _scraped_image_ext unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_scraped_image_ext_content_type_wins() -> None:
+    """Content-Type is preferred over URL suffix for extension detection."""
+    from app.routers.import_sessions.sessions import _scraped_image_ext  # noqa: PLC0415
+
+    # MakerWorld CDN URL with no dot in the last segment — Content-Type must win.
+    assert _scraped_image_ext(
+        "https://cdn.makerworld.com.cn/mkm/cover/image/format,webp",
+        "image/webp",
+    ) == ".webp"
+
+    assert _scraped_image_ext(
+        "https://cdn.makerworld.com.cn/mkm/cover/image/format,webp",
+        "image/jpeg",
+    ) == ".jpg"
+
+    assert _scraped_image_ext(
+        "https://cdn.example.com/img/format,webp",
+        "image/png",
+    ) == ".png"
+
+
+def test_scraped_image_ext_fallback_to_url() -> None:
+    """URL path suffix is used when Content-Type is missing or unrecognised."""
+    from app.routers.import_sessions.sessions import _scraped_image_ext  # noqa: PLC0415
+
+    assert _scraped_image_ext("https://example.com/photo.jpg", "") == ".jpg"
+    assert _scraped_image_ext("https://example.com/photo.jpeg", "") == ".jpg"
+    assert _scraped_image_ext("https://example.com/photo.png", "text/html") == ".png"
+    assert _scraped_image_ext("https://example.com/photo.gif", "") == ".gif"
+
+
+def test_scraped_image_ext_fallback_to_jpg() -> None:
+    """Falls back to .jpg when neither Content-Type nor URL gives a known extension."""
+    from app.routers.import_sessions.sessions import _scraped_image_ext  # noqa: PLC0415
+
+    assert _scraped_image_ext("https://cdn.example.com/format,webp", "") == ".jpg"
+    assert _scraped_image_ext("https://cdn.example.com/format,webp", "text/html") == ".jpg"
+    assert _scraped_image_ext("https://cdn.example.com/thing", "") == ".jpg"
+
+
+# ---------------------------------------------------------------------------
+# Commit: scraped URL images get collision-free filenames
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_commit_scraped_images_unique_filenames(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+) -> None:
+    """Committing a session with multiple scraped URLs sharing the same basename
+    produces a distinct file on disk and a distinct Image.path for each image.
+
+    Reproduces the MakerWorld CDN pattern where every gallery image URL ends in
+    ``image/format,webp`` — prior to the fix all images overwrote the same file.
+    """
+    import uuid as _uuid  # noqa: PLC0415
+
+    from sqlalchemy import select as _select  # noqa: PLC0415
+
+    from app.models.image import Image  # noqa: PLC0415
+    from app.models.import_session import (  # noqa: PLC0415
+        ImportSession,
+        ImportSessionImage,
+        ImportSessionStatus,
+    )
+
+    csrf = await _setup_and_login(client, tmp_path)
+
+    # Library rooted at a temp dir so the commit can create item directories.
+    lib_path = tmp_path / "lib"
+    lib_path.mkdir()
+    lib_resp = await client.post(
+        "/api/libraries",
+        json={"name": "Collision Test Lib", "mount_path": str(lib_path)},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert lib_resp.status_code == 201
+    library_id = lib_resp.json()["id"]
+
+    # Create a bare upload session then advance it to pending_wizard in the DB.
+    create_resp = await client.post(
+        "/api/import-sessions",
+        json={"source_type": "upload"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert create_resp.status_code == 201
+    session_id = _uuid.UUID(create_resp.json()["id"])
+
+    res = await db_session.execute(
+        _select(ImportSession).where(ImportSession.id == session_id)
+    )
+    sess = res.scalar_one()
+    sess.status = ImportSessionStatus.pending_wizard
+    sess.confirmed_title = "Collision Test Item"
+    sess.library_id = library_id
+    await db_session.flush()
+
+    # Two scraped URL images whose URLs share the same basename (``format,webp``).
+    img_a = ImportSessionImage(
+        session_id=session_id,
+        path="https://cdn.makerworld.com/model/123/image/format,webp",
+        is_url=True,
+        source="scrape",
+        order=0,
+        is_default=True,
+    )
+    img_b = ImportSessionImage(
+        session_id=session_id,
+        path="https://cdn.makerworld.com/model/456/image/format,webp",
+        is_url=True,
+        source="scrape",
+        order=1,
+        is_default=False,
+    )
+    db_session.add(img_a)
+    db_session.add(img_b)
+    await db_session.flush()
+
+    # Mock httpx.Client so both URLs return 200 with webp content-type.
+    # Patch the global httpx.Client because the lazy import inside the function
+    # pulls the already-cached module from sys.modules.
+    fake_img_bytes = b"\x00\x00\x00\x0c"  # minimal placeholder bytes
+
+    def _make_mock_client(*args: object, **kwargs: object) -> MagicMock:  # type: ignore[return]
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "image/webp"}
+        mock_response.content = fake_img_bytes
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get = MagicMock(return_value=mock_response)
+        return mock_client
+
+    with patch("httpx.Client", side_effect=_make_mock_client):
+        commit_resp = await client.post(
+            f"/api/import-sessions/{session_id}/commit",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert commit_resp.status_code == 200, commit_resp.text
+    data = commit_resp.json()
+    item_id = data["item_id"]
+
+    # Fetch the Image rows written to the DB.
+    img_res = await db_session.execute(
+        _select(Image).where(Image.item_id == item_id).order_by(Image.order)
+    )
+    images = img_res.scalars().all()
+
+    assert len(images) == 2, f"Expected 2 Image rows, got {len(images)}"
+
+    paths = [img.path for img in images]
+    assert len(set(paths)) == 2, f"Image paths must be distinct; got {paths}"
+
+    # Each file must actually exist on disk and be distinct.
+    from app.models.item import Item  # noqa: PLC0415
+
+    item_res = await db_session.execute(_select(Item).where(Item.id == item_id))
+    item_row = item_res.scalar_one()
+    item_dir_root = Path(item_row.dir_path)
+
+    disk_paths = [item_dir_root / p for p in paths]
+    for dp in disk_paths:
+        assert dp.exists(), f"Expected file on disk: {dp}"
+
+    assert disk_paths[0] != disk_paths[1], "Files must be at distinct paths on disk"
