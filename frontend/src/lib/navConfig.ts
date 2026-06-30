@@ -5,6 +5,10 @@
  * Items with `action: 'add-asset'` open AddAssetModal instead of navigating.
  *
  * Used by both SideNavShell and TopNavShell so every route exists in exactly one place.
+ *
+ * Admin nav (2026-06-29 reorg): the old Operations + 12-item Admin groups are
+ * replaced by ONE 'admin' group of 5 section items, each pointing to the
+ * first tab of its section.  Individual tab routes live in App.tsx.
  */
 
 import {
@@ -15,24 +19,12 @@ import {
   SlidersHorizontal,
   Key,
   Rocket,
-  Cpu,
-  Calendar,
-  AlertTriangle,
-  GitBranch,
-  Eye,
+  Layers,
   Users,
-  Mail,
-  Zap,
-  Archive,
-  Download,
-  Hash,
-  Settings,
-  BarChart2,
-  Share2,
-  Printer,
-  ShieldCheck,
-  HardDrive,
+  Cpu,
   Activity,
+  HardDrive,
+  Printer,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -62,8 +54,7 @@ export interface NavGroupDef {
 }
 
 // ---------------------------------------------------------------------------
-// Nav model — verified against App.tsx routes on 2026-06-28 (AI Usage added;
-//             Quick Start added 2026-06-28)
+// Nav model
 // ---------------------------------------------------------------------------
 
 export const NAV_GROUPS: NavGroupDef[] = [
@@ -71,9 +62,9 @@ export const NAV_GROUPS: NavGroupDef[] = [
     id: 'library',
     label: 'Library',
     items: [
-      { label: 'Catalog',      icon: LayoutGrid,  path: '/catalog' },
-      { label: 'My Favorites', icon: Heart,        path: '/catalog?favorited=true' },
-      { label: 'My Creations', icon: Printer,      path: '/me/creations' },
+      { label: 'Catalog',      icon: LayoutGrid, path: '/catalog' },
+      { label: 'My Favorites', icon: Heart,       path: '/catalog?favorited=true' },
+      { label: 'My Creations', icon: Printer,     path: '/me/creations' },
     ],
   },
   {
@@ -88,21 +79,9 @@ export const NAV_GROUPS: NavGroupDef[] = [
     id: 'settings',
     label: 'Settings',
     items: [
-      { label: 'Quick Start', icon: Rocket,           path: '/quick-start' },
+      { label: 'Quick Start', icon: Rocket,            path: '/quick-start' },
       { label: 'Settings',    icon: SlidersHorizontal, path: '/settings' },
       { label: 'API Keys',    icon: Key,               path: '/settings/api-keys' },
-    ],
-  },
-  {
-    id: 'operations',
-    label: 'Operations',
-    requiresAdmin: true,
-    items: [
-      { label: 'Jobs',           icon: Cpu,           path: '/admin/jobs' },
-      { label: 'Scheduled Jobs', icon: Calendar,      path: '/admin/scheduled-jobs' },
-      { label: 'Issues',         icon: AlertTriangle, path: '/admin/issues' },
-      { label: 'Change Log',     icon: GitBranch,     path: '/admin/changes' },
-      { label: 'Reviews',        icon: Eye,           path: '/admin/reviews' },
     ],
   },
   {
@@ -110,18 +89,11 @@ export const NAV_GROUPS: NavGroupDef[] = [
     label: 'Admin',
     requiresAdmin: true,
     items: [
-      { label: 'Libraries',         icon: HardDrive,   path: '/admin/libraries' },
-      { label: 'Users',             icon: Users,       path: '/admin/users' },
-      { label: 'Invites',           icon: Mail,        path: '/admin/invites' },
-      { label: 'AI Providers',      icon: Zap,         path: '/admin/ai-providers' },
-      { label: 'Site Capabilities', icon: ShieldCheck, path: '/admin/site-capabilities' },
-      { label: 'Backups',           icon: Archive,     path: '/admin/backups' },
-      { label: 'Export',            icon: Download,    path: '/admin/export' },
-      { label: 'Pending Tags',      icon: Hash,        path: '/admin/pending-tags' },
-      { label: 'Tag Admin',         icon: Settings,    path: '/admin/tags' },
-      { label: 'Print Stats',       icon: BarChart2,   path: '/admin/print-stats' },
-      { label: 'Share Audit',       icon: Share2,      path: '/admin/shares' },
-      { label: 'AI Usage',          icon: Activity,    path: '/admin/ai-usage' },
+      { label: 'Content',        icon: Layers,    path: '/admin/content/libraries' },
+      { label: 'Users & Access', icon: Users,     path: '/admin/access/users' },
+      { label: 'AI & Scraping',  icon: Cpu,       path: '/admin/ai/providers' },
+      { label: 'Jobs & Activity', icon: Activity, path: '/admin/activity/jobs' },
+      { label: 'Data & Backups', icon: HardDrive, path: '/admin/data/backups' },
     ],
   },
 ]

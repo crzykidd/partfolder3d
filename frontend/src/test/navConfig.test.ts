@@ -13,7 +13,9 @@ import {
   getDefaultLayout,
 } from '@/lib/navConfig'
 
-// Real routes from App.tsx — used to verify navConfig paths
+// Real routes from App.tsx — used to verify navConfig paths.
+// Includes all section tab routes + non-admin routes.
+// Updated 2026-06-29: nav reorg collapsed 17-item admin menu into 5 tabbed sections.
 const REAL_ROUTES = new Set([
   '/catalog',
   '/catalog?favorited=true',
@@ -22,23 +24,28 @@ const REAL_ROUTES = new Set([
   '/quick-start',
   '/settings',
   '/settings/api-keys',
-  '/admin/jobs',
-  '/admin/scheduled-jobs',
-  '/admin/issues',
-  '/admin/changes',
-  '/admin/reviews',
-  '/admin/libraries',
-  '/admin/users',
-  '/admin/invites',
-  '/admin/ai-providers',
-  '/admin/site-capabilities',
-  '/admin/backups',
-  '/admin/export',
-  '/admin/pending-tags',
-  '/admin/tags',
-  '/admin/print-stats',
-  '/admin/shares',
-  '/admin/ai-usage',
+  // Content section
+  '/admin/content/libraries',
+  '/admin/content/tags',
+  '/admin/content/print-stats',
+  // Users & Access section
+  '/admin/access/users',
+  '/admin/access/invites',
+  '/admin/access/password-resets',
+  // AI & Scraping section
+  '/admin/ai/providers',
+  '/admin/ai/usage',
+  '/admin/ai/sites',
+  // Jobs & Activity section
+  '/admin/activity/jobs',
+  '/admin/activity/scheduled',
+  '/admin/activity/reviews',
+  '/admin/activity/issues',
+  '/admin/activity/changes',
+  // Data & Backups section
+  '/admin/data/backups',
+  '/admin/data/export',
+  '/admin/data/shares',
 ])
 
 // ---------------------------------------------------------------------------
@@ -52,7 +59,6 @@ describe('getVisibleGroups', () => {
     expect(ids).toContain('library')
     expect(ids).toContain('import')
     expect(ids).toContain('settings')
-    expect(ids).toContain('operations')
     expect(ids).toContain('admin')
   })
 
@@ -62,7 +68,6 @@ describe('getVisibleGroups', () => {
     expect(ids).toContain('library')
     expect(ids).toContain('import')
     expect(ids).toContain('settings')
-    expect(ids).not.toContain('operations')
     expect(ids).not.toContain('admin')
   })
 
@@ -111,8 +116,15 @@ describe('NAV_GROUPS path verification', () => {
     expect(badPaths).toEqual([])
   })
 
-  it('all admin route paths are in the admin or operations groups', () => {
-    const adminPaths = ['/admin/users', '/admin/jobs', '/admin/reviews']
+  it('all admin section paths are in the admin group', () => {
+    // One representative path from each of the 5 sections
+    const adminPaths = [
+      '/admin/content/libraries',
+      '/admin/access/users',
+      '/admin/ai/providers',
+      '/admin/activity/jobs',
+      '/admin/data/backups',
+    ]
     for (const path of adminPaths) {
       const found = NAV_GROUPS.flatMap((g) => g.items).some((i) => i.path === path)
       expect(found).toBe(true)
@@ -154,6 +166,12 @@ describe('NAV_GROUPS structure', () => {
     expect(actionItems).toHaveLength(1)
     expect(actionItems[0].action).toBe('add-asset')
     expect(actionItems[0].path).toBeUndefined()
+  })
+
+  it('admin group has exactly 5 section items', () => {
+    const adminGroup = NAV_GROUPS.find((g) => g.id === 'admin')
+    expect(adminGroup).toBeDefined()
+    expect(adminGroup!.items).toHaveLength(5)
   })
 })
 

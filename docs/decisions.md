@@ -2,6 +2,57 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-29 — Admin nav reorg: 17-item menu → 5 tabbed sections
+
+**Problem:** The admin sidebar/dropdown had two groups (Operations + Admin) totalling 17 entries —
+too many for quick scanning.
+
+**Decision:** Collapse into **5 themed sections**, each a single route with a tab bar
+(`AdminSectionLayout`) hosting the existing admin page components unchanged.
+
+**Route map (new):**
+
+| Nav entry | Base route | Tabs → component |
+|---|---|---|
+| Content | `/admin/content` | libraries→`LibrariesPage`, tags→`TagAdminPage`, print-stats→`PrintStatsPage` |
+| Users & Access | `/admin/access` | users→`UsersPage`, invites→`InvitesPage`, password-resets→`PasswordResetPage` |
+| AI & Scraping | `/admin/ai` | providers→`AiProvidersPage`, usage→`AiUsagePage`, sites→`SiteCapabilitiesPage` |
+| Jobs & Activity | `/admin/activity` | jobs→`JobsPage`, scheduled→`ScheduledJobsPage`, reviews→`ReviewsPage`, issues→`IssuesPage`, changes→`ChangesPage` |
+| Data & Backups | `/admin/data` | backups→`BackupsPage`, export→`ExportPage`, shares→`ShareAuditPage` |
+
+**Back-compat redirects** (`<Navigate replace>`) from every old `/admin/*` path to its new location
+so bookmarks, QuickStart links, and cross-links never 404:
+
+- `/admin/libraries` → `/admin/content/libraries`
+- `/admin/tags` → `/admin/content/tags`
+- `/admin/pending-tags` → `/admin/content/tags` (PendingTagsPage merged into TagAdminPage nav entry)
+- `/admin/print-stats` → `/admin/content/print-stats`
+- `/admin/users` → `/admin/access/users`
+- `/admin/invites` → `/admin/access/invites`
+- `/admin/password-reset` → `/admin/access/password-resets`
+- `/admin/ai-providers` → `/admin/ai/providers`
+- `/admin/ai-usage` → `/admin/ai/usage`
+- `/admin/site-capabilities` → `/admin/ai/sites`
+- `/admin/jobs` → `/admin/activity/jobs`
+- `/admin/scheduled-jobs` → `/admin/activity/scheduled`
+- `/admin/reviews` → `/admin/activity/reviews`
+- `/admin/issues` → `/admin/activity/issues`
+- `/admin/changes` → `/admin/activity/changes`
+- `/admin/backups` → `/admin/data/backups`
+- `/admin/export` → `/admin/data/export`
+- `/admin/shares` → `/admin/data/shares`
+
+**Implementation notes:**
+- `AdminSectionLayout` (`frontend/src/components/admin/AdminSectionLayout.tsx`): Aurora underline
+  tab bar with `NavLink` isActive detection + `<Outlet />`. Zero new deps.
+- `navConfig.ts`: Replaced `operations` + `admin` groups with a single `admin` group of 5 items.
+  Both SideNavShell and TopNavShell render the 5 sections (they both read navConfig).
+- Pending reviews badge moved to "Jobs & Activity" nav item (path `/admin/activity/jobs`).
+- `QuickStartPage.tsx` deep links updated to new paths.
+- `PendingTagsPage` component retained but removed from nav and its old route is redirected.
+  `TagAdminPage` already contained the pending section.
+- `PasswordResetPage` added to nav for the first time (was routed but not linked).
+
 ## 2026-06-29 — Split backend monoliths: worker.py → tasks/, items.py → services/, import_sessions.py → package
 
 Three backend monoliths extracted into smaller modules — pure token-efficiency refactor, no behavior change.

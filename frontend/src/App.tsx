@@ -6,15 +6,19 @@
  *
  * AuthProvider lives inside QueryClientProvider (it needs useQuery) and inside
  * BrowserRouter (AuthGuard uses navigation hooks).
+ *
+ * Admin area: 5 tabbed sections using AdminSectionLayout.
+ * Back-compat <Navigate replace> redirects preserve every old /admin/* bookmark.
  */
 
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { ThemeProvider } from '@/components/ThemeProvider'
 import { AuthProvider } from '@/context/AuthContext'
 import { AuthGuard, AdminGuard } from '@/components/AuthGuard'
 import { AuroraShell } from '@/components/shell/AuroraShell'
+import { AdminSectionLayout } from '@/components/admin/AdminSectionLayout'
 
 import { VersionPage } from '@/pages/VersionPage'
 import { SetupPage } from '@/pages/SetupPage'
@@ -27,24 +31,24 @@ import { ItemPage } from '@/pages/ItemPage'
 import { CreatorPage } from '@/pages/CreatorPage'
 import { MyCreationsPage } from '@/pages/MyCreationsPage'
 
+// Admin page components — reused unchanged inside tab outlets
+import { LibrariesPage } from '@/pages/admin/LibrariesPage'
+import { TagAdminPage } from '@/pages/admin/TagAdminPage'
+import { PrintStatsPage } from '@/pages/admin/PrintStatsPage'
 import { UsersPage } from '@/pages/admin/UsersPage'
 import { InvitesPage } from '@/pages/admin/InvitesPage'
 import { PasswordResetPage } from '@/pages/admin/PasswordResetPage'
+import { AiProvidersPage } from '@/pages/admin/AiProvidersPage'
+import { AiUsagePage } from '@/pages/admin/AiUsagePage'
+import { SiteCapabilitiesPage } from '@/pages/admin/SiteCapabilitiesPage'
 import { JobsPage } from '@/pages/admin/JobsPage'
 import { ScheduledJobsPage } from '@/pages/admin/ScheduledJobsPage'
-import { PendingTagsPage } from '@/pages/admin/PendingTagsPage'
+import { ReviewsPage } from '@/pages/admin/ReviewsPage'
 import { IssuesPage } from '@/pages/admin/IssuesPage'
 import { ChangesPage } from '@/pages/admin/ChangesPage'
-import { ReviewsPage } from '@/pages/admin/ReviewsPage'
-import { PrintStatsPage } from '@/pages/admin/PrintStatsPage'
-import { ShareAuditPage } from '@/pages/admin/ShareAuditPage'
-import { AiProvidersPage } from '@/pages/admin/AiProvidersPage'
 import { BackupsPage } from '@/pages/admin/BackupsPage'
 import { ExportPage } from '@/pages/admin/ExportPage'
-import { TagAdminPage } from '@/pages/admin/TagAdminPage'
-import { SiteCapabilitiesPage } from '@/pages/admin/SiteCapabilitiesPage'
-import { LibrariesPage } from '@/pages/admin/LibrariesPage'
-import { AiUsagePage } from '@/pages/admin/AiUsagePage'
+import { ShareAuditPage } from '@/pages/admin/ShareAuditPage'
 
 import { PublicSharePage } from '@/pages/PublicSharePage'
 
@@ -54,6 +58,46 @@ import { ImportWizardPage } from '@/pages/ImportWizardPage'
 import { SettingsPage } from '@/pages/settings/SettingsPage'
 import { ApiKeysPage } from '@/pages/settings/ApiKeysPage'
 import { QuickStartPage } from '@/pages/settings/QuickStartPage'
+
+// ---------------------------------------------------------------------------
+// Section tab configs — co-located with routes for easy maintenance
+// ---------------------------------------------------------------------------
+
+const CONTENT_TABS = [
+  { label: 'Libraries',   path: '/admin/content/libraries' },
+  { label: 'Tags',        path: '/admin/content/tags' },
+  { label: 'Print Stats', path: '/admin/content/print-stats' },
+]
+
+const ACCESS_TABS = [
+  { label: 'Users',           path: '/admin/access/users' },
+  { label: 'Invites',         path: '/admin/access/invites' },
+  { label: 'Password Resets', path: '/admin/access/password-resets' },
+]
+
+const AI_TABS = [
+  { label: 'AI Providers',     path: '/admin/ai/providers' },
+  { label: 'AI Usage',         path: '/admin/ai/usage' },
+  { label: 'Site Capabilities', path: '/admin/ai/sites' },
+]
+
+const ACTIVITY_TABS = [
+  { label: 'Jobs',       path: '/admin/activity/jobs' },
+  { label: 'Scheduled',  path: '/admin/activity/scheduled' },
+  { label: 'Reviews',    path: '/admin/activity/reviews' },
+  { label: 'Issues',     path: '/admin/activity/issues' },
+  { label: 'Change Log', path: '/admin/activity/changes' },
+]
+
+const DATA_TABS = [
+  { label: 'Backups',     path: '/admin/data/backups' },
+  { label: 'Export',      path: '/admin/data/export' },
+  { label: 'Share Audit', path: '/admin/data/shares' },
+]
+
+// ---------------------------------------------------------------------------
+// QueryClient
+// ---------------------------------------------------------------------------
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -99,151 +143,113 @@ function App() {
                   <Route path="/settings" element={<SettingsPage />} />
                   <Route path="/settings/api-keys" element={<ApiKeysPage />} />
 
-                  {/* Admin area */}
+                  {/* ── Admin area — 5 tabbed sections, each guarded individually ── */}
+
+                  {/* Content: Libraries · Tags · Print Stats */}
                   <Route
-                    path="/admin/users"
+                    path="/admin/content"
                     element={
                       <AdminGuard>
-                        <UsersPage />
+                        <AdminSectionLayout tabs={CONTENT_TABS} />
                       </AdminGuard>
                     }
-                  />
+                  >
+                    <Route index element={<Navigate to="/admin/content/libraries" replace />} />
+                    <Route path="libraries" element={<LibrariesPage />} />
+                    <Route path="tags" element={<TagAdminPage />} />
+                    <Route path="print-stats" element={<PrintStatsPage />} />
+                  </Route>
+
+                  {/* Users & Access: Users · Invites · Password Resets */}
                   <Route
-                    path="/admin/invites"
+                    path="/admin/access"
                     element={
                       <AdminGuard>
-                        <InvitesPage />
+                        <AdminSectionLayout tabs={ACCESS_TABS} />
                       </AdminGuard>
                     }
-                  />
+                  >
+                    <Route index element={<Navigate to="/admin/access/users" replace />} />
+                    <Route path="users" element={<UsersPage />} />
+                    <Route path="invites" element={<InvitesPage />} />
+                    <Route path="password-resets" element={<PasswordResetPage />} />
+                  </Route>
+
+                  {/* AI & Scraping: AI Providers · AI Usage · Site Capabilities */}
                   <Route
-                    path="/admin/password-reset"
+                    path="/admin/ai"
                     element={
                       <AdminGuard>
-                        <PasswordResetPage />
+                        <AdminSectionLayout tabs={AI_TABS} />
                       </AdminGuard>
                     }
-                  />
+                  >
+                    <Route index element={<Navigate to="/admin/ai/providers" replace />} />
+                    <Route path="providers" element={<AiProvidersPage />} />
+                    <Route path="usage" element={<AiUsagePage />} />
+                    <Route path="sites" element={<SiteCapabilitiesPage />} />
+                  </Route>
+
+                  {/* Jobs & Activity: Jobs · Scheduled · Reviews · Issues · Change Log */}
                   <Route
-                    path="/admin/jobs"
+                    path="/admin/activity"
                     element={
                       <AdminGuard>
-                        <JobsPage />
+                        <AdminSectionLayout tabs={ACTIVITY_TABS} />
                       </AdminGuard>
                     }
-                  />
+                  >
+                    <Route index element={<Navigate to="/admin/activity/jobs" replace />} />
+                    <Route path="jobs" element={<JobsPage />} />
+                    <Route path="scheduled" element={<ScheduledJobsPage />} />
+                    <Route path="reviews" element={<ReviewsPage />} />
+                    <Route path="issues" element={<IssuesPage />} />
+                    <Route path="changes" element={<ChangesPage />} />
+                  </Route>
+
+                  {/* Data & Backups: Backups · Export · Share Audit */}
                   <Route
-                    path="/admin/scheduled-jobs"
+                    path="/admin/data"
                     element={
                       <AdminGuard>
-                        <ScheduledJobsPage />
+                        <AdminSectionLayout tabs={DATA_TABS} />
                       </AdminGuard>
                     }
-                  />
-                  <Route
-                    path="/admin/pending-tags"
-                    element={
-                      <AdminGuard>
-                        <PendingTagsPage />
-                      </AdminGuard>
-                    }
-                  />
-                  <Route
-                    path="/admin/issues"
-                    element={
-                      <AdminGuard>
-                        <IssuesPage />
-                      </AdminGuard>
-                    }
-                  />
-                  <Route
-                    path="/admin/changes"
-                    element={
-                      <AdminGuard>
-                        <ChangesPage />
-                      </AdminGuard>
-                    }
-                  />
-                  <Route
-                    path="/admin/reviews"
-                    element={
-                      <AdminGuard>
-                        <ReviewsPage />
-                      </AdminGuard>
-                    }
-                  />
-                  <Route
-                    path="/admin/print-stats"
-                    element={
-                      <AdminGuard>
-                        <PrintStatsPage />
-                      </AdminGuard>
-                    }
-                  />
-                  <Route
-                    path="/admin/shares"
-                    element={
-                      <AdminGuard>
-                        <ShareAuditPage />
-                      </AdminGuard>
-                    }
-                  />
-                  <Route
-                    path="/admin/ai-providers"
-                    element={
-                      <AdminGuard>
-                        <AiProvidersPage />
-                      </AdminGuard>
-                    }
-                  />
-                  <Route
-                    path="/admin/backups"
-                    element={
-                      <AdminGuard>
-                        <BackupsPage />
-                      </AdminGuard>
-                    }
-                  />
-                  <Route
-                    path="/admin/export"
-                    element={
-                      <AdminGuard>
-                        <ExportPage />
-                      </AdminGuard>
-                    }
-                  />
-                  <Route
-                    path="/admin/tags"
-                    element={
-                      <AdminGuard>
-                        <TagAdminPage />
-                      </AdminGuard>
-                    }
-                  />
-                  <Route
-                    path="/admin/site-capabilities"
-                    element={
-                      <AdminGuard>
-                        <SiteCapabilitiesPage />
-                      </AdminGuard>
-                    }
-                  />
-                  <Route
-                    path="/admin/libraries"
-                    element={
-                      <AdminGuard>
-                        <LibrariesPage />
-                      </AdminGuard>
-                    }
-                  />
-                  <Route
-                    path="/admin/ai-usage"
-                    element={
-                      <AdminGuard>
-                        <AiUsagePage />
-                      </AdminGuard>
-                    }
-                  />
+                  >
+                    <Route index element={<Navigate to="/admin/data/backups" replace />} />
+                    <Route path="backups" element={<BackupsPage />} />
+                    <Route path="export" element={<ExportPage />} />
+                    <Route path="shares" element={<ShareAuditPage />} />
+                  </Route>
+
+                  {/* ── Back-compat redirects — Content ── */}
+                  <Route path="/admin/libraries"   element={<Navigate to="/admin/content/libraries"   replace />} />
+                  <Route path="/admin/tags"         element={<Navigate to="/admin/content/tags"         replace />} />
+                  <Route path="/admin/pending-tags" element={<Navigate to="/admin/content/tags"         replace />} />
+                  <Route path="/admin/print-stats"  element={<Navigate to="/admin/content/print-stats"  replace />} />
+
+                  {/* ── Back-compat redirects — Users & Access ── */}
+                  <Route path="/admin/users"           element={<Navigate to="/admin/access/users"           replace />} />
+                  <Route path="/admin/invites"         element={<Navigate to="/admin/access/invites"         replace />} />
+                  <Route path="/admin/password-reset"  element={<Navigate to="/admin/access/password-resets" replace />} />
+                  <Route path="/admin/password-resets" element={<Navigate to="/admin/access/password-resets" replace />} />
+
+                  {/* ── Back-compat redirects — AI & Scraping ── */}
+                  <Route path="/admin/ai-providers"      element={<Navigate to="/admin/ai/providers" replace />} />
+                  <Route path="/admin/ai-usage"          element={<Navigate to="/admin/ai/usage"     replace />} />
+                  <Route path="/admin/site-capabilities" element={<Navigate to="/admin/ai/sites"     replace />} />
+
+                  {/* ── Back-compat redirects — Jobs & Activity ── */}
+                  <Route path="/admin/jobs"           element={<Navigate to="/admin/activity/jobs"      replace />} />
+                  <Route path="/admin/scheduled-jobs" element={<Navigate to="/admin/activity/scheduled" replace />} />
+                  <Route path="/admin/reviews"        element={<Navigate to="/admin/activity/reviews"   replace />} />
+                  <Route path="/admin/issues"         element={<Navigate to="/admin/activity/issues"    replace />} />
+                  <Route path="/admin/changes"        element={<Navigate to="/admin/activity/changes"   replace />} />
+
+                  {/* ── Back-compat redirects — Data & Backups ── */}
+                  <Route path="/admin/backups" element={<Navigate to="/admin/data/backups" replace />} />
+                  <Route path="/admin/export"  element={<Navigate to="/admin/data/export"  replace />} />
+                  <Route path="/admin/shares"  element={<Navigate to="/admin/data/shares"  replace />} />
                 </Route>
               </Route>
             </Routes>

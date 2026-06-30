@@ -156,7 +156,7 @@ function NavGroupDropdown({ group, onAction, reviewBadge }: NavDropdownProps) {
           {group.items.map((item) => {
             const Icon = item.icon
             const badge =
-              item.path === '/admin/reviews' && reviewBadge != null && reviewBadge > 0
+              item.path === '/admin/activity/jobs' && reviewBadge != null && reviewBadge > 0
                 ? reviewBadge
                 : undefined
 

@@ -356,7 +356,7 @@ export function SideNavShell() {
                       item={item}
                       collapsed={sidebarCollapsed}
                       onAction={handleAction}
-                      pendingBadge={item.path === '/admin/reviews' ? reviewBadge : undefined}
+                      pendingBadge={item.path === '/admin/activity/jobs' ? reviewBadge : undefined}
                     />
                   ))}
                 </div>

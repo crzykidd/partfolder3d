@@ -53,7 +53,7 @@ interface StepDef {
 }
 
 // ---------------------------------------------------------------------------
-// Step definitions — routes verified against App.tsx on 2026-06-28
+// Step definitions — routes verified against App.tsx on 2026-06-29 (nav reorg)
 // ---------------------------------------------------------------------------
 
 const STEPS: StepDef[] = [
@@ -62,7 +62,7 @@ const STEPS: StepDef[] = [
     title: 'Add a library',
     description:
       'Libraries are where your model files live — set up at least one mount path before importing assets.',
-    to: '/admin/libraries',
+    to: '/admin/content/libraries',
     cta: 'Manage libraries',
     adminOnly: true,
     statusKey: 'libraries',
@@ -89,7 +89,7 @@ const STEPS: StepDef[] = [
     title: 'Enable AI tagging (optional)',
     description:
       'Add a Claude, OpenAI, or Ollama API key to auto-suggest tags during import. Usage and estimated cost are tracked in AI Usage.',
-    to: '/admin/ai-providers',
+    to: '/admin/ai/providers',
     cta: 'Configure AI providers',
     adminOnly: true,
     statusKey: 'aiProviders',
@@ -99,7 +99,7 @@ const STEPS: StepDef[] = [
     title: 'Invite your team',
     description:
       'PartFolder 3D has no open registration. Send invite links to teammates from the Invites page.',
-    to: '/admin/invites',
+    to: '/admin/access/invites',
     cta: 'Manage invites',
     adminOnly: true,
   },
@@ -108,7 +108,7 @@ const STEPS: StepDef[] = [
     title: 'Set up backups',
     description:
       'Schedule automatic database and config backups. Library files are intentionally not backed up — they live on your own storage.',
-    to: '/admin/backups',
+    to: '/admin/data/backups',
     cta: 'Configure backups',
     adminOnly: true,
   },
@@ -117,7 +117,7 @@ const STEPS: StepDef[] = [
     title: 'Share your catalog',
     description:
       'Create per-item share links from any item page, or mint a full-site read-only share link for guests. The Share Audit page logs every view.',
-    to: '/admin/shares',
+    to: '/admin/data/shares',
     cta: 'Share audit',
     adminOnly: true,
   },
