@@ -8,37 +8,54 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-06-30 (post UI-revamp deep feature/fix run on `dev`; about to do the FIRST push to origin/dev)
+**Last updated:** 2026-06-30 (ALL post-revamp work DONE + pushed + CI green on real code; **AT THE v0.1.0 RELEASE GATE**, awaiting owner go)
 
-> ## CURRENT STATE & ROADMAP (2026-06-30)
-> UI revamp (Aurora) DONE. A large owner-driven run of features/fixes has since landed on `dev`,
-> **all committed but never pushed** (`dev` was ~87 commits ahead of origin). Highlights: AgentQL
-> fallback scraper (MakerWorld/Cloudflare, BYO key + budget, mig 0018), per-object asset analysis
-> (colors+grams, 0016), local-modified tracking + public-share notice (0015), renders-as-gallery-
-> images (0014), per-library×per-OS path prefixes (0017), image upload/delete, item delete-to-trash
-> (cross-device fix), tag delete/autocomplete/starter-tags, browse-cloud Alpha/Number sort + real
-> counts, AI usage+$cost, job retry, Quick Start page, import management. **Migrations at 0018.**
-> ~465 backend / 228 vitest, vite build green.
+> ## CURRENT STATE (2026-06-30) — at the v0.1.0 release gate
+> Everything below is **done, on `origin/dev`, and CI-green** (latest commit `23575fc`; `dev` was
+> pushed for the first time this session — ~88 commits — and CI now runs on dev/main). Health:
+> **481 backend / 229 vitest**, ruff + vite build clean, migrations at **0018**.
 >
-> **Owner-approved sequence (do in order):**
-> 1. **Push `dev`** → first-ever CI run (ci.yml on push:[dev]) + publish.yml `:dev` image. Watch `gh`, fix failures.
-> 2. **Modularization refactor** (behavior-preserving; sequential; verify+commit each): split `api.ts`
->    (2k) → `lib/api/*`+barrel; split `ItemPage.tsx` (2.6k) + `ImportWizardPage.tsx` (2.3k) into
->    subcomponents; split `worker.py` (1.7k) → `worker/tasks/*`, carve `import_sessions.py`/`items.py`;
->    retire `examples/` from src.
-> 3. **Full test pass** (whole backend suite on ephemeral PG + frontend gates).
-> 4. **Nav reorg**: admin 17 → 5 tabbed sections (Content · Users&Access · AI&Scraping · Jobs&Activity ·
->    Data&Backups); merge Tag Admin+Pending, AI Providers+Usage+Site-Caps.
-> 5. **Docs pass** (post-nav, final tab names): README features (8 new) + Getting-started; `.env.example`;
->    `docs/build-plan.md` (stale "Phase 0"); QuickStart route links; add `docs/features-overview.md` +
->    `docs/nav-architecture.md`. (Full docs audit already done.)
-> 6. **v0.1.0 release**: `/release-prep 0.1.0` → dev→main PR → CI **+ first CodeQL run** green → make
->    **CodeQL gating** (branch protection — owner click / `gh api`) → merge → images publish → `/release-cut v0.1.0`.
+> Shipped this session (all committed): AgentQL fallback scraper (MakerWorld/Cloudflare, BYO key +
+> budget, mig 0018) — **confirmed working** (1 call recorded); per-object asset analysis (colors +
+> est. grams, 0016); local-modified tracking + public-share notice (0015); renders-as-gallery-images
+> (0014); per-library×per-OS path prefixes (0017); image upload/delete; item delete-to-trash
+> (cross-device); tag delete/autocomplete/starter-tags; browse-cloud Alpha/Number sort + real counts;
+> AI usage+$cost; job retry; Quick Start page; import management. **Then** the modularization refactor
+> (`api.ts`→`lib/api/*`; `ItemPage`→`pages/item/*`; `ImportWizardPage`→`pages/import-wizard/*`;
+> `worker.py` 1741→160 + `app/worker/tasks/*` + `app/services/item_helpers.py`; `import_sessions.py`→
+> package; `examples/` retired). **Then** nav reorg: admin **17 → 5 tabbed sections** (Content ·
+> Users&Access · AI&Scraping · Jobs&Activity · Data&Backups) via `AdminSectionLayout` + 18 back-compat
+> redirects (route map in `docs/nav-architecture.md`). **Then** docs refresh (README, .env, build-plan,
+> + new features-overview.md / nav-architecture.md).
 >
-> **Verify discipline:** backend = `ruff check backend/` (config lives in `backend/pyproject.toml` —
-> running ruff WITHOUT it yields false UP042/F841 errors) + ephemeral-PG pytest; frontend = tsc +
-> vitest + **`npx vite build`** (the real gate — tsc/vitest miss babel parse errors). Worker has NO
-> hot-reload (restart it for worker.py/scraper changes); backend uses uvicorn --reload.
+> Roadmap steps 1–5 (push → refactor → full test → nav → docs) = **DONE**. Only step 6 remains:
+>
+> ### NEXT: v0.1.0 release (queued — needs owner)
+> 1. Owner: **rebuild + smoke-test** (`docker compose -f docker-compose.dev.yml up -d --build`).
+> 2. `/release-prep 0.1.0` (version bump + CHANGELOG roll + dev→main PR; version source =
+>    `backend/app/version.py`, mirror `frontend/package.json`).
+> 3. PR runs CI **+ the FIRST-EVER CodeQL run** (CodeQL only triggers on main PR/push — never run yet;
+>    triage any alerts).
+> 4. **Make the 2 CodeQL checks REQUIRED** on `main` branch protection — owner action (GitHub settings
+>    or `gh api`); they run but aren't gating yet.
+> 5. Merge PR → publish workflow pushes `:latest` images → `/release-cut v0.1.0` (only after CI green +
+>    images published; never re-tag).
+>
+> ### OPEN / DEFERRED (post-v0.1.0 ideas, not started)
+> - **Rotate the AgentQL API key** (owner pasted it in chat during testing).
+> - Watch whether AgentQL **tetra proxy adds cost** beyond $0.02/call; default is proxy-on (beat
+>   Cloudflare) — can switch off if costly.
+> - Real **slicing** for accurate filament grams/colors (current = volume estimate; `est_method` field
+>   reserved). Type-2 **"newer version online"** upstream check (`source_version` captured, unused).
+> - **Trash purge / empty-trash admin UI** (delete-to-trash accumulates under `private_data/data/app/trash`).
+> - Print-log **gcode multi-filament** parsing + `.bgcode` (separate from the asset-analysis path).
+>
+> **Verify discipline:** backend = `ruff check backend/` (pinned 0.8.4 + `backend/pyproject.toml`
+> config — unpinned/no-config gives false UP042/F841) + ephemeral-PG pytest (`alembic upgrade head`
+> first — conftest needs schema); frontend = tsc + vitest + **`npx vite build`** (real gate; tsc/vitest
+> miss babel parse errors). **Worker has NO hot-reload** (restart for worker/task/scraper edits);
+> backend uses uvicorn --reload. Spawned agents reporting "13 ruff UP042 errors" = ran ruff w/o config
+> (false). CI gotchas already fixed in `ci.yml` (pinned ruff + migrate-before-pytest).
 
 > **UI REVAMP underway (owner-directed, autonomous run).** Owner chose **Aurora** (`/example3`)
 > as the real look. Locked spec:
