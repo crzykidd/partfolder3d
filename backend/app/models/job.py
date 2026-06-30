@@ -3,7 +3,7 @@
 Created by worker tasks to record status and progress.
 Visible in the admin job/queue monitor.
 
-Status flow: queued → running → succeeded | failed
+Status flow: queued → running → succeeded | failed | cancelled | superseded
 """
 
 import uuid
@@ -26,7 +26,7 @@ class Job(Base):
     )
     # Descriptive type string, e.g. "render", "zip_bundle", "expired_zip_cleanup"
     type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    # queued | running | succeeded | failed
+    # queued | running | succeeded | failed | cancelled | superseded
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="queued", index=True
     )
@@ -41,6 +41,21 @@ class Job(Base):
     # Optional FK to the item this job operates on (for render / ZIP jobs)
     item_id: Mapped[int | None] = mapped_column(
         ForeignKey("items.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # arq internal job id — used to abort running jobs via arq's abort API
+    arq_job_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    # Links a retry/restart to the original job it replaces (for supersede-on-success)
+    retry_of_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # Set when a job is cleared/archived; excluded from the default list
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
     )
 
     created_at: Mapped[datetime] = mapped_column(

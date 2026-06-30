@@ -307,12 +307,51 @@ async def _inbox_scan_core(ctx: dict) -> None:
 # exec_scheduled_job — dispatches named job; used for "run-now" from the API
 # ---------------------------------------------------------------------------
 
+async def _job_history_retention_core(_ctx: dict) -> None:
+    """Hard-delete old job rows that have aged past their retention window.
+
+    Succeeded jobs: deleted after JOB_RETENTION_SUCCEEDED_DAYS.
+    Failed / cancelled / superseded: deleted after JOB_RETENTION_FAILED_DAYS.
+    Running / queued rows are never touched.
+    """
+    import sqlalchemy as sa  # noqa: PLC0415
+
+    from app.config import settings as _settings  # noqa: PLC0415
+    from app.db import SessionLocal  # noqa: PLC0415
+    from app.models.job import Job  # noqa: PLC0415
+
+    now = datetime.now(UTC)
+    succeeded_cutoff = now - timedelta(days=_settings.JOB_RETENTION_SUCCEEDED_DAYS)
+    failed_cutoff = now - timedelta(days=_settings.JOB_RETENTION_FAILED_DAYS)
+
+    async with SessionLocal() as db:
+        result = await db.execute(
+            sa.delete(Job).where(
+                sa.or_(
+                    sa.and_(
+                        Job.status == "succeeded",
+                        Job.finished_at < succeeded_cutoff,
+                    ),
+                    sa.and_(
+                        Job.status.in_(["failed", "cancelled", "superseded"]),
+                        Job.finished_at < failed_cutoff,
+                    ),
+                )
+            )
+        )
+        deleted = result.rowcount
+        await db.commit()
+
+    log.info("job_history_retention: deleted %d old job row(s)", deleted)
+
+
 _SCHED_FUNCS = {
     "expired_zip_cleanup": _cleanup_expired_bundles_core,
     "inbox_scan": _inbox_scan_core,
     "library_reconcile_scan": _library_reconcile_scan_core,
     "share_link_expiry_cleanup": _share_link_expiry_cleanup_core,
     "db_backup": _db_backup_core,
+    "job_history_retention": _job_history_retention_core,
 }
 
 
@@ -341,6 +380,7 @@ async def exec_scheduled_job(ctx: dict, name: str) -> None:
             "inbox_scan": 2,
             "library_reconcile_scan": 3,
             "db_backup": 4,
+            "job_history_retention": 4,
         }
         hour = _hour_map.get(name, 1)
         await _sj_finish(name, error=error, hour=hour, minute=0)
@@ -369,3 +409,7 @@ async def cron_library_reconcile_scan(ctx: dict) -> None:
 
 async def cron_db_backup(ctx: dict) -> None:
     await exec_scheduled_job(ctx, "db_backup")
+
+
+async def cron_job_history_retention(ctx: dict) -> None:
+    await exec_scheduled_job(ctx, "job_history_retention")

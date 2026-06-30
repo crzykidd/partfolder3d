@@ -79,5 +79,11 @@ class Settings(BaseSettings):
     # HTTP timeout (seconds) for instance-to-instance import fetch.
     INSTANCE_IMPORT_TIMEOUT: int = 30
 
+    # ---- Job retention (Phase 19) ----
+    # Days after which a succeeded job row is hard-deleted by the daily retention cron.
+    JOB_RETENTION_SUCCEEDED_DAYS: int = 7
+    # Days after which a failed/cancelled/superseded job row is hard-deleted.
+    JOB_RETENTION_FAILED_DAYS: int = 30
+
 
 settings = Settings()

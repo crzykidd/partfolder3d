@@ -152,7 +152,7 @@ async def _reconcile_render_images(
             await db.commit()
 
 
-async def render_item(ctx: dict, item_id: int) -> None:
+async def render_item(ctx: dict, item_id: int, retry_of_job_id: str | None = None) -> None:
     """Render all mesh files for an item into renders/<sha256>.png.
 
     PRD §7: SHA-256-keyed cache — skips files whose render already exists.
@@ -211,10 +211,15 @@ async def render_item(ctx: dict, item_id: int) -> None:
             )
             return
 
-    # Create the Job row
+    # Create the Job row — capture arq's internal job_id for cancel/abort support
     async with SessionLocal() as db:
         job_id = await create_job(
-            db, "render", payload={"item_id": item_id}, item_id=item_id
+            db,
+            "render",
+            payload={"item_id": item_id},
+            item_id=item_id,
+            arq_job_id=ctx.get("job_id"),
+            retry_of_job_id=retry_of_job_id,
         )
         await db.commit()
 

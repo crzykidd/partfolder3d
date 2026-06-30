@@ -57,6 +57,11 @@ SCHEDULED_JOB_REGISTRY: dict[str, tuple[str, str]] = {
         "Library files are NOT included — back up /data/library/ separately.",
         "daily at 04:00 UTC",
     ),
+    "job_history_retention": (
+        "Daily hard-delete of old job rows past their retention window "
+        "(JOB_RETENTION_SUCCEEDED_DAYS / JOB_RETENTION_FAILED_DAYS).",
+        "daily at 04:00 UTC",
+    ),
 }
 
 
@@ -75,6 +80,7 @@ from app.worker.tasks.scheduled import (  # noqa: E402
     cron_db_backup,
     cron_expired_zip_cleanup,
     cron_inbox_scan,
+    cron_job_history_retention,
     cron_library_reconcile_scan,
     cron_share_link_expiry_cleanup,
     exec_scheduled_job,
@@ -236,7 +242,10 @@ class WorkerSettings:
         cron(cron_inbox_scan, hour=2, minute=0, run_at_startup=False),
         cron(cron_library_reconcile_scan, hour=3, minute=0, run_at_startup=False),
         cron(cron_db_backup, hour=4, minute=0, run_at_startup=False),
+        cron(cron_job_history_retention, hour=4, minute=30, run_at_startup=False),
     ]
+
+    allow_abort_jobs = True
 
     on_startup = startup
 

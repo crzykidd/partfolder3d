@@ -323,8 +323,8 @@ async def test_retry_failed_render_job(
     body = resp.json()
     assert body["queued"] is True
 
-    # Verify that enqueue_job was called with the correct task and item_id
-    mock_redis.enqueue_job.assert_called_once_with("render_item", 42)
+    # Verify that enqueue_job was called with the correct task, item_id, and retry link
+    mock_redis.enqueue_job.assert_called_once_with("render_item", 42, retry_of_job_id=str(jid))
 
 
 @pytest.mark.asyncio

@@ -1,18 +1,24 @@
 """Job monitor endpoints (Phase 4 — PRD §8.3).
 
-GET  /api/jobs          → paginated list of queued/running/failed jobs (admin)
-GET  /api/jobs/{id}     → single job detail (admin)
-POST /api/jobs/{id}/retry → re-enqueue a failed job (admin + CSRF)
+GET    /api/jobs                  → paginated list (admin); default excludes archived +
+                                    superseded; ?archived=true → archive list only;
+                                    ?include_superseded=true → show superseded rows
+GET    /api/jobs/{id}             → single job detail (admin)
+POST   /api/jobs/{id}/retry       → re-enqueue a failed job (admin + CSRF)
+POST   /api/jobs/{id}/cancel      → cancel a running job (admin + CSRF)
+POST   /api/jobs/{id}/restart     → restart a job of any status (admin + CSRF)
+POST   /api/jobs/clear-succeeded  → archive all non-archived succeeded jobs (admin + CSRF)
+POST   /api/jobs/{id}/archive     → archive one terminal job (admin + CSRF)
+DELETE /api/jobs/{id}             → hard-delete one job row (admin + CSRF)
 
-These endpoints power the admin job/queue monitor — a live view of in-flight and
-recently finished background work.
+These endpoints power the admin job/queue monitor.
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 import sqlalchemy as sa
@@ -34,7 +40,8 @@ router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 # Schemas
 # ---------------------------------------------------------------------------
 
-_VALID_STATUSES = {"queued", "running", "succeeded", "failed"}
+_VALID_STATUSES = {"queued", "running", "succeeded", "failed", "cancelled", "superseded"}
+_TERMINAL_STATUSES = {"succeeded", "failed", "cancelled", "superseded"}
 
 
 class JobOut(BaseModel):
@@ -46,6 +53,8 @@ class JobOut(BaseModel):
     log: str | None
     error: str | None
     item_id: int | None
+    retry_of_job_id: str | None
+    archived_at: datetime | None
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
@@ -64,6 +73,10 @@ class RetryOut(BaseModel):
     queued: bool
 
 
+class ArchiveOut(BaseModel):
+    archived: int
+
+
 # ---------------------------------------------------------------------------
 # Retry map: Job.type → (arq_task_name, callable that extracts positional args
 # from the stored payload).
@@ -75,7 +88,7 @@ class RetryOut(BaseModel):
 #
 # A retry does NOT reset the old failed row — it re-enqueues the arq task,
 # which will create a NEW Job row when it starts.  The original failed row is
-# preserved as history.
+# preserved as history and marked 'superseded' once the new job succeeds.
 # ---------------------------------------------------------------------------
 
 def _enqueue_args_for(job: Job) -> tuple[str, list[Any]]:
@@ -110,10 +123,29 @@ def _job_out(job: Job) -> JobOut:
         log=job.log,
         error=job.error,
         item_id=job.item_id,
+        retry_of_job_id=str(job.retry_of_job_id) if job.retry_of_job_id else None,
+        archived_at=job.archived_at,
         created_at=job.created_at,
         started_at=job.started_at,
         finished_at=job.finished_at,
     )
+
+
+async def _resolve_job(db: AsyncSession, job_id: str) -> Job:
+    """Parse UUID string, load job row, raise 422/404 on failure."""
+    try:
+        job_uuid = uuid.UUID(job_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid job ID format (expected UUID)",
+        ) from exc
+
+    result = await db.execute(select(Job).where(Job.id == job_uuid))
+    job = result.scalar_one_or_none()
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    return job
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +160,7 @@ async def list_jobs(
     status_filter: str | None = Query(
         default=None,
         alias="status",
-        description="Filter by status: queued, running, succeeded, failed",
+        description="Filter by status: queued, running, succeeded, failed, cancelled, superseded",
     ),
     job_type: str | None = Query(
         default=None,
@@ -137,12 +169,32 @@ async def list_jobs(
     ),
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=50, ge=1, le=200),
+    archived: bool = Query(
+        default=False,
+        description="When true, return ONLY archived rows (the archive list).",
+    ),
+    include_superseded: bool = Query(
+        default=False,
+        description="When true (and archived=false), include superseded rows.",
+    ),
 ) -> PaginatedJobs:
     """List background jobs, newest first.
 
-    Useful for spotting stuck or failed jobs.
+    Default view excludes archived and superseded rows.
+    Use archived=true for the archive list; include_superseded=true to reveal
+    superseded rows in the default view.
     """
     query = select(Job)
+
+    if archived:
+        # Archive list: only rows that have been cleared/archived
+        query = query.where(Job.archived_at.is_not(None))
+    else:
+        # Default view: exclude archived rows
+        query = query.where(Job.archived_at.is_(None))
+        # Exclude superseded unless the caller explicitly asks for them
+        if not include_superseded:
+            query = query.where(Job.status != "superseded")
 
     if status_filter and status_filter in _VALID_STATUSES:
         query = query.where(Job.status == status_filter)
@@ -167,6 +219,30 @@ async def list_jobs(
     )
 
 
+@router.post("/clear-succeeded", response_model=ArchiveOut)
+async def clear_succeeded_jobs(
+    _admin: Annotated[User, Depends(require_admin)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ArchiveOut:
+    """Set archived_at=now on all non-archived succeeded jobs.
+
+    Returns the count of jobs archived.
+    """
+    now = datetime.now(UTC)
+    result = await db.execute(
+        select(Job).where(
+            Job.status == "succeeded",
+            Job.archived_at.is_(None),
+        )
+    )
+    jobs = result.scalars().all()
+    for job in jobs:
+        job.archived_at = now
+    await db.flush()
+    return ArchiveOut(archived=len(jobs))
+
+
 @router.get("/{job_id}", response_model=JobOut)
 async def get_job(
     job_id: str,
@@ -174,19 +250,7 @@ async def get_job(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> JobOut:
     """Get a single job by UUID."""
-    try:
-        job_uuid = uuid.UUID(job_id)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Invalid job ID format (expected UUID)",
-        ) from exc
-
-    result = await db.execute(select(Job).where(Job.id == job_uuid))
-    job = result.scalar_one_or_none()
-    if job is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
-
+    job = await _resolve_job(db, job_id)
     return _job_out(job)
 
 
@@ -203,21 +267,11 @@ async def retry_job(
     409; non-retriable job types return 400.
 
     Behaviour: the old failed row is left intact (preserved as history).  The
-    re-enqueued arq task will create a NEW Job row when it starts, exactly as it
-    did on the original run.  See docs/decisions.md for the full retry map.
+    re-enqueued arq task will create a NEW Job row when it starts, linked to
+    this job via retry_of_job_id.  When the new job succeeds, the old row is
+    automatically marked 'superseded'.
     """
-    try:
-        job_uuid = uuid.UUID(job_id)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Invalid job ID format (expected UUID)",
-        ) from exc
-
-    result = await db.execute(select(Job).where(Job.id == job_uuid))
-    job = result.scalar_one_or_none()
-    if job is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    job = await _resolve_job(db, job_id)
 
     if job.status != "failed":
         raise HTTPException(
@@ -232,7 +286,7 @@ async def retry_job(
         from arq.connections import RedisSettings  # noqa: PLC0415
 
         redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-        await redis.enqueue_job(task_name, *task_args)
+        await redis.enqueue_job(task_name, *task_args, retry_of_job_id=str(job.id))
         await redis.aclose()
         log.info(
             "retry_job: re-enqueued %s(%s) for failed job %s",
@@ -247,3 +301,148 @@ async def retry_job(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Failed to enqueue retry: {exc}",
         ) from exc
+
+
+@router.post("/{job_id}/cancel", response_model=JobOut)
+async def cancel_job(
+    job_id: str,
+    _admin: Annotated[User, Depends(require_admin)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> JobOut:
+    """Cancel a running job.
+
+    Sets status to 'cancelled' and best-effort aborts the arq task.  The abort
+    signal tells the worker to stop the task's coroutine; the task's
+    BaseException handler then calls finish_job(failed), which is a no-op
+    because the row is already in terminal state 'cancelled'.
+    """
+    job = await _resolve_job(db, job_id)
+
+    if job.status != "running":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Only running jobs can be cancelled; this job is '{job.status}'.",
+        )
+
+    # Set 'cancelled' FIRST so finish_job (from the arq BaseException handler)
+    # sees a terminal status and returns without clobbering our state.
+    job.status = "cancelled"
+    job.finished_at = datetime.now(UTC)
+    await db.flush()
+
+    # Best-effort abort the arq task (requires allow_abort_jobs=True on the worker).
+    if job.arq_job_id:
+        try:
+            from arq import create_pool  # noqa: PLC0415
+            from arq.connections import RedisSettings  # noqa: PLC0415
+            from arq.jobs import Job as ArqJob  # noqa: PLC0415
+
+            redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
+            await ArqJob(job.arq_job_id, redis).abort()
+            await redis.aclose()
+        except Exception:
+            log.exception(
+                "cancel_job: failed to abort arq job %s (non-fatal; row already cancelled)",
+                job.arq_job_id,
+            )
+
+    return _job_out(job)
+
+
+async def _cancel_running_job(db: AsyncSession, job: Job) -> None:
+    """Internal: cancel a running job (no 409 check — caller has already verified intent)."""
+    job.status = "cancelled"
+    job.finished_at = datetime.now(UTC)
+    await db.flush()
+
+    if job.arq_job_id:
+        try:
+            from arq import create_pool  # noqa: PLC0415
+            from arq.connections import RedisSettings  # noqa: PLC0415
+            from arq.jobs import Job as ArqJob  # noqa: PLC0415
+
+            redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
+            await ArqJob(job.arq_job_id, redis).abort()
+            await redis.aclose()
+        except Exception:
+            log.exception(
+                "_cancel_running_job: abort arq job %s failed (non-fatal)", job.arq_job_id
+            )
+
+
+@router.post("/{job_id}/restart", response_model=RetryOut, status_code=status.HTTP_202_ACCEPTED)
+async def restart_job(
+    job_id: str,
+    _admin: Annotated[User, Depends(require_admin)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> RetryOut:
+    """Restart a job of any status.
+
+    If the job is currently running, it is cancelled first.  Then the work is
+    re-enqueued with retry_of_job_id pointing to this job so that when the new
+    run succeeds, this job row is automatically superseded.
+    """
+    job = await _resolve_job(db, job_id)
+
+    # Cancel in-flight work before re-enqueueing
+    if job.status == "running":
+        await _cancel_running_job(db, job)
+
+    task_name, task_args = _enqueue_args_for(job)
+
+    try:
+        from arq import create_pool  # noqa: PLC0415
+        from arq.connections import RedisSettings  # noqa: PLC0415
+
+        redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
+        await redis.enqueue_job(task_name, *task_args, retry_of_job_id=str(job.id))
+        await redis.aclose()
+        log.info(
+            "restart_job: re-enqueued %s(%s) for job %s (was %s)",
+            task_name, task_args, job_id, job.status,
+        )
+        return RetryOut(queued=True)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("restart_job: failed to enqueue %s for job %s", task_name, job_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Failed to enqueue restart: {exc}",
+        ) from exc
+
+
+@router.post("/{job_id}/archive", response_model=JobOut)
+async def archive_job(
+    job_id: str,
+    _admin: Annotated[User, Depends(require_admin)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> JobOut:
+    """Archive a single terminal job by setting archived_at=now."""
+    job = await _resolve_job(db, job_id)
+
+    if job.status not in _TERMINAL_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Only terminal jobs can be archived; this job is '{job.status}'.",
+        )
+
+    job.archived_at = datetime.now(UTC)
+    await db.flush()
+    return _job_out(job)
+
+
+@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+async def delete_job(
+    job_id: str,
+    _admin: Annotated[User, Depends(require_admin)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Hard-delete a job row (204 No Content)."""
+    job = await _resolve_job(db, job_id)
+    await db.delete(job)
+    await db.flush()

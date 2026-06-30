@@ -2,6 +2,35 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-30 — Job lifecycle: cancel/restart, retry-supersede, archive, retention (migration 0019)
+
+Backend lifecycle management for the `jobs` table (UI is a separate follow-up). Migration
+0019 adds `arq_job_id` (so a running job can be aborted), `retry_of_job_id` (FK→jobs.id,
+links a retry/restart to the job it replaces), and `archived_at`.
+
+- **Status vocabulary** extended with two terminal values, `cancelled` and `superseded`
+  (status stays a free `String`, so no enum migration). `_VALID_STATUSES`/`_TERMINAL_STATUSES`
+  updated in both `jobs.py` and `job_tracker.py`.
+- **Cancel race closed:** `finish_job` is now a **no-op if the row is already terminal**. The
+  cancel endpoint sets `cancelled` FIRST, then best-effort arq-aborts; the aborted task's
+  `BaseException` finalizer calls `finish_job(failed)` which the terminal guard ignores —
+  so an explicit cancel is never clobbered. Abort requires `allow_abort_jobs=True` (now set).
+- **Supersede on success:** when a job succeeds and has a `retry_of_job_id`, `finish_job` walks
+  the ancestor chain (`_supersede_ancestors`, depth-20 cycle guard) marking each `superseded`,
+  so a failed job whose retry later succeeds drops out of the default list.
+- **List filtering:** default `GET /api/jobs` excludes `archived_at IS NOT NULL` AND
+  `status='superseded'`; `?archived=true` → archive-only list; `?include_superseded=true`
+  reveals superseded in the default view.
+- **New endpoints:** `POST /{id}/cancel`, `POST /{id}/restart`, `POST /clear-succeeded`
+  (archive all succeeded), `POST /{id}/archive`, `DELETE /{id}`. `/clear-succeeded` is declared
+  before `/{job_id}` so it isn't captured by the path param.
+- **Retention cron** `job_history_retention` (daily 04:30): hard-deletes succeeded jobs older
+  than `JOB_RETENTION_SUCCEEDED_DAYS` (7) and failed/cancelled/superseded older than
+  `JOB_RETENTION_FAILED_DAYS` (30); both configurable.
+
+Verified capped (no full suite, mocked renders): 31 pytest (17 new + 14 existing), ruff clean,
+alembic 0019 up/down/up clean.
+
 ## 2026-06-30 — Render reliability: subprocess offload, timeout, crash recovery, RENDER_MODE
 
 **Problem:** renders pegged 100% CPU and got stuck in "running" forever. Root cause: the
