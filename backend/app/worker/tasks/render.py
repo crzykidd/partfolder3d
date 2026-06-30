@@ -162,6 +162,16 @@ async def render_item(ctx: dict, item_id: int) -> None:
     It does NOT crash the worker and does NOT block item creation or rescan.
 
     Non-mesh files (Blender/CAD/gcode) are silently skipped with no Job failure.
+
+    Error handling:
+    - Per-file RenderError / RenderTimeout → appended to errors[], job marked
+      failed at the end but the function RETURNS NORMALLY so arq does not retry
+      (which would create duplicate Job rows).
+    - Unexpected Exception (DB hiccup, I/O error) → job marked failed, function
+      returns normally (same reasoning: no retry, no duplicate rows).
+    - BaseException (asyncio.CancelledError from arq timeout / shutdown) →
+      job marked failed best-effort using a fresh DB session, then re-raised so
+      arq knows the task was cancelled.
     """
     import hashlib  # noqa: PLC0415
 
@@ -170,17 +180,36 @@ async def render_item(ctx: dict, item_id: int) -> None:
     from app.config import settings  # noqa: PLC0415
     from app.db import SessionLocal  # noqa: PLC0415
     from app.models.file import File, FileRole  # noqa: PLC0415
+    from app.models.image import Image  # noqa: PLC0415
     from app.models.item import Item  # noqa: PLC0415
     from app.worker.job_tracker import (  # noqa: PLC0415
         create_job,
         finish_job,
         update_job_progress,
     )
-    from app.worker.render_mesh import (  # noqa: PLC0415
-        MESH_EXTENSIONS,
-        RenderError,
-        render_mesh_file,
-    )
+    from app.worker.render_mesh import MESH_EXTENSIONS, RenderError  # noqa: PLC0415
+    from app.worker.render_subprocess import RenderTimeout, run_render_subprocess  # noqa: PLC0415
+
+    # ---- Background-render mode gate (before creating a Job row) ----
+    render_mode = settings.RENDER_MODE
+    if render_mode == "off":
+        log.info("render_item: RENDER_MODE=off — skipping render for item %s", item_id)
+        return
+    if render_mode == "no_images":
+        async with SessionLocal() as db:
+            img_count = await db.scalar(
+                sa.select(sa.func.count())
+                .select_from(Image)
+                .where(Image.item_id == item_id)
+            )
+        if img_count:
+            log.info(
+                "render_item: RENDER_MODE=no_images and item %s already has %d image(s)"
+                " — skipping render",
+                item_id,
+                img_count,
+            )
+            return
 
     # Create the Job row
     async with SessionLocal() as db:
@@ -188,6 +217,8 @@ async def render_item(ctx: dict, item_id: int) -> None:
             db, "render", payload={"item_id": item_id}, item_id=item_id
         )
         await db.commit()
+
+    _job_finalized = False
 
     try:
         # Load item + model files
@@ -203,6 +234,7 @@ async def render_item(ctx: dict, item_id: int) -> None:
                         error=f"Item {item_id} not found"
                     )
                     await db2.commit()
+                _job_finalized = True
                 return
 
             item_dir = Path(item.dir_path)
@@ -223,9 +255,11 @@ async def render_item(ctx: dict, item_id: int) -> None:
                     log_text="No model files to render."
                 )
                 await db.commit()
+            _job_finalized = True
             return
 
         resolution = settings.RENDER_RESOLUTION
+        timeout_s = settings.RENDER_TIMEOUT_S
         rendered: list[str] = []
         skipped: list[str] = []
         errors: list[str] = []
@@ -259,19 +293,18 @@ async def render_item(ctx: dict, item_id: int) -> None:
 
             try:
                 renders_dir.mkdir(parents=True, exist_ok=True)
-                png_bytes = render_mesh_file(file_path, resolution=resolution)
+                png_bytes = await run_render_subprocess(
+                    file_path, resolution=resolution, timeout_s=timeout_s
+                )
                 render_path.write_bytes(png_bytes)
                 rendered.append(f.path)
                 log.info(
                     "render_item: item=%s rendered %s → renders/%s.png",
                     item_id, f.path, sha[:12],
                 )
-            except RenderError as exc:
+            except (RenderError, RenderTimeout) as exc:
                 errors.append(f"{f.path}: {exc}")
                 log.warning("render_item: item=%s %s", item_id, exc)
-            except Exception as exc:
-                errors.append(f"{f.path}: unexpected error: {exc}")
-                log.exception("render_item: item=%s unexpected error for %s", item_id, f.path)
 
             # Update progress after each file
             pct = int((idx + 1) / len(model_files) * 90)
@@ -306,9 +339,43 @@ async def render_item(ctx: dict, item_id: int) -> None:
                 log_text="\n".join(log_lines) or "No mesh files to render.",
             )
             await db.commit()
+        _job_finalized = True
 
     except Exception as exc:
-        log.exception("render_item: unexpected top-level error for item %s", item_id)
-        async with SessionLocal() as db:
-            await finish_job(db, job_id, succeeded=False, error=str(exc))
-            await db.commit()
+        # Unexpected pipeline error (DB hiccup, I/O, etc.).
+        # Mark failed and return normally — arq must not retry (that would spawn
+        # a duplicate Job row since we already created one above).
+        if not _job_finalized:
+            log.exception("render_item: unexpected error for item %s", item_id)
+            try:
+                async with SessionLocal() as db:
+                    await finish_job(db, job_id, succeeded=False, error=str(exc))
+                    await db.commit()
+            except Exception:
+                log.exception(
+                    "render_item: failed to finalize job %s on unexpected error", job_id
+                )
+
+    except BaseException:
+        # asyncio.CancelledError (arq job_timeout / graceful shutdown).
+        # Best-effort finalization using a FRESH session (the in-flight one may
+        # be poisoned), then re-raise so arq knows the task was interrupted.
+        if not _job_finalized:
+            log.error(
+                "render_item: cancelled/shutdown for item %s — finalizing job %s as failed",
+                item_id,
+                job_id,
+            )
+            try:
+                async with SessionLocal() as db:
+                    await finish_job(
+                        db, job_id,
+                        succeeded=False,
+                        error="worker stopped / cancelled",
+                    )
+                    await db.commit()
+            except Exception:
+                log.exception(
+                    "render_item: failed to finalize job %s on cancellation", job_id
+                )
+        raise

@@ -44,6 +44,20 @@ class Settings(BaseSettings):
     # Rendering backend: "auto" tries EGL → OSMesa → VTK in order.
     # Override with "egl", "osmesa", or "vtk" to force a specific backend.
     RENDER_BACKEND: str = "auto"
+    # Wall-clock kill timeout (seconds) for a single file's render subprocess.
+    # The child process is SIGTERM'd (then SIGKILL'd) after this many seconds.
+    RENDER_TIMEOUT_S: int = 300
+    # Thread cap passed to the render subprocess via numeric-thread env vars
+    # (OMP_NUM_THREADS, LP_NUM_THREADS, etc.).  Limits CPU saturation on
+    # multi-core hosts; 2 is safe for a shared server.
+    RENDER_CPU_THREADS: int = 2
+    # Background-render mode — controls when items are auto-rendered:
+    #   "all"       → render every mesh item (default).
+    #   "no_images" → only render items that have no images (render as a
+    #                 fallback thumbnail; skip items that already have images).
+    #   "off"       → never auto-render.
+    # Unknown values fall back to "all" behaviour.
+    RENDER_MODE: str = "all"
 
     # ---- Import / Inbox (Phase 5) ----
     # Directory the inbox scanner watches for incoming asset folders.

@@ -158,7 +158,13 @@ async def _enqueue_render(item_id: int) -> None:
 
     Failure to enqueue (e.g. Redis not available) is logged but does NOT
     propagate — it must never block item creation or rescan.
+
+    Skipped entirely when RENDER_MODE=off.  Other modes ("no_images") are
+    enforced inside render_item itself, which is the single source of truth.
     """
+    if settings.RENDER_MODE == "off":
+        log.debug("_enqueue_render: RENDER_MODE=off — not enqueuing render for item %s", item_id)
+        return
     try:
         from arq import create_pool  # noqa: PLC0415
         from arq.connections import RedisSettings  # noqa: PLC0415

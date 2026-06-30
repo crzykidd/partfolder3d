@@ -81,17 +81,114 @@ from app.worker.tasks.scheduled import (  # noqa: E402
 )
 
 # ---------------------------------------------------------------------------
-# Worker startup hook — seed ScheduledJob table
+# Worker startup hook — seed ScheduledJob table + crash recovery
 # ---------------------------------------------------------------------------
 
 
-async def startup(ctx: dict) -> None:
-    """Ensure all registered scheduled jobs have a row in scheduled_jobs."""
+async def _recover_orphaned_render_jobs(
+    ctx: dict,
+    _db: object | None = None,
+) -> None:
+    """Mark orphaned 'running' render jobs failed and re-enqueue them.
+
+    At startup the worker has no jobs in flight; any render job still in
+    'running' status was abandoned by a previous crashed/restarted worker.
+    We mark each orphan 'failed', then re-enqueue render_item(item_id) so the
+    render completes.  Renders are idempotent (SHA-256 cache hit skips already-
+    done files), so a previously-completed render just cache-hits.
+
+    Multiple orphans for the same item_id are deduped — one enqueue per item.
+
+    Args:
+        ctx:  arq worker context dict (must contain 'redis' key when _db is None
+              and there are orphans to re-enqueue).
+        _db:  Optional AsyncSession for testing (mirrors the _reconcile_render_images
+              pattern).  When None (production), opens its own SessionLocal.
+    """
     import sqlalchemy as sa  # noqa: PLC0415
 
     from app.db import SessionLocal  # noqa: PLC0415
+    from app.models.job import Job  # noqa: PLC0415
+
+    async def _do_recover(db: object) -> list[int]:  # type: ignore[type-arg]
+        """Inner: mark orphans failed; return item_ids to re-enqueue (deduped)."""
+        result = await db.execute(  # type: ignore[union-attr]
+            sa.select(Job).where(
+                Job.type == "render",
+                Job.status == "running",
+            )
+        )
+        orphans: list[Job] = list(result.scalars().all())
+
+        if not orphans:
+            return []
+
+        log.warning(
+            "startup: %d orphaned render job(s) found — marking failed + re-queuing",
+            len(orphans),
+        )
+
+        seen_item_ids: set[int] = set()
+        to_enqueue: list[int] = []
+
+        for job in orphans:
+            job.status = "failed"  # type: ignore[union-attr]
+            job.error = "orphaned by worker restart — re-queued"  # type: ignore[union-attr]
+
+            item_id: int | None = (job.payload or {}).get("item_id")  # type: ignore[union-attr]
+            if item_id is not None and item_id not in seen_item_ids:
+                seen_item_ids.add(item_id)
+                to_enqueue.append(item_id)
+
+        await db.flush()  # type: ignore[union-attr]
+        return to_enqueue
+
+    if _db is not None:
+        to_enqueue = await _do_recover(_db)
+    else:
+        async with SessionLocal() as db:
+            to_enqueue = await _do_recover(db)
+            await db.commit()
+
+    if not to_enqueue:
+        return
+
+    redis = ctx.get("redis")
+    if redis is None:
+        log.error("startup: no redis in ctx — cannot re-enqueue orphaned renders")
+        return
+
+    for item_id in to_enqueue:
+        await redis.enqueue_job("render_item", item_id)
+        log.info("startup: re-enqueued render_item for item_id=%d", item_id)
+
+
+async def startup(ctx: dict) -> None:
+    """Seed the ScheduledJob table, apply thread caps, and recover orphaned jobs."""
+    import sqlalchemy as sa  # noqa: PLC0415
+
+    from app.config import settings  # noqa: PLC0415
+    from app.db import SessionLocal  # noqa: PLC0415
     from app.models.scheduled_job import ScheduledJob  # noqa: PLC0415
 
+    # --- Thread caps ---
+    # Set numeric-thread env vars BEFORE any render subprocess is spawned so
+    # children inherit them.  The compose environment (and Dockerfile ENV) already
+    # set these; this is a belt-and-suspenders defensive reset that drives them
+    # all from the single RENDER_CPU_THREADS setting.
+    thread_count = str(settings.RENDER_CPU_THREADS)
+    for _var in (
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "LP_NUM_THREADS",
+    ):
+        os.environ[_var] = thread_count
+    log.info("startup: render thread caps set to %s", thread_count)
+
+    # --- Seed scheduled jobs ---
     async with SessionLocal() as db:
         for name, (description, schedule) in SCHEDULED_JOB_REGISTRY.items():
             result = await db.execute(
@@ -107,6 +204,10 @@ async def startup(ctx: dict) -> None:
                 db.add(sj)
         await db.commit()
     log.info("startup: scheduled_jobs table seeded")
+
+    # --- Crash recovery ---
+    await _recover_orphaned_render_jobs(ctx)
+    log.info("startup: crash recovery complete")
 
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
+# Render thread caps — limit CPU saturation on multi-core hosts.
+# Driven by RENDER_CPU_THREADS (default 2); the worker startup hook also
+# enforces these at runtime.  Overridden per-service in docker-compose.
+ENV OMP_NUM_THREADS=2 \
+    OPENBLAS_NUM_THREADS=2 \
+    MKL_NUM_THREADS=2 \
+    VECLIB_MAXIMUM_THREADS=2 \
+    NUMEXPR_NUM_THREADS=2 \
+    LP_NUM_THREADS=2
 
 # ---- deps: system libraries + Python packages (cached layer) ----
 FROM base AS deps

@@ -104,6 +104,15 @@ services:
       DATABASE_URL: "postgresql+asyncpg://partfolder3d:${POSTGRES_PASSWORD:-changeme}@db:5432/partfolder3d"
       REDIS_URL: "redis://redis:6379"
       DATA_DIR: /data
+      # Render thread caps — override the Dockerfile defaults from RENDER_CPU_THREADS.
+      # All six vars must be set so every numeric-thread library sees the cap.
+      RENDER_CPU_THREADS: "${RENDER_CPU_THREADS:-2}"
+      OMP_NUM_THREADS: "${RENDER_CPU_THREADS:-2}"
+      OPENBLAS_NUM_THREADS: "${RENDER_CPU_THREADS:-2}"
+      MKL_NUM_THREADS: "${RENDER_CPU_THREADS:-2}"
+      VECLIB_MAXIMUM_THREADS: "${RENDER_CPU_THREADS:-2}"
+      NUMEXPR_NUM_THREADS: "${RENDER_CPU_THREADS:-2}"
+      LP_NUM_THREADS: "${RENDER_CPU_THREADS:-2}"
     volumes:
       - ./backend:/app
       - ./private_data/data/app:/data

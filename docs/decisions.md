@@ -2,6 +2,43 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-30 — Render reliability: subprocess offload, timeout, crash recovery, RENDER_MODE
+
+**Problem:** renders pegged 100% CPU and got stuck in "running" forever. Root cause: the
+render was a synchronous blocking C call (`trimesh` + pyrender/OSMesa/VTK) run directly in
+the worker's asyncio event loop. No thread caps → every core saturated; arq's cooperative
+`job_timeout` could not interrupt blocking C code → hung renders never timed out; and
+`asyncio.CancelledError` (a `BaseException`) bypassed the `except Exception`, leaking the
+"running" row.
+
+**Fix:**
+- New `backend/app/worker/render_subprocess.py`: runs `render_mesh_file` in a fresh
+  `multiprocessing` **spawn** child (not fork — GL/Mesa global state makes fork unsafe),
+  awaited via `asyncio.to_thread` so the loop stays free. On `RENDER_TIMEOUT_S` (default
+  300s) the child is SIGTERM'd then SIGKILL'd → a real wall-clock kill.
+- Thread caps (`RENDER_CPU_THREADS`, default 2) set as `OMP_/OPENBLAS_/MKL_/VECLIB_/
+  NUMEXPR_NUM_THREADS` + **`LP_NUM_THREADS`** (llvmpipe/Mesa — the one that caps OSMesa)
+  in Dockerfile ENV, both compose worker services, and defensively in `worker.startup()`.
+- `render_item` finalizes the Job row on every path: content failures (RenderError/
+  RenderTimeout/unexpected) mark it `failed` and **return normally** so arq does NOT
+  auto-retry (which would spawn duplicate Job rows — chosen over tweaking WorkerSettings
+  `max_tries` globally, which would affect zip/import tasks too); `BaseException`
+  (cancel/shutdown) finalizes best-effort via a fresh session, then re-raises.
+- Crash recovery: `worker.startup()` runs `_recover_orphaned_render_jobs` — marks any
+  pre-existing `running` render jobs `failed` and **re-enqueues** `render_item` (deduped by
+  item_id). Renders are idempotent (sha-cache), so completed ones just cache-hit.
+
+**RENDER_MODE (background-render config):** new setting `all` (default) | `no_images` (only
+render items with zero images — render-as-fallback-thumbnail) | `off` (never auto-render).
+Gated at the top of `render_item` before the Job row is created; `off` also short-circuits
+`_enqueue_render`. `render_item` is the single source of truth (reconcile.py enqueues bypass
+the helper).
+
+**Verification (light, CPU-capped — orchestrator ran this, not a heavy host suite):** live
+render smoke inside the worker container (tiny cube → valid PNG; garbage file → RenderError,
+no hang), plus 7 mocked/capped pytest (timeout→failed, error→no-dup-rows, orphan recovery +
+dedup + no-op, and the two RENDER_MODE gate cases).
+
 ## 2026-06-30 — Clickable stat-strip tiles
 
 Made the global `WidgetStatStrip` tiles navigate to their detail pages. Added an optional
