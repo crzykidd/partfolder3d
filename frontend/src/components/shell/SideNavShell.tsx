@@ -15,7 +15,7 @@
  */
 
 import React, { useState } from 'react'
-import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   ChevronDown,
@@ -53,6 +53,10 @@ interface NavItemProps {
 function SideNavItem({ item, collapsed, onAction, pendingBadge }: NavItemProps) {
   const Icon = item.icon
   const isAction = Boolean(item.action)
+  const { pathname } = useLocation()
+  // Section items (e.g. Admin tabs) point at a default sub-route but should
+  // stay highlighted across the whole section — match on the prefix instead.
+  const sectionActive = item.match ? pathname.startsWith(item.match) : false
 
   const commonStyle: React.CSSProperties = {
     display: 'flex',
@@ -136,14 +140,17 @@ function SideNavItem({ item, collapsed, onAction, pendingBadge }: NavItemProps) 
       to={item.path}
       end={item.path === '/catalog'}
       title={collapsed ? item.label : undefined}
-      style={({ isActive }) => ({
-        ...commonStyle,
-        background: isActive ? 'var(--aurora-pill)' : 'transparent',
-        border: `1px solid ${isActive ? 'var(--aurora-pill-border)' : 'transparent'}`,
-        color: isActive ? 'var(--aurora-accent)' : 'var(--aurora-text-dim)',
-        fontWeight: isActive ? 600 : 400,
-        boxShadow: isActive ? 'var(--aurora-glow)' : 'none',
-      })}
+      style={({ isActive }) => {
+        const active = isActive || sectionActive
+        return {
+          ...commonStyle,
+          background: active ? 'var(--aurora-pill)' : 'transparent',
+          border: `1px solid ${active ? 'var(--aurora-pill-border)' : 'transparent'}`,
+          color: active ? 'var(--aurora-accent)' : 'var(--aurora-text-dim)',
+          fontWeight: active ? 600 : 400,
+          boxShadow: active ? 'var(--aurora-glow)' : 'none',
+        }
+      }}
       onMouseEnter={(e) => {
         const el = e.currentTarget as HTMLElement
         const style = window.getComputedStyle(el)

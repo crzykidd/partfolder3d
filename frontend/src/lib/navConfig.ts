@@ -43,6 +43,14 @@ export interface NavItemDef {
   path?: string
   /** A named action that the shell handles (e.g. open AddAssetModal). */
   action?: 'add-asset'
+  /**
+   * Optional active-highlight prefix. When set, the nav item is highlighted
+   * whenever the current pathname starts with this prefix — used for section
+   * items whose `path` points at a default sub-route (e.g. the Admin sections
+   * land on `/admin/activity/jobs` but should stay highlighted on any
+   * `/admin/activity/*` tab).
+   */
+  match?: string
 }
 
 export interface NavGroupDef {
@@ -89,11 +97,11 @@ export const NAV_GROUPS: NavGroupDef[] = [
     label: 'Admin',
     requiresAdmin: true,
     items: [
-      { label: 'Content',        icon: Layers,    path: '/admin/content/libraries' },
-      { label: 'Users & Access', icon: Users,     path: '/admin/access/users' },
-      { label: 'AI & Scraping',  icon: Cpu,       path: '/admin/ai/providers' },
-      { label: 'Jobs & Activity', icon: Activity, path: '/admin/activity/jobs' },
-      { label: 'Data & Backups', icon: HardDrive, path: '/admin/data/backups' },
+      { label: 'Content',        icon: Layers,    path: '/admin/content/libraries', match: '/admin/content' },
+      { label: 'Users & Access', icon: Users,     path: '/admin/access/users',     match: '/admin/access' },
+      { label: 'AI & Scraping',  icon: Cpu,       path: '/admin/ai/providers',     match: '/admin/ai' },
+      { label: 'Jobs & Activity', icon: Activity, path: '/admin/activity/jobs',    match: '/admin/activity' },
+      { label: 'Data & Backups', icon: HardDrive, path: '/admin/data/backups',     match: '/admin/data' },
     ],
   },
 ]
