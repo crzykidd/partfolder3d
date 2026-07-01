@@ -2,15 +2,17 @@
  * IssuesPage — admin view of reconcile-engine issues (PRD §8.3).
  *
  * Paginated table of issues (open/resolved/ignored) with severity and type
- * filters.  Resolve / Ignore actions on open issues.  Clicking a row expands
- * to show detail, suggested action, and resolution timestamp.
+ * filters.  Action buttons driven by issue.available_actions (ignore, delete,
+ * import); Import opens the import wizard prefilled from the folder's sidecar.
  *
  * Route: /admin/issues
  * Styling: Aurora aesthetic (B3a restyle — visual pass, all behavior preserved).
  */
 
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Trash2, EyeOff, FolderInput } from 'lucide-react'
 import * as api from '@/lib/api'
 import {
   AdminPage, PageHeader,
@@ -30,24 +32,71 @@ function formatTs(ts: string | null): string {
 }
 
 // ---------------------------------------------------------------------------
+// Action button config
+// ---------------------------------------------------------------------------
+
+const ACTION_LABEL: Record<string, string> = {
+  ignore: 'Ignore',
+  delete: 'Delete folder',
+  import: 'Import',
+}
+
+function ActionIcon({ action }: { action: string }) {
+  if (action === 'delete') return <Trash2 size={12} />
+  if (action === 'ignore') return <EyeOff size={12} />
+  if (action === 'import') return <FolderInput size={12} />
+  return null
+}
+
+function actionExtraStyle(action: string): React.CSSProperties | undefined {
+  if (action === 'delete') {
+    return {
+      background: 'rgba(220,38,38,0.10)',
+      border: '1px solid rgba(220,38,38,0.30)',
+      color: '#DC2626',
+    }
+  }
+  if (action === 'import') {
+    return {
+      background: 'rgba(22,163,74,0.10)',
+      border: '1px solid rgba(22,163,74,0.30)',
+      color: '#16A34A',
+    }
+  }
+  return undefined
+}
+
+// ---------------------------------------------------------------------------
 // Issue row (expandable)
 // ---------------------------------------------------------------------------
 
 function IssueRow({ issue }: { issue: api.IssueOut }) {
   const [expanded, setExpanded] = useState(false)
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
 
-  const resolveMutation = useMutation({
-    mutationFn: () => api.resolveIssue(issue.id),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['issues'] }),
+  const actionMutation = useMutation({
+    mutationFn: (action: string) => api.issueAction(issue.id, action),
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: ['issues'] })
+      if (data.import_session_id) {
+        navigate(`/import/${data.import_session_id}?prefill=sidecar`)
+      }
+    },
   })
 
-  const ignoreMutation = useMutation({
-    mutationFn: () => api.ignoreIssue(issue.id),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['issues'] }),
-  })
+  const busy = actionMutation.isPending
 
-  const busy = resolveMutation.isPending || ignoreMutation.isPending
+  function handleAction(action: string) {
+    if (action === 'delete') {
+      const path = issue.target_path ? `\n\n${issue.target_path}` : ''
+      const ok = window.confirm(`Move this directory to trash? This cannot be easily undone.${path}`)
+      if (!ok) return
+    }
+    actionMutation.mutate(action)
+  }
+
+  const availableActions = issue.available_actions ?? []
 
   return (
     <>
@@ -87,29 +136,31 @@ function IssueRow({ issue }: { issue: api.IssueOut }) {
           {formatTs(issue.created_at)}
         </Td>
         <Td onClick={(e) => e.stopPropagation()}>
-          {issue.status === 'open' && (
-            <div style={{ display: 'flex', gap: 6 }}>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={busy}
-                onClick={() => resolveMutation.mutate()}
-                extraStyle={{ background: 'rgba(22,163,74,0.1)', border: '1px solid rgba(22,163,74,0.3)', color: '#16A34A' }}
-              >
-                {resolveMutation.isPending ? '…' : 'Resolve'}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={busy}
-                onClick={() => ignoreMutation.mutate()}
-              >
-                {ignoreMutation.isPending ? '…' : 'Ignore'}
-              </Button>
+          {issue.status === 'open' && availableActions.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {availableActions.map((action) => (
+                <Button
+                  key={action}
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => handleAction(action)}
+                  extraStyle={actionExtraStyle(action)}
+                >
+                  <ActionIcon action={action} />
+                  {busy && actionMutation.variables === action
+                    ? '…'
+                    : (ACTION_LABEL[action] ?? action)}
+                </Button>
+              ))}
             </div>
           )}
-          {(resolveMutation.isError || ignoreMutation.isError) && (
-            <span style={{ fontSize: 11, color: 'var(--aurora-danger)', display: 'block', marginTop: 4 }}>Action failed</span>
+          {actionMutation.isError && (
+            <span style={{ fontSize: 11, color: 'var(--aurora-danger)', display: 'block', marginTop: 4 }}>
+              {actionMutation.error instanceof Error
+                ? actionMutation.error.message
+                : 'Action failed'}
+            </span>
           )}
         </Td>
       </TableRow>
@@ -122,6 +173,12 @@ function IssueRow({ issue }: { issue: api.IssueOut }) {
                 <span style={{ fontWeight: 600, color: 'var(--aurora-text-dim)' }}>Detail: </span>
                 <span style={{ color: 'var(--aurora-muted)' }}>{issue.detail}</span>
               </div>
+              {issue.target_path && (
+                <div>
+                  <span style={{ fontWeight: 600, color: 'var(--aurora-text-dim)' }}>Path: </span>
+                  <span style={{ color: 'var(--aurora-muted)', fontFamily: 'monospace' }}>{issue.target_path}</span>
+                </div>
+              )}
               {issue.suggested_action && (
                 <div>
                   <span style={{ fontWeight: 600, color: 'var(--aurora-text-dim)' }}>Suggested action: </span>

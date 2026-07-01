@@ -10,11 +10,18 @@ export interface IssueOut {
   severity: string
   status: string
   item_id: number | null
+  target_path: string | null
   detail: string
   suggested_action: string | null
+  available_actions: string[]
   created_at: string
   updated_at: string
   resolved_at: string | null
+}
+
+export interface ActionResponse {
+  issue: IssueOut
+  import_session_id: string | null
 }
 
 export interface PaginatedIssues {
@@ -49,3 +56,9 @@ export const resolveIssue = (id: number): Promise<IssueOut> =>
 
 export const ignoreIssue = (id: number): Promise<IssueOut> =>
   apiFetch<IssueOut>(`/api/issues/${id}/ignore`, { method: 'POST' })
+
+export const issueAction = (id: number, action: string): Promise<ActionResponse> =>
+  apiFetch<ActionResponse>(`/api/issues/${id}/action`, {
+    method: 'POST',
+    body: JSON.stringify({ action }),
+  })

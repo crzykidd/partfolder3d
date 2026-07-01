@@ -16,7 +16,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Check } from 'lucide-react'
 import * as api from '@/lib/api'
@@ -38,6 +38,9 @@ import { SummaryStep } from './import-wizard/SummaryStep'
 
 export function ImportWizardPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
+  const [searchParams] = useSearchParams()
+  const [prefillBannerDismissed, setPrefillBannerDismissed] = useState(false)
+  const showPrefillBanner = searchParams.get('prefill') === 'sidecar' && !prefillBannerDismissed
   const [step, setStep] = useState<WizardStep>('title')
 
   const { data: session, isLoading, isError, error } = useQuery({
@@ -182,6 +185,43 @@ export function ImportWizardPage() {
           Review and finalize your import before adding it to the library.
         </p>
       </div>
+
+      {/* Sidecar prefill notice — shown when opened from Issues → Import action */}
+      {showPrefillBanner && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            background: 'rgba(15,164,171,0.06)',
+            border: '1px solid rgba(15,164,171,0.25)',
+            borderRadius: 10,
+            padding: '10px 14px',
+          }}
+        >
+          <p style={{ fontSize: 12, color: 'var(--aurora-accent)', margin: 0, lineHeight: 1.5 }}>
+            Showing existing sidecar data — review and update before importing.
+          </p>
+          <button
+            type="button"
+            onClick={() => setPrefillBannerDismissed(true)}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--aurora-muted)',
+              fontSize: 16,
+              lineHeight: 1,
+              padding: '0 2px',
+              flexShrink: 0,
+            }}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Error banner for failed sessions */}
       {session.status === 'failed' && session.error && (
