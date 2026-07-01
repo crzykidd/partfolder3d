@@ -35,9 +35,11 @@
 First full-stack alpha covering all core features: multi-user catalog with full-text
 search and tag cloud browse; item library with YAML sidecars and atomic renames;
 import/inbox wizard with URL scraping and tag reconciliation; headless CPU mesh
-rendering (STL/3MF/OBJ/PLY); reconcile engine with issues, change log, and review
-queue; print history with gcode parsing; tokenized share links with audit; optional
-AI tagging (Claude / OpenAI / Ollama); admin backup, JSON export, and tag management.
+rendering (STL/3MF/OBJ/PLY) with subprocess isolation, configurable timeout/mode, and
+orphan recovery; reconcile engine with actionable per-type issue resolution, change log,
+and review queue; print history with gcode parsing; tokenized share links with audit;
+optional AI tagging (Claude / OpenAI / Ollama); admin backup, JSON export, and tag
+management; enhanced job lifecycle (cancel, restart, retry, archive, retention).
 See [CHANGELOG.md](CHANGELOG.md) for the full details.
 
 ---
@@ -103,6 +105,7 @@ transfer, and resilience against database loss.
   function, feature, theme, process, audience, mechanical) from the Tags page
   (Content section).
 - Tag-cloud **Alpha / Number sort** toggle; **in-use-only** filter hides zero-item tags.
+- Admin Tags table (`/admin/content/tags`) sortable by **Category** and **Uses**.
 
 ### 📥 Import & inbox
 - **Inbox folder drop** — drop model files + a URL/link + an optional sidecar; a
@@ -119,6 +122,14 @@ transfer, and resilience against database loss.
 - Blender / Fusion / STEP / CAD: generic icon + any scraped/manual image (optional
   add-on renderer containers later).
 - Renders cached per file hash; re-rendered automatically when a file changes.
+- Renders run in an **isolated subprocess** with a wall-clock kill timeout
+  (`RENDER_TIMEOUT_S`, default 300 s) and a CPU-thread cap (`RENDER_CPU_THREADS`,
+  default 2) so the worker is never blocked by a runaway mesh.
+- **Render mode** — configure when thumbnails auto-render via Settings → Instance
+  settings (admin) or the `RENDER_MODE` env var: *Render all models* / *Render only
+  when a model has no images* / *Disable rendering*; the DB setting overrides the env.
+- Orphaned "running" render jobs are **auto-recovered** on worker restart — marked
+  failed and re-queued so no render silently disappears.
 - Renders are **surfaced as gallery images** in the item carousel alongside scraped and
   uploaded images.
 - **Per-item image upload and delete** — add or remove curated images at any time;
@@ -140,6 +151,12 @@ transfer, and resilience against database loss.
   and a live **job/queue monitor**.
 - **Atomic, all-or-nothing** directory operations with crash-safe rollback.
 - Per-item **"Rescan disk"** button for on-demand reconciliation.
+- **Per-type issue resolution** — the Issues page (`/admin/activity/issues`) offers
+  actionable, context-aware choices instead of a blanket "mark resolved": orphan →
+  Import wizard (prefilled from sidecar) / Delete (→ trash) / Ignore; conflict → keep
+  DB / keep sidecar; dead link → clear source URL; corruption → accept new hash;
+  missing file → remove record; sidecar error → retry. Resolved and ignored issues are
+  **deduplicated** — the scan never re-creates the same issue.
 - **Modification tracking** — detects when local model files have been changed from the
   originally downloaded versions; items show a "modified copy" notice on public share
   pages when flagged.
@@ -180,14 +197,19 @@ transfer, and resilience against database loss.
 - **Scheduled backup of DB + config** (library files are *not* backed up by design).
 - Full-catalog **JSON export**; library, tag, and site-capability administration.
 - **Scheduled-jobs** view (last run / next run / running now) + manual triggers.
+- **Job lifecycle controls** — the job monitor (`/admin/activity/jobs`) supports: cancel
+  + restart of running jobs; retry of failed jobs (the retry supersedes the original
+  once it succeeds); a context-sensitive **Clear…** button that archives rows by the
+  active status filter; and an **archive view** for historical records.
+- **Job retention** — succeeded rows are pruned after 7 days, failed/cancelled/superseded
+  after 30 days; configurable via `JOB_RETENTION_SUCCEEDED_DAYS` /
+  `JOB_RETENTION_FAILED_DAYS`.
 - **Aurora UI** — switchable **top-bar or side navigation** (per-user preference in
-  Settings); **customizable widget dashboard** on the home page; **Quick Start**
-  onboarding page.
+  Settings); **customizable widget dashboard** on the home page (stat tiles link to
+  their detail pages); **Quick Start** onboarding page.
 - **5-section admin nav** — Content · Users & Access · AI & Scraping · Jobs & Activity ·
   Data & Backups — consolidates 17+ old entries into a tabbed layout; old `/admin/*`
   paths redirect automatically to their new locations.
-- **Failed-job retry** — re-enqueue a failed render job directly from the Jobs page
-  (Jobs & Activity section).
 - **Import management** — delete an in-progress import session, remove a staged image,
   or clear an inbox folder from the Imports page.
 
