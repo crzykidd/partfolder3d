@@ -2,6 +2,30 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-01 — CodeQL triage on the first release PR (v0.1.1): 12 fixed, 24 dismissed
+
+The first-ever CodeQL run (release PR #1) raised 36 alerts (1 critical, 20 high, 15 medium) —
+because `main` was empty, it scanned the whole codebase at once. Disposition: **12 fixed in
+code**, **24 dismissed as verified false positives** (via the code-scanning API, with per-alert
+justifications).
+
+- **Path-injection (downloads.py, shares.py):** switched the containment check from a
+  `try: relative_to()` to an explicit `Path.is_relative_to()` boolean guard — functionally
+  equivalent but **CodeQL's taint analysis recognizes it as a barrier**, so the alerts clear on
+  re-scan rather than needing a dismissal. journal.py / sidecar.py path alerts were **dismissed**:
+  those paths are built from `item.dir_path` (DB) + sanitized slug + 7-char base32 key, never from
+  request input.
+- **Critical SSRF (`_fetch_remote_share`):** already guarded by `assert_safe_url` on the exact URL
+  fetched; added explicit **`follow_redirects=False`** to make the guard's assumption airtight,
+  then dismissed the alert (CodeQL doesn't recognize the custom guard as a sanitizer).
+- **XSS (creator profile URL):** real — added `isSafeHttpUrl()` (allow only http/https) and only
+  render the `<a href>` when it passes (new `frontend/src/lib/utils.ts` + 8 tests).
+- **Log-injection (15):** sanitized CR/LF at the request-derived sites (ssrf_guard, import);
+  dismissed the rest where the logged value is app-controlled (UUIDs, ints, or `%r`-escaped names).
+
+CodeQL is a **required release gate** — these had to be cleared (fixed or justifiably dismissed)
+before PR #1 could merge.
+
 ## 2026-06-30 — Issue resolution Phase 3 (backend): context-aware corrective actions for all types
 
 Extended the action framework to every issue type (no schema change). `available_actions` is now

@@ -7,6 +7,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import * as api from '@/lib/api'
+import { isSafeHttpUrl } from '@/lib/utils'
 import {
   SECTION_LABEL,
   AURORA_INPUT,
@@ -124,7 +125,7 @@ export function CreatorStep({ session, onNext, onPrev }: CreatorStepProps) {
               onFocus={onAuroraFocus}
               onBlur={onAuroraBlur}
             />
-            {profileUrl && (
+            {profileUrl && isSafeHttpUrl(profileUrl) && (
               <a
                 href={profileUrl}
                 target="_blank"

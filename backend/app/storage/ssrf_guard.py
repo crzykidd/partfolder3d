@@ -134,16 +134,19 @@ def assert_safe_url(url: str) -> None:
     if not addr_infos:
         raise SSRFBlockedError(f"No DNS records for hostname {hostname!r}.")
 
+    # Sanitize URL for logging: strip CR/LF to prevent log injection.
+    _safe_url = url.replace("\r", "\\r").replace("\n", "\\n")
+
     for _fam, _type, _proto, _canonname, sockaddr in addr_infos:
         ip_str = sockaddr[0]
         if _is_blocked_ip(ip_str):
             log.warning(
                 "ssrf_guard: blocked URL %s — resolved to %s which is in a restricted range",
-                url, ip_str,
+                _safe_url, ip_str,
             )
             raise SSRFBlockedError(
                 f"URL {url!r} resolves to {ip_str!r}, which is in a restricted IP range "
                 "and cannot be fetched by this server."
             )
 
-    log.debug("ssrf_guard: URL %s passed (hosts=%s)", url, [s[4][0] for s in addr_infos])
+    log.debug("ssrf_guard: URL %s passed (hosts=%s)", _safe_url, [s[4][0] for s in addr_infos])

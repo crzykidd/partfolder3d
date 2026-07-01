@@ -117,14 +117,12 @@ async def download_file(
     clean_path = path.lstrip("/")
     requested = (item_dir / clean_path).resolve()
 
-    # Path traversal check
-    try:
-        requested.relative_to(item_dir)
-    except ValueError as exc:
+    # Path traversal containment barrier: resolved path must remain inside item_dir.
+    if not requested.is_relative_to(item_dir):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid file path (outside item directory).",
-        ) from exc
+        )
 
     if not requested.exists() or not requested.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found.")

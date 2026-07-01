@@ -49,7 +49,10 @@ async def _fetch_remote_share(url: str, timeout: int) -> dict:
         import httpx  # noqa: PLC0415
 
         async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.get(url)
+            # follow_redirects=False is explicit: the SSRF guard validates the
+            # exact URL being fetched; if we followed redirects the guard would
+            # not cover the final destination, opening an SSRF bypass.
+            resp = await client.get(url, follow_redirects=False)
             resp.raise_for_status()
             return resp.json()  # type: ignore[return-value]
     except Exception as exc:
@@ -251,11 +254,13 @@ async def import_from_share_link(
     await db.flush()
     await db.refresh(session)
 
+    # Sanitize api_url for logging: strip CR/LF to prevent log injection.
+    _log_url = api_url.replace("\r", "\\r").replace("\n", "\\n")
     log.info(
         "import_from_share_link: created session %s from %s "
         "(tags confirmed=%d pending=%d print_records=%d)",
         session.id,
-        api_url,
+        _log_url,
         len(tag_state.get("confirmed", [])),
         len(tag_state.get("pending", [])),
         len(public_print_records),

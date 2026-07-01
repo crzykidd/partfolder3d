@@ -20,7 +20,7 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
-_Nothing yet — all delivered features are listed under the v0.1.1 entry below._
+_Nothing yet._
 
 ---
 
@@ -90,6 +90,19 @@ _Nothing yet — all delivered features are listed under the v0.1.1 entry below.
   Activity → Jobs); previously the highlight reset on sub-tab navigation.
 - **Dark-theme native controls** — native `<select>` dropdowns and scrollbars now render
   dark in dark mode via explicit CSS overrides, matching the rest of the UI.
+
+### Security
+
+- **XSS in creator profile URL** — the import wizard no longer renders a live `<a href>` for a
+  user-supplied profile URL unless it passes an `isSafeHttpUrl()` check (http/https only),
+  blocking `javascript:` / `data:` and other dangerous schemes.
+- **Path-traversal containment** — the file-serving endpoints in `downloads.py` and `shares.py`
+  use an explicit `Path.is_relative_to()` boundary check so a requested path can never escape the
+  item directory.
+- **SSRF redirect hardening** — the remote share-link fetch passes `follow_redirects=False`, so a
+  redirect cannot bypass the `assert_safe_url` SSRF guard applied to the initial URL.
+- **Log-injection hardening** — user-supplied URLs are stripped of CR/LF before being written to
+  logs in the SSRF guard and import paths.
 
 ---
 
