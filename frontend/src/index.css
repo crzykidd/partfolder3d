@@ -2,6 +2,9 @@
 
 @layer base {
   :root {
+    /* Tells the browser to render native controls (select popups, scrollbars,
+       spinners) in the light palette. Overridden to dark by .dark below. */
+    color-scheme: light;
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
     --card: 0 0% 100%;
@@ -25,6 +28,8 @@
   }
 
   .dark {
+    /* Native dropdown lists, scrollbars, etc. render dark to match the theme. */
+    color-scheme: dark;
     --background: 222.2 84% 4.9%;
     --foreground: 210 40% 98%;
     --card: 222.2 84% 4.9%;
