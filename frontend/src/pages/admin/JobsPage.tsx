@@ -11,7 +11,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { RotateCw } from 'lucide-react'
+import { RotateCw, RefreshCw, X, Archive, Trash2 } from 'lucide-react'
 import * as api from '@/lib/api'
 import {
   AdminPage, PageHeader,
@@ -72,16 +72,65 @@ function ProgressBar({ value }: { value: number }) {
 // Job row (expandable)
 // ---------------------------------------------------------------------------
 
-function JobRow({ job }: { job: api.JobOut }) {
+function JobRow({ job, archived }: { job: api.JobOut; archived: boolean }) {
   const [expanded, setExpanded] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
   const queryClient = useQueryClient()
+
+  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['jobs'] })
+  const onError = (err: unknown) => {
+    setActionError(err instanceof Error ? err.message : 'Action failed')
+  }
 
   const retryMutation = useMutation({
     mutationFn: () => api.retryJob(job.id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['jobs'] })
-    },
+    onSuccess: invalidate,
+    onError,
   })
+
+  const cancelMutation = useMutation({
+    mutationFn: () => api.cancelJob(job.id),
+    onSuccess: invalidate,
+    onError,
+  })
+
+  const restartMutation = useMutation({
+    mutationFn: () => api.restartJob(job.id),
+    onSuccess: invalidate,
+    onError,
+  })
+
+  const archiveMutation = useMutation({
+    mutationFn: () => api.archiveJob(job.id),
+    onSuccess: invalidate,
+    onError,
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => api.deleteJob(job.id),
+    onSuccess: invalidate,
+    onError,
+  })
+
+  const anyPending =
+    retryMutation.isPending ||
+    cancelMutation.isPending ||
+    restartMutation.isPending ||
+    archiveMutation.isPending ||
+    deleteMutation.isPending
+
+  const clearError = () => setActionError(null)
+
+  const handleDelete = () => {
+    if (!window.confirm('Permanently delete this job? This cannot be undone.')) return
+    clearError()
+    deleteMutation.mutate()
+  }
+
+  const isRunning = job.status === 'running'
+  const isFailed = job.status === 'failed'
+  // terminal = can be archived/deleted in live view
+  const isTerminal = job.status === 'succeeded' || job.status === 'cancelled' || job.status === 'failed'
 
   return (
     <>
@@ -126,27 +175,111 @@ function JobRow({ job }: { job: api.JobOut }) {
           )}
         </Td>
         <Td onClick={(e) => e.stopPropagation()}>
-          {job.status === 'failed' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => retryMutation.mutate()}
-                disabled={retryMutation.isPending}
-              >
-                <RotateCw size={11} />
-                {retryMutation.isPending ? 'Retrying…' : 'Retry'}
-              </Button>
-              {retryMutation.isError && (
-                <span style={{ fontSize: 11, color: 'var(--aurora-danger)' }}>
-                  {retryMutation.error instanceof Error ? retryMutation.error.message : 'Failed'}
-                </span>
-              )}
-              {retryMutation.isSuccess && (
-                <span style={{ fontSize: 11, color: '#16A34A' }}>Enqueued ✓</span>
-              )}
-            </div>
-          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {archived ? (
+              /* Archive view: Restart + Delete */
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => { clearError(); restartMutation.mutate() }}
+                  disabled={anyPending}
+                >
+                  <RefreshCw size={11} />
+                  {restartMutation.isPending ? 'Restarting…' : 'Restart'}
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={handleDelete}
+                  disabled={anyPending}
+                >
+                  <Trash2 size={11} />
+                  {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+                </Button>
+              </>
+            ) : (
+              /* Live view: status-gated actions */
+              <>
+                {isRunning && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => { clearError(); cancelMutation.mutate() }}
+                      disabled={anyPending}
+                    >
+                      <X size={11} />
+                      {cancelMutation.isPending ? 'Cancelling…' : 'Cancel'}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => { clearError(); restartMutation.mutate() }}
+                      disabled={anyPending}
+                    >
+                      <RefreshCw size={11} />
+                      {restartMutation.isPending ? 'Restarting…' : 'Restart'}
+                    </Button>
+                  </>
+                )}
+                {isFailed && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => { clearError(); retryMutation.mutate() }}
+                      disabled={anyPending}
+                    >
+                      <RotateCw size={11} />
+                      {retryMutation.isPending ? 'Retrying…' : 'Retry'}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => { clearError(); restartMutation.mutate() }}
+                      disabled={anyPending}
+                    >
+                      <RefreshCw size={11} />
+                      {restartMutation.isPending ? 'Restarting…' : 'Restart'}
+                    </Button>
+                  </>
+                )}
+                {isTerminal && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => { clearError(); archiveMutation.mutate() }}
+                      disabled={anyPending}
+                    >
+                      <Archive size={11} />
+                      {archiveMutation.isPending ? 'Archiving…' : 'Archive'}
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={handleDelete}
+                      disabled={anyPending}
+                    >
+                      <Trash2 size={11} />
+                      {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+                    </Button>
+                  </>
+                )}
+              </>
+            )}
+
+            {actionError && (
+              <span style={{ fontSize: 11, color: 'var(--aurora-danger)' }}>{actionError}</span>
+            )}
+            {retryMutation.isSuccess && !actionError && (
+              <span style={{ fontSize: 11, color: '#16A34A' }}>Enqueued ✓</span>
+            )}
+            {restartMutation.isSuccess && !actionError && (
+              <span style={{ fontSize: 11, color: '#16A34A' }}>Restarted ✓</span>
+            )}
+          </div>
         </Td>
       </TableRow>
 
@@ -200,13 +333,14 @@ function JobRow({ job }: { job: api.JobOut }) {
 // Page
 // ---------------------------------------------------------------------------
 
-const STATUS_FILTERS = ['', 'running', 'queued', 'failed', 'succeeded']
+const STATUS_FILTERS = ['', 'running', 'queued', 'failed', 'succeeded', 'cancelled']
 const STATUS_LABELS: Record<string, string> = {
   '': 'all',
   running: 'running',
   queued: 'queued',
   failed: 'failed',
   succeeded: 'succeeded',
+  cancelled: 'cancelled',
 }
 
 const COLUMNS = ['ID', 'Type', 'Status', 'Progress', 'Created', 'Elapsed', 'Error', 'Actions']
@@ -214,25 +348,50 @@ const COLUMNS = ['ID', 'Type', 'Status', 'Progress', 'Created', 'Elapsed', 'Erro
 export function JobsPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [page, setPage] = useState(1)
+  const [archived, setArchived] = useState(false)
+  const [clearCount, setClearCount] = useState<number | null>(null)
   const perPage = 50
+  const queryClient = useQueryClient()
+
+  const clearMutation = useMutation({
+    mutationFn: () => api.clearSucceededJobs(),
+    onSuccess: (data) => {
+      setClearCount(data.archived)
+      void queryClient.invalidateQueries({ queryKey: ['jobs'] })
+    },
+  })
 
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['jobs', statusFilter, page],
+    queryKey: ['jobs', statusFilter, page, archived],
     queryFn: () =>
       api.listJobs({
         status: statusFilter || undefined,
         page,
         per_page: perPage,
+        ...(archived ? { archived: true } : {}),
       }),
     refetchInterval: 5000, // poll every 5 s
   })
 
   const totalPages = data ? Math.ceil(data.total / perPage) : 1
 
+  const handleToggleArchived = () => {
+    setArchived((v) => !v)
+    setStatusFilter('')
+    setPage(1)
+    setClearCount(null)
+  }
+
+  const handleClearSucceeded = () => {
+    if (!window.confirm('Archive all succeeded jobs? They will be moved to the archive and hidden from the live view.')) return
+    setClearCount(null)
+    clearMutation.mutate()
+  }
+
   return (
     <AdminPage>
       <PageHeader
-        title="Job Monitor"
+        title={archived ? 'Job Archive' : 'Job Monitor'}
         meta={
           data
             ? `${data.total} job${data.total === 1 ? '' : 's'} · auto-refreshes every 5 s`
@@ -247,30 +406,65 @@ export function JobsPage() {
         }
       />
 
-      {/* Status filter pills */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-          Status
-        </span>
-        {STATUS_FILTERS.map((s) => (
-          <FilterPill
-            key={s || 'all'}
-            active={statusFilter === s}
-            onClick={() => { setStatusFilter(s); setPage(1) }}
+      {/* Top controls */}
+      <div className="flex flex-wrap items-center gap-3">
+        {!archived && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleClearSucceeded}
+            disabled={clearMutation.isPending}
           >
-            {STATUS_LABELS[s]}
-          </FilterPill>
-        ))}
+            <Archive size={12} />
+            {clearMutation.isPending ? 'Clearing…' : 'Clear succeeded'}
+          </Button>
+        )}
+        {clearCount != null && (
+          <span style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>
+            Archived {clearCount} job{clearCount === 1 ? '' : 's'}
+          </span>
+        )}
+        {clearMutation.isError && (
+          <span style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>
+            {clearMutation.error instanceof Error ? clearMutation.error.message : 'Clear failed'}
+          </span>
+        )}
+        <Button
+          variant={archived ? 'primary' : 'ghost'}
+          size="sm"
+          onClick={handleToggleArchived}
+        >
+          <Archive size={12} />
+          {archived ? '← Live view' : 'View archive'}
+        </Button>
       </div>
+
+      {/* Status filter pills (live view only) */}
+      {!archived && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            Status
+          </span>
+          {STATUS_FILTERS.map((s) => (
+            <FilterPill
+              key={s || 'all'}
+              active={statusFilter === s}
+              onClick={() => { setStatusFilter(s); setPage(1) }}
+            >
+              {STATUS_LABELS[s]}
+            </FilterPill>
+          ))}
+        </div>
+      )}
 
       {/* Table */}
       <DataTable
         columns={COLUMNS}
         isLoading={isLoading}
         isEmpty={data ? data.jobs.length === 0 : false}
-        emptyMessage="No jobs found."
+        emptyMessage={archived ? 'No archived jobs.' : 'No jobs found.'}
       >
-        {data?.jobs.map((job) => <JobRow key={job.id} job={job} />)}
+        {data?.jobs.map((job) => <JobRow key={job.id} job={job} archived={archived} />)}
       </DataTable>
 
       {/* Pagination */}
