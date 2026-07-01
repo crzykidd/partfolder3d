@@ -3,7 +3,7 @@
 Admin:
   GET  /api/issues           → list issues (filter by status/type, paginate)
   GET  /api/issues/{id}      → issue detail
-  POST /api/issues/{id}/action   → generic action handler (ignore/delete/import)
+  POST /api/issues/{id}/action   → generic action handler (Phase 1+3)
   POST /api/issues/{id}/resolve  → mark resolved (legacy; kept for back-compat)
   POST /api/issues/{id}/ignore   → mark ignored (legacy; kept for back-compat)
 """
@@ -30,18 +30,36 @@ router = APIRouter(prefix="/api/issues", tags=["issues"])
 # Action → issue type mapping
 # ---------------------------------------------------------------------------
 
-#: Actions available per issue type.  The ``import`` and ``delete`` actions
-#: are only valid for orphan-dir issues (target_path must be an existing dir).
+#: Static action map — used as the base for ``actions_for()``.
+#: For ``orphan`` this is the item_id=None default; ``actions_for`` overrides
+#: it when item_id is set.
 ISSUE_ACTIONS: dict[str, list[str]] = {
-    IssueType.orphan: ["import", "delete", "ignore"],
-    IssueType.conflict: ["ignore"],
-    IssueType.dead_link: ["ignore"],
-    IssueType.corruption: ["ignore"],
-    IssueType.missing_file: ["ignore"],
-    IssueType.extra_file: ["ignore"],
-    IssueType.sidecar_error: ["ignore"],
-    IssueType.other: ["ignore"],
+    IssueType.orphan:        ["import", "delete", "ignore"],        # item_id=None default
+    IssueType.conflict:      ["keep_db", "keep_sidecar", "ignore"],
+    IssueType.dead_link:     ["clear_source", "ignore"],
+    IssueType.corruption:    ["accept", "ignore"],
+    IssueType.missing_file:  ["remove_record", "ignore"],
+    IssueType.extra_file:    ["ignore"],
+    IssueType.sidecar_error: ["retry", "ignore"],
+    IssueType.other:         ["ignore"],
 }
+
+
+def actions_for(issue: Any) -> list[str]:
+    """Return the available actions for an issue, context-aware for orphan.
+
+    For ``orphan`` issues the correct actions depend on whether a DB item exists:
+    - item_id IS NULL  → directory with no DB row → ["import", "delete", "ignore"]
+    - item_id IS SET   → DB item whose directory is missing → ["delete_item", "ignore"]
+
+    All other types delegate to ``ISSUE_ACTIONS``.
+    """
+    if issue.issue_type == IssueType.orphan:
+        if issue.item_id is None:
+            return ["import", "delete", "ignore"]
+        else:
+            return ["delete_item", "ignore"]
+    return list(ISSUE_ACTIONS.get(issue.issue_type, ["ignore"]))
 
 
 # ---------------------------------------------------------------------------
@@ -66,9 +84,9 @@ class IssueOut(BaseModel):
 
     @model_validator(mode="after")
     def set_available_actions(self) -> IssueOut:
-        """Compute available_actions from issue_type unless already set."""
+        """Compute available_actions from issue_type + item_id unless already set."""
         if not self.available_actions:
-            self.available_actions = list(ISSUE_ACTIONS.get(self.issue_type, ["ignore"]))
+            self.available_actions = actions_for(self)
         return self
 
 
@@ -151,25 +169,31 @@ async def issue_action(
 ) -> ActionResponse:
     """Perform a corrective action on an issue.
 
-    Available actions depend on the issue type (see ``ISSUE_ACTIONS``).  A 422
-    is returned for actions not in the issue's ``available_actions``.
+    Available actions are context-aware (see ``actions_for``).  A 422 is
+    returned for actions not in the issue's ``available_actions``.
 
-    Actions:
-      ``ignore``        — any type: mark ignored (durable via reconcile dedup).
-      ``delete``        — orphan only: move ``target_path`` dir to trash.
-      ``import``        — orphan only: create an ImportSession for the orphan
-                          directory, prefilled from its sidecar if present.
+    Phase 1 actions:
+      ``ignore``       — any type: mark ignored (durable via reconcile dedup).
+      ``delete``       — orphan (item_id null): move ``target_path`` dir to trash.
+      ``import``       — orphan (item_id null): create an ImportSession for the orphan
+                         directory, prefilled from its sidecar if present.
 
-    For ``import``, the issue is marked resolved immediately.  If the user
-    abandons the wizard, the next reconcile scan will re-detect the orphan dir
-    (since *resolved* does not suppress) and raise a fresh issue.
+    Phase 3 additions:
+      ``delete_item``  — orphan (item_id set): delete the DB Item row; dir is already
+                         gone so no trash move is attempted.
+      ``remove_record``— missing_file: delete the File DB row for the missing path.
+      ``accept``       — corruption: recompute sha256 from disk and accept the new hash.
+      ``clear_source`` — dead_link: clear item.source_url.
+      ``keep_db``      — conflict: rewrite sidecar from DB state.
+      ``keep_sidecar`` — conflict: apply on-disk sidecar fields to DB.
+      ``retry``        — sidecar_error: re-run reconcile for the item; resolve if clean.
     """
     result = await db.execute(select(Issue).where(Issue.id == issue_id))
     issue = result.scalar_one_or_none()
     if issue is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Issue not found.")
 
-    available = ISSUE_ACTIONS.get(issue.issue_type, ["ignore"])
+    available = actions_for(issue)
     if body.action not in available:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -180,15 +204,21 @@ async def issue_action(
         )
 
     import_session_id: str | None = None
+    now = datetime.now(UTC)
 
+    # ------------------------------------------------------------------
+    # ignore (any type)
+    # ------------------------------------------------------------------
     if body.action == "ignore":
         issue.status = IssueStatus.ignored
-        issue.resolved_at = datetime.now(UTC)
-        issue.updated_at = datetime.now(UTC)
+        issue.resolved_at = now
+        issue.updated_at = now
         await db.flush()
 
+    # ------------------------------------------------------------------
+    # delete (orphan, item_id null) — move dir to trash
+    # ------------------------------------------------------------------
     elif body.action == "delete":
-        # Guard: need a target path that is an existing directory
         target = issue.target_path
         if not target:
             raise HTTPException(
@@ -202,7 +232,6 @@ async def issue_action(
                 detail=f"Target directory does not exist: {target}",
             )
 
-        # Guard: target must be within a known enabled library mount (no traversal)
         from ..models.library import Library  # noqa: PLC0415
 
         libs_result = await db.execute(
@@ -218,7 +247,6 @@ async def issue_action(
                 detail="Target directory is not within a known library mount.",
             )
 
-        # Move to trash using the same helper as item delete
         from ..storage.journal import move_to_trash  # noqa: PLC0415
 
         try:
@@ -233,12 +261,14 @@ async def issue_action(
             ) from exc
 
         issue.status = IssueStatus.resolved
-        issue.resolved_at = datetime.now(UTC)
-        issue.updated_at = datetime.now(UTC)
+        issue.resolved_at = now
+        issue.updated_at = now
         await db.flush()
 
+    # ------------------------------------------------------------------
+    # import (orphan, item_id null) — create ImportSession
+    # ------------------------------------------------------------------
     elif body.action == "import":
-        # Guard: need an existing directory
         target = issue.target_path
         if not target:
             raise HTTPException(
@@ -252,7 +282,6 @@ async def issue_action(
                 detail=f"Target directory does not exist: {target}",
             )
 
-        # Prefill metadata from sidecar if one exists in the orphan dir
         from ..models.import_session import (  # noqa: PLC0415
             ImportSession,
             ImportSessionStatus,
@@ -283,9 +312,8 @@ async def issue_action(
                     creator_profile_url = sc.creator.profile_url
                 if sc.tags:
                     tag_state = await reconcile_tags(db, list(sc.tags))
-                break  # use first valid sidecar found
+                break
             else:
-                # Fall back to raw YAML parse (same approach as the inbox import task)
                 try:
                     import yaml  # noqa: PLC0415
 
@@ -305,15 +333,13 @@ async def issue_action(
                         raw_tags = [str(t) for t in (raw.get("tags") or [])]
                         if raw_tags:
                             tag_state = await reconcile_tags(db, raw_tags)
-                        break  # parsed a valid sidecar
+                        break
                 except Exception:
-                    pass  # not a valid sidecar — skip
+                    pass
 
         if not suggested_title:
             suggested_title = target_dir.name
 
-        # Create the ImportSession at pending_wizard so the wizard opens immediately.
-        # The sidecar was already read above; the user reviews/edits and commits.
         session_obj = ImportSession(
             status=ImportSessionStatus.pending_wizard,
             source_type=ImportSourceType.inbox,
@@ -334,11 +360,289 @@ async def issue_action(
         await db.refresh(session_obj)
         import_session_id = str(session_obj.id)
 
-        # Mark the issue resolved.  If the user abandons the wizard the next
-        # reconcile scan will re-detect the orphan dir (resolved ≠ suppressed).
         issue.status = IssueStatus.resolved
-        issue.resolved_at = datetime.now(UTC)
-        issue.updated_at = datetime.now(UTC)
+        issue.resolved_at = now
+        issue.updated_at = now
+        await db.flush()
+
+    # ------------------------------------------------------------------
+    # delete_item (orphan, item_id set) — dir gone; delete DB item row
+    # ------------------------------------------------------------------
+    elif body.action == "delete_item":
+        if issue.item_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="delete_item requires item_id to be set on the issue.",
+            )
+        from ..models.item import Item  # noqa: PLC0415
+
+        item_result = await db.execute(select(Item).where(Item.id == issue.item_id))
+        item = item_result.scalar_one_or_none()
+        if item is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Item {issue.item_id} not found.",
+            )
+        # Directory is already gone; do NOT attempt trash move.
+        # The cascade on the ORM handles Files, Images, ItemTags.
+        await db.delete(item)
+        await db.flush()
+
+        issue.status = IssueStatus.resolved
+        issue.resolved_at = now
+        issue.updated_at = now
+        await db.flush()
+
+    # ------------------------------------------------------------------
+    # remove_record (missing_file) — delete the File DB row
+    # ------------------------------------------------------------------
+    elif body.action == "remove_record":
+        if issue.item_id is None or not issue.target_path:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="remove_record requires item_id and target_path on the issue.",
+            )
+        from ..models.file import File  # noqa: PLC0415
+        from ..models.item import Item  # noqa: PLC0415
+
+        item_result = await db.execute(select(Item).where(Item.id == issue.item_id))
+        item = item_result.scalar_one_or_none()
+        if item is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Item {issue.item_id} not found.",
+            )
+        # target_path is absolute; File.path is relative to item.dir_path
+        try:
+            rel_path = str(Path(issue.target_path).relative_to(Path(item.dir_path)))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"target_path {issue.target_path!r} is not under item dir "
+                    f"{item.dir_path!r}."
+                ),
+            ) from exc
+        file_result = await db.execute(
+            select(File).where(File.item_id == item.id, File.path == rel_path)
+        )
+        file_row = file_result.scalar_one_or_none()
+        if file_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"File record not found for path {rel_path!r} on item {issue.item_id}.",
+            )
+        await db.delete(file_row)
+        await db.flush()
+
+        issue.status = IssueStatus.resolved
+        issue.resolved_at = now
+        issue.updated_at = now
+        await db.flush()
+
+    # ------------------------------------------------------------------
+    # accept (corruption) — recompute sha256 and accept the new value
+    # ------------------------------------------------------------------
+    elif body.action == "accept":
+        if issue.item_id is None or not issue.target_path:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="accept requires item_id and target_path on the issue.",
+            )
+        target_file = Path(issue.target_path)
+        if not target_file.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"File no longer exists at {issue.target_path!r}; cannot accept.",
+            )
+        from ..models.file import File  # noqa: PLC0415
+        from ..models.item import Item  # noqa: PLC0415
+        from ..storage.inventory import hash_file_sha256  # noqa: PLC0415
+
+        item_result = await db.execute(select(Item).where(Item.id == issue.item_id))
+        item = item_result.scalar_one_or_none()
+        if item is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Item {issue.item_id} not found.",
+            )
+        try:
+            rel_path = str(target_file.relative_to(Path(item.dir_path)))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"target_path {issue.target_path!r} is not under item dir "
+                    f"{item.dir_path!r}."
+                ),
+            ) from exc
+        file_result = await db.execute(
+            select(File).where(File.item_id == item.id, File.path == rel_path)
+        )
+        file_row = file_result.scalar_one_or_none()
+        if file_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"File record not found for path {rel_path!r} on item {issue.item_id}.",
+            )
+        new_hash = hash_file_sha256(target_file)
+        file_row.sha256 = new_hash
+        await db.flush()
+
+        issue.status = IssueStatus.resolved
+        issue.resolved_at = now
+        issue.updated_at = now
+        await db.flush()
+
+    # ------------------------------------------------------------------
+    # clear_source (dead_link) — clear item.source_url
+    # ------------------------------------------------------------------
+    elif body.action == "clear_source":
+        if issue.item_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="clear_source requires item_id on the issue.",
+            )
+        from ..models.item import Item  # noqa: PLC0415
+
+        item_result = await db.execute(select(Item).where(Item.id == issue.item_id))
+        item = item_result.scalar_one_or_none()
+        if item is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Item {issue.item_id} not found.",
+            )
+        item.source_url = None
+        item.updated_at = now
+        await db.flush()
+
+        issue.status = IssueStatus.resolved
+        issue.resolved_at = now
+        issue.updated_at = now
+        await db.flush()
+
+    # ------------------------------------------------------------------
+    # keep_db (conflict) — rewrite sidecar from DB state
+    # ------------------------------------------------------------------
+    elif body.action == "keep_db":
+        if issue.item_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="keep_db requires item_id on the issue.",
+            )
+        from ..models.item import Item  # noqa: PLC0415
+        from ..services.item_helpers import _write_item_sidecar  # noqa: PLC0415
+
+        item_result = await db.execute(select(Item).where(Item.id == issue.item_id))
+        item = item_result.scalar_one_or_none()
+        if item is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Item {issue.item_id} not found.",
+            )
+        item_dir = Path(item.dir_path)
+        if not item_dir.is_dir():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Item directory does not exist: {item.dir_path}",
+            )
+        await _write_item_sidecar(db, item)
+
+        issue.status = IssueStatus.resolved
+        issue.resolved_at = now
+        issue.updated_at = now
+        await db.flush()
+
+    # ------------------------------------------------------------------
+    # keep_sidecar (conflict) — apply on-disk sidecar fields to DB
+    # ------------------------------------------------------------------
+    elif body.action == "keep_sidecar":
+        if issue.item_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="keep_sidecar requires item_id on the issue.",
+            )
+        from ..models.item import Item  # noqa: PLC0415
+        from ..services.item_helpers import _write_item_sidecar  # noqa: PLC0415
+        from ..storage.sidecar import read_sidecar  # noqa: PLC0415
+
+        item_result = await db.execute(select(Item).where(Item.id == issue.item_id))
+        item = item_result.scalar_one_or_none()
+        if item is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Item {issue.item_id} not found.",
+            )
+        item_dir = Path(item.dir_path)
+        if not item_dir.is_dir():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Item directory does not exist: {item.dir_path}",
+            )
+        sc = read_sidecar(item_dir, item.title, item.key)
+        if sc is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Sidecar file could not be read; cannot apply keep_sidecar.",
+            )
+        # Apply sidecar fields to DB (title renames require separate atomic-rename
+        # flow; skip title here, same as the reconcile auto-pull path).
+        changed = False
+        if sc.description != item.description:
+            item.description = sc.description
+            changed = True
+        if sc.source_url != item.source_url:
+            item.source_url = sc.source_url
+            changed = True
+        if sc.source_site != item.source_site:
+            item.source_site = sc.source_site
+            changed = True
+        if sc.license != item.license:
+            item.license = sc.license
+            changed = True
+        if changed:
+            item.updated_at = now
+            await db.flush()
+        # Re-write sidecar to stamp the new updated_at so next reconcile sees no drift.
+        await _write_item_sidecar(db, item)
+
+        issue.status = IssueStatus.resolved
+        issue.resolved_at = now
+        issue.updated_at = now
+        await db.flush()
+
+    # ------------------------------------------------------------------
+    # retry (sidecar_error) — re-run reconcile for item; resolve if clean
+    # ------------------------------------------------------------------
+    elif body.action == "retry":
+        if issue.item_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="retry requires item_id on the issue.",
+            )
+        from ..models.item import Item  # noqa: PLC0415
+        from ..worker.reconcile import load_mode_settings, reconcile_one_item  # noqa: PLC0415
+
+        item_result = await db.execute(select(Item).where(Item.id == issue.item_id))
+        item = item_result.scalar_one_or_none()
+        if item is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Item {issue.item_id} not found.",
+            )
+        mode_settings = await load_mode_settings(db)
+        # Use auto mode so the retry actually applies fixes rather than queuing them.
+        mode_settings = {**mode_settings, "sidecar_sync": "auto", "file_changes": "auto"}
+        recon = await reconcile_one_item(
+            db, item, mode_settings=mode_settings, source="issue_retry"
+        )
+        issue.updated_at = now
+        if not recon.errors:
+            issue.status = IssueStatus.resolved
+            issue.resolved_at = now
+        else:
+            # Leave open; update detail with latest error
+            issue.detail = f"Retry attempt failed: {'; '.join(recon.errors)}"
         await db.flush()
 
     return ActionResponse(

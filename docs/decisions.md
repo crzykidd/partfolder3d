@@ -2,6 +2,20 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-30 — Issue resolution Phase 3 (backend): context-aware corrective actions for all types
+
+Extended the action framework to every issue type (no schema change). `available_actions` is now
+computed by `actions_for(issue)` (type + item_id), not a static type map — so the two `orphan`
+sub-cases differ: **item_id NULL** (dir, no item) → import/delete/ignore; **item_id SET** (item's
+dir missing) → `delete_item`/ignore. New handlers, each doing the real fix then resolving:
+`delete_item` (drop the DB item + child rows; dir already gone, no trash move), `remove_record`
+(missing_file → delete the File row), `accept` (corruption → recompute + store the on-disk sha),
+`clear_source` (dead_link → clear source_url), `keep_db`/`keep_sidecar` (conflict), `retry`
+(sidecar_error). Notable choices: **`keep_sidecar`** applies the sidecar's description/source
+fields to the DB then re-stamps the sidecar via `_write_item_sidecar` (skips title renames — those
+need the atomic-rename flow); **`retry`** re-runs `reconcile_one_item(auto)` and resolves only if
+no errors remain, else updates the issue detail. Verified capped: 61 pytest, ruff clean.
+
 ## 2026-06-30 — Issue resolution framework, Phase 1 (backend): dedup + actionable resolve (migration 0020)
 
 Reconcile Issues couldn't be truly resolved — `resolve`/`ignore` only flipped status and the
