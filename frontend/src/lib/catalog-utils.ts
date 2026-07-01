@@ -9,8 +9,8 @@
 
 /** Minimum tag font size (rem ≈ 12 px at 16 px base). */
 const MIN_TAG_FONT_REM = 0.75
-/** Maximum tag font size (rem ≈ 16 px at 16 px base) — keeps the cloud balanced. */
-const MAX_TAG_FONT_REM = 1
+/** Maximum tag font size (rem ≈ 14 px at 16 px base) — keeps the cloud balanced. */
+const MAX_TAG_FONT_REM = 0.875
 
 /**
  * Map a tag's item count to a CSS font-size string.

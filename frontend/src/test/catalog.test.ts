@@ -35,9 +35,9 @@ describe('getTagFontSize', () => {
     expect(result).toBe('0.75rem')
   })
 
-  it('returns largest size for the maximum count (capped at ~16 px / 1rem)', () => {
+  it('returns largest size for the maximum count (capped at ~14 px / 0.875rem)', () => {
     const result = getTagFontSize(100, 1, 100)
-    expect(result).toBe('1rem')
+    expect(result).toBe('0.875rem')
   })
 
   it('scales monotonically between min and max (log scale)', () => {
@@ -63,7 +63,7 @@ describe('getTagFontSize', () => {
 
   it('handles count equal to maxCount', () => {
     const size = getTagFontSize(50, 10, 50)
-    expect(size).toBe('1rem')
+    expect(size).toBe('0.875rem')
   })
 })
 
