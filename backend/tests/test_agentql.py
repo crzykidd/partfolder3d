@@ -497,9 +497,11 @@ async def test_window_math_excludes_previous_month(
         success=True,
         est_cost_usd=0.02,
     ))
-    # Row from yesterday (inside this month's window assuming reset on 1st)
+    # Row from the current instant — always inside this month's window,
+    # regardless of the day (avoids a false failure when the test runs on the
+    # 1st, where "yesterday" would fall in the previous month/window).
     db_session.add(ScraperUsage(
-        created_at=now - timedelta(days=1),
+        created_at=now,
         provider="agentql",
         source_url="https://makerworld.com/recent",
         success=True,
