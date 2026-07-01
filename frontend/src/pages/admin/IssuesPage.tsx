@@ -2,8 +2,10 @@
  * IssuesPage — admin view of reconcile-engine issues (PRD §8.3).
  *
  * Paginated table of issues (open/resolved/ignored) with severity and type
- * filters.  Action buttons driven by issue.available_actions (ignore, delete,
- * import); Import opens the import wizard prefilled from the folder's sidecar.
+ * filters.  Action buttons driven by issue.available_actions; metadata for
+ * each action (label, icon, danger, confirm) lives in ACTION_META so future
+ * actions are trivial to add.  Import opens the import wizard prefilled from
+ * the folder's sidecar; all other actions POST to /api/issues/{id}/action.
  *
  * Route: /admin/issues
  * Styling: Aurora aesthetic (B3a restyle — visual pass, all behavior preserved).
@@ -12,7 +14,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Trash2, EyeOff, FolderInput } from 'lucide-react'
+import {
+  Trash2, EyeOff, FolderInput,
+  Check, Unlink, Database, FileText, RefreshCw,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import * as api from '@/lib/api'
 import {
   AdminPage, PageHeader,
@@ -32,24 +38,97 @@ function formatTs(ts: string | null): string {
 }
 
 // ---------------------------------------------------------------------------
-// Action button config
+// Action metadata map
 // ---------------------------------------------------------------------------
 
-const ACTION_LABEL: Record<string, string> = {
-  ignore: 'Ignore',
-  delete: 'Delete folder',
-  import: 'Import',
+interface ActionMeta {
+  label: string
+  icon: LucideIcon | null
+  /** Render in danger (red) style. */
+  danger?: boolean
+  /** If set, show window.confirm with this message before proceeding. */
+  confirm?: string
+}
+
+/**
+ * Single source of truth for action button appearance and behaviour.
+ * Unknown action ids fall back gracefully via getActionMeta().
+ */
+const ACTION_META: Record<string, ActionMeta> = {
+  import: {
+    label: 'Import…',
+    icon: FolderInput,
+    // green style applied separately; navigates to wizard via onSuccess
+  },
+  delete: {
+    label: 'Delete folder',
+    icon: Trash2,
+    danger: true,
+    confirm: 'Move this directory to trash?',
+  },
+  ignore: {
+    label: 'Ignore',
+    icon: EyeOff,
+  },
+  delete_item: {
+    label: 'Delete item record',
+    icon: Trash2,
+    danger: true,
+    confirm: "Delete this item's database record? Its files are already gone.",
+  },
+  remove_record: {
+    label: 'Remove file record',
+    icon: Trash2,
+    danger: true,
+    confirm: "Remove this missing file's record from the item?",
+  },
+  accept: {
+    label: 'Accept new hash',
+    icon: Check,
+    confirm: 'Accept the changed file and update its recorded hash?',
+  },
+  clear_source: {
+    label: 'Clear source URL',
+    icon: Unlink,
+    confirm: "Clear this item's source URL?",
+  },
+  keep_db: {
+    label: 'Keep DB',
+    icon: Database,
+    confirm: 'Overwrite the sidecar with the database version?',
+  },
+  keep_sidecar: {
+    label: 'Keep sidecar',
+    icon: FileText,
+    confirm: 'Update the database from the sidecar?',
+  },
+  retry: {
+    label: 'Retry rescan',
+    icon: RefreshCw,
+  },
+}
+
+/** Convert an unknown action id to a readable title-cased label. */
+function toTitleCase(actionId: string): string {
+  return actionId
+    .split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+}
+
+/** Return metadata for a known action, or a safe fallback for unknown ids. */
+function getActionMeta(action: string): ActionMeta {
+  return ACTION_META[action] ?? { label: toTitleCase(action), icon: null }
 }
 
 function ActionIcon({ action }: { action: string }) {
-  if (action === 'delete') return <Trash2 size={12} />
-  if (action === 'ignore') return <EyeOff size={12} />
-  if (action === 'import') return <FolderInput size={12} />
-  return null
+  const Icon = getActionMeta(action).icon
+  return Icon ? <Icon size={12} /> : null
 }
 
 function actionExtraStyle(action: string): React.CSSProperties | undefined {
-  if (action === 'delete') {
+  const meta = getActionMeta(action)
+  if (meta.danger) {
     return {
       background: 'rgba(220,38,38,0.10)',
       border: '1px solid rgba(220,38,38,0.30)',
@@ -88,9 +167,9 @@ function IssueRow({ issue }: { issue: api.IssueOut }) {
   const busy = actionMutation.isPending
 
   function handleAction(action: string) {
-    if (action === 'delete') {
-      const path = issue.target_path ? `\n\n${issue.target_path}` : ''
-      const ok = window.confirm(`Move this directory to trash? This cannot be easily undone.${path}`)
+    const meta = getActionMeta(action)
+    if (meta.confirm) {
+      const ok = window.confirm(meta.confirm)
       if (!ok) return
     }
     actionMutation.mutate(action)
@@ -150,7 +229,7 @@ function IssueRow({ issue }: { issue: api.IssueOut }) {
                   <ActionIcon action={action} />
                   {busy && actionMutation.variables === action
                     ? '…'
-                    : (ACTION_LABEL[action] ?? action)}
+                    : getActionMeta(action).label}
                 </Button>
               ))}
             </div>
