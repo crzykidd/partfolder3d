@@ -76,6 +76,32 @@ class ReconcileResult:
 
 
 # ---------------------------------------------------------------------------
+# Dedup helper
+# ---------------------------------------------------------------------------
+
+async def _issue_exists(db: AsyncSession, issue_type: str, target_path: str | None) -> bool:
+    """Return True if an open or ignored issue already exists for (issue_type, target_path).
+
+    Used by all detectors to skip duplicate issue creation.  A *resolved* issue
+    does NOT suppress — if the underlying condition genuinely recurs after a
+    corrective action the scanner should raise a fresh issue.
+    Returns False immediately when target_path is None (no dedup possible).
+    """
+    if target_path is None:
+        return False
+    from ..models.issue import Issue, IssueStatus  # noqa: PLC0415
+
+    result = await db.execute(
+        select(Issue).where(
+            Issue.issue_type == issue_type,
+            Issue.target_path == target_path,
+            Issue.status.in_([IssueStatus.open, IssueStatus.ignored]),
+        ).limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+# ---------------------------------------------------------------------------
 # Settings loader
 # ---------------------------------------------------------------------------
 
@@ -178,17 +204,20 @@ async def _behavior_sidecar_sync(
     if sc is None:
         if not item_dir.exists():
             # Item dir is missing — orphan (no DB row with live dir)
-            issue = Issue(
-                issue_type=IssueType.orphan,
-                severity=IssueSeverity.warning,
-                status=IssueStatus.open,
-                item_id=item.id,
-                detail=f"Item directory missing: {item_dir}",
-                suggested_action="Verify the library mount is accessible or delete the item.",
-            )
-            db.add(issue)
-            await db.flush()
-            result.issues_created.append(issue.id)
+            _tp = str(item_dir)
+            if not await _issue_exists(db, IssueType.orphan, _tp):
+                issue = Issue(
+                    issue_type=IssueType.orphan,
+                    severity=IssueSeverity.warning,
+                    status=IssueStatus.open,
+                    item_id=item.id,
+                    target_path=_tp,
+                    detail=f"Item directory missing: {item_dir}",
+                    suggested_action="Verify the library mount is accessible or delete the item.",
+                )
+                db.add(issue)
+                await db.flush()
+                result.issues_created.append(issue.id)
         # No sidecar but dir exists: nothing to sync yet; the next write will create it.
         return
 
@@ -228,23 +257,26 @@ async def _behavior_sidecar_sync(
 
     if sidecar_externally_edited and db_changed_since_sync:
         # Both changed — conflict
-        issue = Issue(
-            issue_type=IssueType.conflict,
-            severity=IssueSeverity.warning,
-            status=IssueStatus.open,
-            item_id=item.id,
-            detail=(
-                f"Sidecar and DB both changed since last sync "
-                f"(sidecar mtime: {sidecar_file_mtime.isoformat()}, "
-                f"DB updated_at: {db_updated_at.isoformat()})"
-            ),
-            suggested_action=(
-                "Review the sidecar file and DB metadata; resolve via the item page."
-            ),
-        )
-        db.add(issue)
-        await db.flush()
-        result.issues_created.append(issue.id)
+        _tp = str(item_dir)
+        if not await _issue_exists(db, IssueType.conflict, _tp):
+            issue = Issue(
+                issue_type=IssueType.conflict,
+                severity=IssueSeverity.warning,
+                status=IssueStatus.open,
+                item_id=item.id,
+                target_path=_tp,
+                detail=(
+                    f"Sidecar and DB both changed since last sync "
+                    f"(sidecar mtime: {sidecar_file_mtime.isoformat()}, "
+                    f"DB updated_at: {db_updated_at.isoformat()})"
+                ),
+                suggested_action=(
+                    "Review the sidecar file and DB metadata; resolve via the item page."
+                ),
+            )
+            db.add(issue)
+            await db.flush()
+            result.issues_created.append(issue.id)
         return
 
     if db_changed_since_sync and not sidecar_externally_edited:
@@ -284,20 +316,23 @@ async def _behavior_sidecar_sync(
         changed = False
         if sc.title and sc.title != item.title:
             # Title change requires journal rename — just record as issue for safety
-            issue = Issue(
-                issue_type=IssueType.conflict,
-                severity=IssueSeverity.info,
-                status=IssueStatus.open,
-                item_id=item.id,
-                detail=(
-                    f"Sidecar title {sc.title!r} differs from DB title {item.title!r}. "
-                    "Title renames require user action (atomic rename)."
-                ),
-                suggested_action="Rename the item via the UI to apply the sidecar title.",
-            )
-            db.add(issue)
-            await db.flush()
-            result.issues_created.append(issue.id)
+            _tp = str(item_dir)
+            if not await _issue_exists(db, IssueType.conflict, _tp):
+                issue = Issue(
+                    issue_type=IssueType.conflict,
+                    severity=IssueSeverity.info,
+                    status=IssueStatus.open,
+                    item_id=item.id,
+                    target_path=_tp,
+                    detail=(
+                        f"Sidecar title {sc.title!r} differs from DB title {item.title!r}. "
+                        "Title renames require user action (atomic rename)."
+                    ),
+                    suggested_action="Rename the item via the UI to apply the sidecar title.",
+                )
+                db.add(issue)
+                await db.flush()
+                result.issues_created.append(issue.id)
         if sc.description != item.description:
             item.description = sc.description
             changed = True
@@ -430,11 +465,15 @@ async def _behavior_file_changes(
 
     # Missing files (in DB but not on disk) — always an Issue (never auto-delete)
     for path in missing_paths:
+        _tp = str(item_dir / path)
+        if await _issue_exists(db, IssueType.missing_file, _tp):
+            continue
         issue = Issue(
             issue_type=IssueType.missing_file,
             severity=IssueSeverity.warning,
             status=IssueStatus.open,
             item_id=item.id,
+            target_path=_tp,
             detail=f"File in DB not found on disk: {path!r}",
             suggested_action="Restore the file from backup or remove the record via the item page.",
         )
@@ -583,20 +622,23 @@ async def _behavior_integrity(
         try:
             current_hash = hash_file_sha256(abs_path)
             if current_hash != f.sha256:
-                issue = Issue(
-                    issue_type=IssueType.corruption,
-                    severity=IssueSeverity.critical,
-                    status=IssueStatus.open,
-                    item_id=item.id,
-                    detail=(
-                        f"File hash mismatch for {f.path!r}: "
-                        f"stored={f.sha256[:12]}…, actual={current_hash[:12]}…"
-                    ),
-                    suggested_action="Verify file integrity; restore from backup if corrupted.",
-                )
-                db.add(issue)
-                await db.flush()
-                result.issues_created.append(issue.id)
+                _tp = str(abs_path)
+                if not await _issue_exists(db, IssueType.corruption, _tp):
+                    issue = Issue(
+                        issue_type=IssueType.corruption,
+                        severity=IssueSeverity.critical,
+                        status=IssueStatus.open,
+                        item_id=item.id,
+                        target_path=_tp,
+                        detail=(
+                            f"File hash mismatch for {f.path!r}: "
+                            f"stored={f.sha256[:12]}…, actual={current_hash[:12]}…"
+                        ),
+                        suggested_action="Verify file integrity; restore from backup if corrupted.",
+                    )
+                    db.add(issue)
+                    await db.flush()
+                    result.issues_created.append(issue.id)
         except OSError:
             continue
 
@@ -605,17 +647,20 @@ async def _behavior_integrity(
         try:
             reachable = await url_validator(item.source_url)
             if not reachable:
-                issue = Issue(
-                    issue_type=IssueType.dead_link,
-                    severity=IssueSeverity.info,
-                    status=IssueStatus.open,
-                    item_id=item.id,
-                    detail=f"Source URL appears unreachable: {item.source_url}",
-                    suggested_action="Verify the URL manually or update/clear the source link.",
-                )
-                db.add(issue)
-                await db.flush()
-                result.issues_created.append(issue.id)
+                _tp = item.source_url
+                if not await _issue_exists(db, IssueType.dead_link, _tp):
+                    issue = Issue(
+                        issue_type=IssueType.dead_link,
+                        severity=IssueSeverity.info,
+                        status=IssueStatus.open,
+                        item_id=item.id,
+                        target_path=_tp,
+                        detail=f"Source URL appears unreachable: {item.source_url}",
+                        suggested_action="Verify the URL manually or update/clear the source link.",
+                    )
+                    db.add(issue)
+                    await db.flush()
+                    result.issues_created.append(issue.id)
         except Exception as exc:
             log.warning("reconcile integrity: url_validator raised for item %s: %s", item.id, exc)
 
@@ -725,17 +770,20 @@ async def reconcile_one_item(
     except Exception as exc:
         log.exception("reconcile_one_item: sidecar_sync failed for item %s", item.id)
         result.errors.append(f"sidecar_sync: {exc}")
-        _issue = Issue(
-            issue_type=IssueType.sidecar_error,
-            severity=IssueSeverity.warning,
-            status=IssueStatus.open,
-            item_id=item.id,
-            detail=f"Sidecar sync error: {exc}",
-            suggested_action="Re-run rescan or manually inspect the sidecar file.",
-        )
-        db.add(_issue)
-        await db.flush()
-        result.issues_created.append(_issue.id)
+        _tp = str(item_dir)
+        if not await _issue_exists(db, IssueType.sidecar_error, _tp):
+            _issue = Issue(
+                issue_type=IssueType.sidecar_error,
+                severity=IssueSeverity.warning,
+                status=IssueStatus.open,
+                item_id=item.id,
+                target_path=_tp,
+                detail=f"Sidecar sync error: {exc}",
+                suggested_action="Re-run rescan or manually inspect the sidecar file.",
+            )
+            db.add(_issue)
+            await db.flush()
+            result.issues_created.append(_issue.id)
 
     # ---- Behavior (c): File changes ----
     try:
@@ -743,16 +791,19 @@ async def reconcile_one_item(
     except Exception as exc:
         log.exception("reconcile_one_item: file_changes failed for item %s", item.id)
         result.errors.append(f"file_changes: {exc}")
-        _issue = Issue(
-            issue_type=IssueType.other,
-            severity=IssueSeverity.warning,
-            status=IssueStatus.open,
-            item_id=item.id,
-            detail=f"File inventory check failed: {exc}",
-        )
-        db.add(_issue)
-        await db.flush()
-        result.issues_created.append(_issue.id)
+        _tp = str(item_dir)
+        if not await _issue_exists(db, IssueType.other, _tp):
+            _issue = Issue(
+                issue_type=IssueType.other,
+                severity=IssueSeverity.warning,
+                status=IssueStatus.open,
+                item_id=item.id,
+                target_path=_tp,
+                detail=f"File inventory check failed: {exc}",
+            )
+            db.add(_issue)
+            await db.flush()
+            result.issues_created.append(_issue.id)
 
     # ---- Behavior (b): Re-render on file change ----
     try:
@@ -855,15 +906,18 @@ async def reconcile_library_scan(
             )
             try:
                 async with SessionLocal() as db:
-                    _issue = Issue(
-                        issue_type=IssueType.other,
-                        severity=IssueSeverity.warning,
-                        status=IssueStatus.open,
-                        item_id=item_row.id,
-                        detail=f"Reconcile scan error for item {item_row.id}: {exc}",
-                        suggested_action="Check the server logs for details.",
-                    )
-                    db.add(_issue)
+                    _tp = str(Path(item_row.dir_path)) if item_row.dir_path else None
+                    if not await _issue_exists(db, IssueType.other, _tp):
+                        _issue = Issue(
+                            issue_type=IssueType.other,
+                            severity=IssueSeverity.warning,
+                            status=IssueStatus.open,
+                            item_id=item_row.id,
+                            target_path=_tp,
+                            detail=f"Reconcile scan error for item {item_row.id}: {exc}",
+                            suggested_action="Check the server logs for details.",
+                        )
+                        db.add(_issue)
                     await db.commit()
             except Exception:
                 log.exception(
@@ -907,20 +961,24 @@ async def _scan_orphan_dirs(mode_result: dict[str, str]) -> None:
                     continue
                 if str(item_dir) in known_dirs:
                     continue
-                # Dir has no matching DB row → orphan
+                # Dir has no matching DB row → orphan (with dedup)
                 try:
                     async with SessionLocal() as db:
-                        _issue = Issue(
-                            issue_type=IssueType.orphan,
-                            severity=IssueSeverity.warning,
-                            status=IssueStatus.open,
-                            item_id=None,
-                            detail=f"Directory has no matching DB item: {item_dir}",
-                            suggested_action=(
-                                "Import the folder via the inbox wizard or delete it if unwanted."
-                            ),
-                        )
-                        db.add(_issue)
+                        _tp = str(item_dir)
+                        if not await _issue_exists(db, IssueType.orphan, _tp):
+                            _issue = Issue(
+                                issue_type=IssueType.orphan,
+                                severity=IssueSeverity.warning,
+                                status=IssueStatus.open,
+                                item_id=None,
+                                target_path=_tp,
+                                detail=f"Directory has no matching DB item: {item_dir}",
+                                suggested_action=(
+                                    "Import the folder via the inbox wizard"
+                                    " or delete it if unwanted."
+                                ),
+                            )
+                            db.add(_issue)
                         await db.commit()
                 except Exception:
                     log.exception(

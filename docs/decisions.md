@@ -2,6 +2,36 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-30 — Issue resolution framework, Phase 1 (backend): dedup + actionable resolve (migration 0020)
+
+Reconcile Issues couldn't be truly resolved — `resolve`/`ignore` only flipped status and the
+scan had no dedup, so issues reappeared on the next run. Phase 1 backend foundation:
+
+- **Schema (0020):** `issues.target_path VARCHAR(4096) NULL` — the most specific resolvable
+  identifier per issue (dir path for orphan/conflict/sidecar_error, file path for
+  missing_file/corruption, source URL for dead_link) — plus a covering index
+  `(issue_type, target_path, status)`.
+- **Dedup / durable suppression:** `_issue_exists(db, type, target_path)` returns true when an
+  **open or ignored** issue already exists for that pair; every one of the 8 detector sites
+  now skips creation when it does. Effect: no duplicate open issues, and **ignore now sticks**
+  (an ignored issue is never re-created). A `resolved` issue does NOT suppress — a genuinely
+  recurring condition raises a fresh issue (actionable resolve removes the condition, so this
+  is rare).
+- **Action framework:** `ISSUE_ACTIONS: dict[IssueType, list[str]]` (only `orphan` exposes
+  `["import","delete","ignore"]` this phase; all others `["ignore"]`); `available_actions`
+  computed on `IssueOut`; `POST /api/issues/{id}/action` validates against it (422 otherwise).
+  Legacy `/resolve` + `/ignore` endpoints preserved.
+- **Orphan-directory actions:** `delete` moves `target_path` to trash via the same
+  `move_to_trash` helper item-delete uses, guarded to stay inside a known library mount, then
+  marks the issue resolved. `import` creates an `ImportSession` (pending_wizard) prefilled from
+  the folder's sidecar (`read_sidecar()` then raw-YAML fallback) and marks the issue
+  **resolved immediately** — if the user abandons the wizard, `resolved` doesn't suppress, so
+  the next scan re-detects the orphan (no dangling open issue while the wizard is active).
+
+Phase 2 = the Issues-page actions UI (import → wizard showing existing sidecar data); Phase 3 =
+corrective actions for the other issue types. Verified capped: 43 pytest (21 new + 22 reconcile),
+ruff clean, 0020 round-trip clean.
+
 ## 2026-06-30 — RENDER_MODE promoted to admin-editable DB setting (`render.mode`)
 
 `RENDER_MODE` (all / no_images / off) is now an admin-editable server setting, not env-only.

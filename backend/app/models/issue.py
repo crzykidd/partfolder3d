@@ -5,7 +5,7 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -36,6 +36,11 @@ class IssueStatus(str, enum.Enum):
 
 class Issue(Base):
     __tablename__ = "issues"
+    __table_args__ = (
+        # Covering index used by _issue_exists dedup query:
+        #   WHERE issue_type = ? AND target_path = ? AND status IN (open, ignored)
+        Index("ix_issues_type_target_status", "issue_type", "target_path", "status"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     issue_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
@@ -44,6 +49,10 @@ class Issue(Base):
     item_id: Mapped[int | None] = mapped_column(
         ForeignKey("items.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # Logical target the issue concerns (orphan-dir: directory path;
+    # missing_file/corruption: file path; dead_link: URL; etc.).
+    # Indexed for dedup lookups — see _issue_exists() in reconcile.py.
+    target_path: Mapped[str | None] = mapped_column(String(4096), nullable=True, index=True)
     detail: Mapped[str] = mapped_column(Text, nullable=False)
     suggested_action: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
