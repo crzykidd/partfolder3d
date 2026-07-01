@@ -1,19 +1,37 @@
 /**
  * DataTable — Aurora-styled table wrapper with loading/empty states and pagination.
  *
- * Composable: pass columns as string array, children as tbody rows.
- * The outer container uses the aurora glass-card style.
+ * Composable: pass columns as string array (or Column objects for sortable headers),
+ * children as tbody rows. The outer container uses the aurora glass-card style.
  *
- * Usage:
+ * Usage (plain):
  *   <DataTable columns={['ID','Type','Status']} isEmpty={!rows.length} emptyMessage="No jobs.">
  *     {rows.map(r => <tr key={r.id}>…</tr>)}
  *   </DataTable>
- *   <Pagination page={page} totalPages={total} onPrev={…} onNext={…} />
+ *
+ * Usage (with sortable column):
+ *   <DataTable columns={['Name', { label: 'Date', sortable: true, sortDir: dir, onSort: fn }]}>
+ *     …
+ *   </DataTable>
  *
  * Reusable by B3b.
  */
 
 import React from 'react'
+import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
+
+// ---------------------------------------------------------------------------
+// Column type — plain string OR sortable column descriptor
+// ---------------------------------------------------------------------------
+
+export interface SortableColumnDef {
+  label: string
+  sortable?: boolean
+  sortDir?: 'asc' | 'desc' | null
+  onSort?: () => void
+}
+
+export type Column = string | SortableColumnDef
 
 // ---------------------------------------------------------------------------
 // Style constants
@@ -58,7 +76,7 @@ export const TR_HOVER_CLASS = 'hover:bg-white/5 dark:hover:bg-white/5 cursor-poi
 // ---------------------------------------------------------------------------
 
 interface DataTableProps {
-  columns: string[]
+  columns: Column[]
   /** tbody content (rows). When isLoading or isEmpty, this is ignored. */
   children?: React.ReactNode
   isLoading?: boolean
@@ -85,11 +103,62 @@ export function DataTable({
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead style={THEAD_STYLE}>
           <tr>
-            {columns.map((col) => (
-              <th key={col} style={TH_STYLE}>
-                {col}
-              </th>
-            ))}
+            {columns.map((col) => {
+              if (typeof col === 'string') {
+                return (
+                  <th key={col} style={TH_STYLE}>
+                    {col}
+                  </th>
+                )
+              }
+              const { label, sortable, sortDir, onSort } = col
+              if (!sortable) {
+                return (
+                  <th key={label} style={TH_STYLE}>
+                    {label}
+                  </th>
+                )
+              }
+              return (
+                <th key={label} style={TH_STYLE}>
+                  <button
+                    type="button"
+                    onClick={onSort}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: 0,
+                      color: 'inherit',
+                      font: 'inherit',
+                      fontSize: 'inherit',
+                      textTransform: 'inherit',
+                      letterSpacing: 'inherit',
+                      fontWeight: 'inherit',
+                      transition: 'opacity 0.15s',
+                    }}
+                    onMouseEnter={(e) => {
+                      ;(e.currentTarget as HTMLButtonElement).style.opacity = '0.7'
+                    }}
+                    onMouseLeave={(e) => {
+                      ;(e.currentTarget as HTMLButtonElement).style.opacity = '1'
+                    }}
+                  >
+                    {label}
+                    {sortDir === 'asc' ? (
+                      <ChevronUp size={12} />
+                    ) : sortDir === 'desc' ? (
+                      <ChevronDown size={12} />
+                    ) : (
+                      <ChevronsUpDown size={12} style={{ opacity: 0.4 }} />
+                    )}
+                  </button>
+                </th>
+              )
+            })}
           </tr>
         </thead>
         <tbody>

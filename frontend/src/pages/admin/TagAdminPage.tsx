@@ -19,7 +19,7 @@
  * Styling: Aurora aesthetic (B3b restyle — visual pass, all behavior preserved).
  */
 
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as api from '@/lib/api'
 import {
@@ -662,6 +662,28 @@ function AllTagsSection() {
   const [page, setPage] = useState(1)
   const PER_PAGE = 50
 
+  // Sort state — client-side only on the current page
+  const [sortKey, setSortKey] = useState<'category' | 'uses' | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc' | null>(null)
+
+  function handleSort(key: 'category' | 'uses') {
+    if (sortKey !== key) {
+      // Switch to a different column — start at ascending
+      setSortKey(key)
+      setSortDir('asc')
+    } else {
+      // Same column — cycle: asc → desc → null (unsorted)
+      if (sortDir === 'asc') {
+        setSortDir('desc')
+      } else if (sortDir === 'desc') {
+        setSortKey(null)
+        setSortDir(null)
+      } else {
+        setSortDir('asc')
+      }
+    }
+  }
+
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['admin-tags-all', search, page],
     queryFn: () =>
@@ -685,6 +707,27 @@ function AllTagsSection() {
   const total = data?.total ?? 0
   const totalPages = Math.ceil(total / PER_PAGE)
   const mergeList = allTagsForMerge?.tags ?? []
+
+  // Client-side sort on the current page's rows
+  const sortedTags = useMemo(() => {
+    if (!sortKey || !sortDir) return tags
+    return [...tags].sort((a, b) => {
+      if (sortKey === 'category') {
+        const aEmpty = !a.category
+        const bEmpty = !b.category
+        // Null/empty categories always sort last regardless of direction
+        if (aEmpty && bEmpty) return 0
+        if (aEmpty) return 1
+        if (bEmpty) return -1
+        const cmp = a.category!.toLowerCase().localeCompare(b.category!.toLowerCase())
+        return sortDir === 'asc' ? cmp : -cmp
+      } else {
+        // uses (item_count)
+        const cmp = a.item_count - b.item_count
+        return sortDir === 'asc' ? cmp : -cmp
+      }
+    })
+  }, [tags, sortKey, sortDir])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -716,12 +759,27 @@ function AllTagsSection() {
       )}
 
       <DataTable
-        columns={['Name', 'Category', 'Uses', 'Actions']}
+        columns={[
+          'Name',
+          {
+            label: 'Category',
+            sortable: true,
+            sortDir: sortKey === 'category' ? sortDir : null,
+            onSort: () => handleSort('category'),
+          },
+          {
+            label: 'Uses',
+            sortable: true,
+            sortDir: sortKey === 'uses' ? sortDir : null,
+            onSort: () => handleSort('uses'),
+          },
+          'Actions',
+        ]}
         isLoading={isLoading}
         isEmpty={!isLoading && tags.length === 0}
         emptyMessage="No tags found."
       >
-        {tags.map((tag) => (
+        {sortedTags.map((tag) => (
           <AllTagRow key={tag.id} tag={tag} allTags={mergeList} />
         ))}
       </DataTable>
