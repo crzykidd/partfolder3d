@@ -2,6 +2,21 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-06-30 — RENDER_MODE promoted to admin-editable DB setting (`render.mode`)
+
+`RENDER_MODE` (all / no_images / off) is now an admin-editable server setting, not env-only.
+Stored as the generic `Setting` key `render.mode` (values `all` / `no_images` / `off`).
+**Precedence:** the DB row wins; if absent or malformed JSON, fall back to the `RENDER_MODE`
+env/config value (itself defaulted to `all`). `render_item` reads the setting inside its
+existing gate session and remains the **single authoritative gate** (enforced before a Job
+row is created). The `_enqueue_render` "off" short-circuit deliberately still reads only the
+env value — opening a DB session there for a fire-and-forget optimization isn't worth the
+complexity, and correctness is preserved because `render_item` always re-checks the DB setting.
+The settings router validates `render.mode` against the allowed set via a per-key
+`_KEY_ALLOWED_VALUES` map (422 on invalid). Admin UI: a select in SettingsPage (Instance
+settings card, admin-gated) — "Render all models" / "Render only when a model has no images"
+/ "Disable rendering". No migration (Setting is generic key/value).
+
 ## 2026-06-30 — Job lifecycle: cancel/restart, retry-supersede, archive, retention (migration 0019)
 
 Backend lifecycle management for the `jobs` table (UI is a separate follow-up). Migration

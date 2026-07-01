@@ -33,6 +33,12 @@ router = APIRouter(tags=["settings"])
 
 _VALID_THEMES = {"system", "light", "dark"}
 _VALID_LAYOUTS = {"top", "side"}
+_VALID_RENDER_MODES = {"all", "no_images", "off"}
+
+# Per-key value validators: key → set of allowed string values.
+_KEY_ALLOWED_VALUES: dict[str, set[str]] = {
+    "render.mode": _VALID_RENDER_MODES,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +117,18 @@ async def upsert_setting(
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SettingOut:
+    # Per-key value validation
+    if key in _KEY_ALLOWED_VALUES:
+        allowed = _KEY_ALLOWED_VALUES[key]
+        if not isinstance(body.value, str) or body.value not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Invalid value for {key!r}: {body.value!r}. "
+                    f"Must be one of {sorted(allowed)}."
+                ),
+            )
+
     value_json = json.dumps(body.value)
     result = await db.execute(select(Setting).where(Setting.key == key))
     row = result.scalar_one_or_none()

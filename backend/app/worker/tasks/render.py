@@ -174,6 +174,7 @@ async def render_item(ctx: dict, item_id: int, retry_of_job_id: str | None = Non
       arq knows the task was cancelled.
     """
     import hashlib  # noqa: PLC0415
+    import json  # noqa: PLC0415
 
     import sqlalchemy as sa  # noqa: PLC0415
 
@@ -182,6 +183,7 @@ async def render_item(ctx: dict, item_id: int, retry_of_job_id: str | None = Non
     from app.models.file import File, FileRole  # noqa: PLC0415
     from app.models.image import Image  # noqa: PLC0415
     from app.models.item import Item  # noqa: PLC0415
+    from app.models.setting import Setting  # noqa: PLC0415
     from app.worker.job_tracker import (  # noqa: PLC0415
         create_job,
         finish_job,
@@ -191,25 +193,44 @@ async def render_item(ctx: dict, item_id: int, retry_of_job_id: str | None = Non
     from app.worker.render_subprocess import RenderTimeout, run_render_subprocess  # noqa: PLC0415
 
     # ---- Background-render mode gate (before creating a Job row) ----
-    render_mode = settings.RENDER_MODE
-    if render_mode == "off":
-        log.info("render_item: RENDER_MODE=off — skipping render for item %s", item_id)
-        return
-    if render_mode == "no_images":
-        async with SessionLocal() as db:
+    # Read the DB setting first; fall back to the env/config default.
+    # Valid values: "all", "no_images", "off".  Unknown values are treated as "all".
+    _VALID_RENDER_MODES = {"all", "no_images", "off"}
+    render_mode = settings.RENDER_MODE  # env/config fallback
+
+    async with SessionLocal() as db:
+        rm_result = await db.execute(
+            sa.select(Setting).where(Setting.key == "render.mode")
+        )
+        rm_row = rm_result.scalar_one_or_none()
+        if rm_row is not None:
+            try:
+                v = json.loads(rm_row.value)
+                if v in _VALID_RENDER_MODES:
+                    render_mode = v
+            except Exception:
+                pass  # malformed JSON → keep env fallback
+
+        if render_mode == "off":
+            log.info(
+                "render_item: render.mode=off — skipping render for item %s", item_id
+            )
+            return
+
+        if render_mode == "no_images":
             img_count = await db.scalar(
                 sa.select(sa.func.count())
                 .select_from(Image)
                 .where(Image.item_id == item_id)
             )
-        if img_count:
-            log.info(
-                "render_item: RENDER_MODE=no_images and item %s already has %d image(s)"
-                " — skipping render",
-                item_id,
-                img_count,
-            )
-            return
+            if img_count:
+                log.info(
+                    "render_item: render.mode=no_images and item %s already has %d"
+                    " image(s) — skipping render",
+                    item_id,
+                    img_count,
+                )
+                return
 
     # Create the Job row — capture arq's internal job_id for cancel/abort support
     async with SessionLocal() as db:

@@ -17,6 +17,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/context/AuthContext'
 import { useTheme } from '@/components/ThemeProvider'
 import * as api from '@/lib/api'
+import { type RenderMode, RENDER_MODE_LABELS, setRenderMode } from '@/lib/api/settings'
 import { detectOS, rewriteLocalPath } from '@/lib/catalog-utils'
 import {
   AdminPage, PageHeader,
@@ -376,6 +377,86 @@ function PathPrefixesSection() {
 }
 
 // ---------------------------------------------------------------------------
+// Render mode setting (select control, admin only)
+// ---------------------------------------------------------------------------
+
+const RENDER_MODE_SETTING_KEY = 'render.mode'
+
+function RenderModeRow({ currentValue }: { currentValue: string }) {
+  const queryClient = useQueryClient()
+  const [saved, setSaved] = useState(false)
+
+  const mutation = useMutation({
+    mutationFn: (value: RenderMode) => setRenderMode(value),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['settings'] })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    },
+  })
+
+  // Normalise the stored value; fall back to 'all' if absent or unrecognised.
+  const safeValue: RenderMode =
+    currentValue === 'all' || currentValue === 'no_images' || currentValue === 'off'
+      ? currentValue
+      : 'all'
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        paddingTop: 14,
+        paddingBottom: 14,
+        borderTop: '1px solid var(--aurora-divider)',
+      }}
+      className="first-of-type:border-t-0"
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--aurora-text)', marginBottom: 2 }}>
+            Background render mode
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--aurora-muted)', lineHeight: 1.5 }}>
+            Controls when mesh thumbnails are automatically rendered.
+            Overrides the server's <code style={{ fontFamily: 'monospace', fontSize: 11 }}>RENDER_MODE</code> env variable.
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+          {saved && (
+            <span style={{ fontSize: 12, color: 'var(--aurora-accent)' }}>Saved</span>
+          )}
+          {mutation.isError && (
+            <span style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>Save failed</span>
+          )}
+          <select
+            value={safeValue}
+            disabled={mutation.isPending}
+            onChange={(e) => mutation.mutate(e.target.value as RenderMode)}
+            style={{
+              fontSize: 13,
+              padding: '4px 8px',
+              borderRadius: 6,
+              border: '1px solid var(--aurora-glass-border)',
+              background: 'var(--aurora-glass)',
+              color: 'var(--aurora-text)',
+              cursor: 'pointer',
+            }}
+          >
+            {(Object.entries(RENDER_MODE_LABELS) as [RenderMode, string][]).map(
+              ([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              )
+            )}
+          </select>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Known instance settings
 // ---------------------------------------------------------------------------
 
@@ -567,6 +648,9 @@ export function SettingsPage() {
                   currentValue={settingMap.get(s.key) ?? ''}
                 />
               ))}
+              <RenderModeRow
+                currentValue={settingMap.get(RENDER_MODE_SETTING_KEY) ?? ''}
+              />
             </Card>
           )}
         </div>

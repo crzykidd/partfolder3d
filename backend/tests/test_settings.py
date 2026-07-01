@@ -127,3 +127,44 @@ async def test_theme_requires_auth(client: AsyncClient) -> None:
     """GET/PUT /api/me/theme requires authentication."""
     resp = await client.get("/api/me/theme")
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_render_mode_setting_valid_values(client: AsyncClient) -> None:
+    """PUT /api/settings/render.mode accepts all three valid values."""
+    csrf = await _admin_setup(client)
+
+    for value in ("all", "no_images", "off"):
+        resp = await client.put(
+            "/api/settings/render.mode",
+            json={"value": value},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 200, f"Expected 200 for render.mode={value!r}"
+        assert resp.json()["value"] == value
+
+
+@pytest.mark.asyncio
+async def test_render_mode_setting_invalid_value_rejected(client: AsyncClient) -> None:
+    """PUT /api/settings/render.mode rejects values not in {all, no_images, off}."""
+    csrf = await _admin_setup(client)
+
+    resp = await client.put(
+        "/api/settings/render.mode",
+        json={"value": "always"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_render_mode_setting_non_string_rejected(client: AsyncClient) -> None:
+    """PUT /api/settings/render.mode rejects non-string values."""
+    csrf = await _admin_setup(client)
+
+    resp = await client.put(
+        "/api/settings/render.mode",
+        json={"value": True},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 422

@@ -159,8 +159,12 @@ async def _enqueue_render(item_id: int) -> None:
     Failure to enqueue (e.g. Redis not available) is logged but does NOT
     propagate — it must never block item creation or rescan.
 
-    Skipped entirely when RENDER_MODE=off.  Other modes ("no_images") are
-    enforced inside render_item itself, which is the single source of truth.
+    The "off" short-circuit here reads the env/config setting only (not the DB
+    render.mode setting).  render_item is the single authoritative gate: it reads
+    the DB setting first and enforces all render modes before creating a Job row.
+    Opening a DB session here purely for an optimisation short-circuit adds
+    complexity with minimal benefit — the authoritative check in render_item is
+    correct regardless.
     """
     if settings.RENDER_MODE == "off":
         log.debug("_enqueue_render: RENDER_MODE=off — not enqueuing render for item %s", item_id)

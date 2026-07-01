@@ -391,3 +391,100 @@ async def test_render_mode_no_images_skips_when_item_has_images(
     assert await _count_jobs_for_item(item_id) == 0, (
         "no Job row should be created when item has images and RENDER_MODE=no_images"
     )
+
+
+# ---------------------------------------------------------------------------
+# Tests: render.mode DB setting (DB-first, env fallback)
+# ---------------------------------------------------------------------------
+
+
+async def _upsert_render_mode_setting(value: str) -> int:
+    """Insert a render.mode Setting row (committed). Returns the row id."""
+    import json  # noqa: PLC0415
+
+    from app.models.setting import Setting  # noqa: PLC0415
+
+    engine = create_async_engine(TEST_DB_URL, echo=False, poolclass=NullPool)
+    try:
+        async with AsyncSession(engine, expire_on_commit=False) as db:
+            # Remove any pre-existing row first (unique key constraint)
+            existing = await db.execute(
+                sa.select(Setting).where(Setting.key == "render.mode")
+            )
+            row = existing.scalar_one_or_none()
+            if row is not None:
+                await db.delete(row)
+                await db.flush()
+            s = Setting(key="render.mode", value=json.dumps(value))
+            db.add(s)
+            await db.commit()
+            return s.id
+    finally:
+        await engine.dispose()
+
+
+async def _delete_render_mode_setting(setting_id: int) -> None:
+    """Remove the render.mode Setting row by id."""
+    from app.models.setting import Setting  # noqa: PLC0415
+
+    engine = create_async_engine(TEST_DB_URL, echo=False, poolclass=NullPool)
+    try:
+        async with AsyncSession(engine, expire_on_commit=False) as db:
+            await db.execute(sa.delete(Setting).where(Setting.id == setting_id))
+            await db.commit()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_render_mode_off_via_db_setting_skips_render(
+    render_item_setup: int,
+) -> None:
+    """DB setting render.mode='off' → render_item skips; no Job row created.
+
+    Tests the DB-first path: env is left at its default ("all") while the DB
+    setting is "off", proving render_item reads the DB setting, not just the env.
+    """
+    from app.worker.tasks.render import render_item  # noqa: PLC0415
+
+    item_id = render_item_setup
+    setting_id = await _upsert_render_mode_setting("off")
+    try:
+        await render_item({}, item_id)
+        assert await _count_jobs_for_item(item_id) == 0, (
+            "no Job row should be created when DB render.mode='off'"
+        )
+    finally:
+        await _delete_render_mode_setting(setting_id)
+
+
+@pytest.mark.asyncio
+async def test_render_mode_all_via_db_setting_proceeds(
+    render_item_setup: int,
+) -> None:
+    """DB setting render.mode='all' → render_item proceeds past the gate (Job row created).
+
+    Uses a mocked run_render_subprocess (RenderError) to confirm the gate was
+    passed without triggering a real render.
+    """
+    from app.worker.render_mesh import RenderError  # noqa: PLC0415
+    from app.worker.tasks.render import render_item  # noqa: PLC0415
+
+    item_id = render_item_setup
+    setting_id = await _upsert_render_mode_setting("all")
+    try:
+        with patch(
+            "app.worker.render_subprocess.run_render_subprocess",
+            new_callable=AsyncMock,
+            side_effect=RenderError("mocked — not a real render"),
+        ):
+            await render_item({}, item_id)
+
+        # A Job row must have been created (gate was passed)
+        job = await _get_job_by_item(item_id)
+        assert job is not None, (
+            "Job row should be created when DB render.mode='all'"
+        )
+        assert job.status == "failed"  # RenderError → marked failed, not stuck 'running'
+    finally:
+        await _delete_render_mode_setting(setting_id)
