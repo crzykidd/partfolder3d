@@ -61,7 +61,7 @@ The catalog is **fully shared**: all users see the same items, tags, files, and 
 
 ```
 /<library>/<shard>/<itemname>-<key>/
-    <itemname>-<key>.yml        # sidecar (canonical, portable, full mirror)
+    <itemname>-<key>.yml        # sidecar (canonical, portable, full mirror — schema: docs/sidecar-schema.md)
     model files (stl/3mf/obj/blend/f3d/step/...)
     project.zip (optional)
     images/                      # scraped + uploaded images
@@ -90,9 +90,10 @@ The catalog is **fully shared**: all users see the same items, tags, files, and 
 - **PasswordResetToken** — user, token, expires_at (default 1 day), used, revoked.
 - **AiProvider** — provider (claude/openai/ollama), endpoint, model, api_key (encrypted), enabled.
 - **Library** — id, name, mount path, enabled.
-- **Item** — id, key, title, slug, description, source URL, source site, license, default image, library, dir path, file inventory + hashes, schema_version, timestamps.
+- **Item** — id, key, title, slug, description, source URL, source site, license, **creator (optional → Creator)**, default image, library, dir path, file inventory + hashes, schema_version, timestamps.
 - **File** — belongs to Item; filename, type, size, hash, mtime, role (model/zip/image/render/gcode/photo/other).
 - **Image** — belongs to Item; path, source (scraped/uploaded), is_default, order.
+- **Creator** — the model's designer/author. id, name, profile_url (optional), source_site (optional), `user_id` (optional FK to **User** — set when the creator is a local user who **self-designed** the item). **Optional and best-effort on an Item:** auto-filled from scraped source metadata when the site exposes it, otherwise set manually or left blank — never required. Deduplicated/mergeable like **Tag** (same designer across sites → one Creator). Powers **browse-by-creator** and the per-user **"everything I have created"** view (Items whose Creator is linked to the current user). Marking an item as your own design (import wizard / Add Asset) binds its Creator to **your** user account.
 - **Tag** — canonical name, optional category/namespace, popularity count, status (active/pending), created_by.
 - **TagAlias** — alias string → canonical Tag (for reconciling source-site/AI tags).
 - **ItemTag** — Item ↔ Tag association.
@@ -118,9 +119,14 @@ The catalog is **fully shared**: all users see the same items, tags, files, and 
 - **Aliases/synonyms** — map source-site tags and AI suggestions onto canonical tags (e.g. `multicolor` → `mmu`). Central to reconciliation.
 - **New-tag approval queue** — AI/import-suggested *new* tags land in a pending state; admin/curator approves before they become canonical. Keeps vocabulary clean.
 
-### 5.2 Virtual tag-browse tree
-- The browse hierarchy (e.g. `mmu / animals / keychain`) is **derived from most-used tags in order**, **N levels deep** (default **4**, configurable in settings).
-- No physical directory hierarchy is created from tags. Pure DB/UI construct.
+### 5.2 Tag cloud & popularity browse
+- Tags drive browse via a **popularity-weighted tag cloud** (plus a sortable tag list) —
+  **no hierarchy**. Clicking a tag filters the catalog; multiple tags stack (AND).
+- **Popularity counts** size the cloud and provide a catalog **sort** option. Pure DB/UI
+  construct — **tags never affect on-disk layout** (files are never organized by tags; §3.2).
+- *(History: an earlier design nested tags into an N-deep browse tree because objects were
+  once stored under a tag-name directory structure on disk. That disk layout was dropped, so
+  the hierarchy is gone — popularity sorting + the cloud replace it.)*
 
 ### 5.3 Tag reconciliation on import
 1. If a **sidecar** is present, read its tags first.
@@ -138,7 +144,7 @@ The catalog is **fully shared**: all users see the same items, tags, files, and 
 
 ### 6.1 Intake methods
 1. **Inbox folder drop (filesystem).** User creates a folder (e.g. "Ladybug Keychain") under the inbox, drops in model files + a URL/link file + optionally a **sidecar from another instance**. A watcher/scan detects it and queues an import wizard task. A present sidecar is used to pre-fill and match.
-2. **"Add Asset" button (web wizard).** Drag-drop file(s) to upload. Fields: optional source URL, required tags, optional description/license/images.
+2. **"Add Asset" button (web wizard).** Drag-drop file(s) to upload. Fields: optional source URL, required tags, optional description/license/images, optional **creator** (or a **"this is my own design"** toggle that attributes it to the current user — §4 Creator).
 3. **Source URL only.** Attempt to fetch metadata/images (and files where permitted). If the site needs auth, trigger **site setup** (see 6.3).
 4. **Import from another instance's share link.** Paste a share link → download all assets/metadata and reconcile against your library settings & canonical tags.
 
@@ -146,7 +152,7 @@ The catalog is **fully shared**: all users see the same items, tags, files, and 
 Both intake paths — manual **Add Asset** and **inbox-folder** ingest — run as a **background job that drives a completion wizard** (the inbox case enqueues a job that surfaces the wizard rather than auto-finalizing).
 - **Suggests a title** (from the inbox folder name, sidecar, scraped source, or filename) that the user can **edit/correct before commit**; the final, user-confirmed title becomes the on-disk `itemname` and the URL slug. The item directory is **not created/named until the wizard is committed**, so a corrected title yields the right path the first time.
 - Detects/loads sidecar if present.
-- Scrapes source URL for description, images, tags, license where permitted.
+- Scrapes source URL for description, images, tags, license, **and creator/designer** where permitted (reconciled/deduped against existing Creators; §4).
 - Generates render thumbnail(s) for mesh files (STL/3MF/OBJ now).
 - Lets user scroll images and **set a default image**.
 - Reconciles tags (§5.3); enforces required tags.
@@ -198,8 +204,8 @@ A first-class subsystem. The filesystem is a peer source of truth: users open/ed
 
 ### 8.5 Atomic moves & rollback
 - Any operation that changes on-disk directory structure (today: only a **title rename**, §3.2) is **all-or-nothing**.
-- It either completes fully — directory renamed, sidecar + DB paths + file references updated, change-log entry written — or, on **any** failure mid-operation (file locked, directory open/in use, partial copy, permission error), it **rolls back to the exact prior state** and reports a **clear, user-facing error** with the reason.
-- **No half-moved state ever persists.** Implementation uses a journaled stage→verify→commit so an interrupted move (process crash) is detected and finished or undone on the next scan. The contract generalizes to **any** future structure-changing operation.
+- The atomic **`os.replace()` directory rename is the commit point** (the rename keeps `<key>`/`<shard>` invariant, so it's a single same-volume atomic syscall — never a copy). **Before** the commit — including a locked/in-use directory or permission error — **nothing is changed** and it reports a **clear, user-facing error** with the reason. **After** the commit, the small idempotent sidecar + DB updates **complete forward** (a failed sidecar write self-heals via the scheduled Sync job). Cross-device renames are refused, never copied.
+- **No half-moved state ever persists.** Implementation uses a filesystem **journal** (`/data/journal/<key>.json`) so an interrupted move (process crash) is detected and finished-forward or rolled back on startup/next scan. **Bulk operations are N isolated per-item transactions** — a single bad/locked item fails alone (as an Issue) and never corrupts or blocks the rest. The contract generalizes to **any** future structure-changing operation. Full spec: [`docs/atomic-moves.md`](docs/atomic-moves.md).
 
 ### 8.6 Per-item rescan
 - An item page has a **Rescan disk** button to reconcile just that one item immediately — re-hash files, re-render changed models, ingest added files, resync the sidecar — without waiting for the scheduled scan.
@@ -251,12 +257,13 @@ Print records can be created via the REST API, enabling future integrations (e.g
 ## 12. Search & Browse UI
 
 - **Search** across tags, titles, descriptions (PostgreSQL full-text).
-- **Tag list** with click-to-search; filter/stack multiple tags; browse via virtual tag tree.
+- **Tag list / popularity tag cloud** with click-to-search; filter/stack multiple tags (AND).
+- **Creator** — click a creator to see all their models; a per-user **"My Creations"** view lists everything you designed yourself (Items whose Creator is linked to your account; §4).
 - **Two catalog views:**
   - **Table view** — small default-image icon + key details per row.
   - **Grid view** — larger image cards.
 - **Favorites** — star/unstar items; filter and sort the catalog by your favorites (per-user).
-- **Item page** — image carousel (scroll, set default), full metadata, tags, source link, license, full dir path + prefix-rewrite + copy button, downloads, print history, share-link control.
+- **Item page** — image carousel (scroll, set default), full metadata, tags, **creator (linked)**, source link, license, full dir path + prefix-rewrite + copy button, downloads, print history, share-link control.
 - **Theme:** dark / light / **system default**. System default applied first; user can override and the choice persists.
 - Crisp, modern, fast.
 
@@ -310,6 +317,7 @@ Print records can be created via the REST API, enabling future integrations (e.g
 - Symlink-based tag-path mirror on disk (revisit if filesystem-tag browsing is desired).
 - Granular per-library ACLs / per-user private libraries.
 - Collections/sets per user (favorites themselves ship in v1).
+- **Per-user public "maker profile" page** — browse-by-creator + the per-user "My Creations" view ship in v1 (§4/§12), but a dedicated public profile page per maker is deferred.
 - Open public registration (toggle could be added later).
 - **SSO (OIDC/SAML)** — auth layer is designed to accept it later.
 - **Email delivery** of invites / password-resets (SMTP).
@@ -330,6 +338,6 @@ Print records can be created via the REST API, enabling future integrations (e.g
 7. **Secrets** — all tokens/keys **encrypted at rest** (§4, §14).
 
 **Remaining implementation notes:**
-- **Instance encryption key** provisioning & rotation (first-run generates it; losing it means re-entering all secrets).
-- **Move journaling / crash recovery** for an interrupted directory rename (§8.5).
-- **Title sanitization** rules for deriving `itemname` from a user-entered title (allowed chars, length cap, collision-proofed by `<key>`).
+- **Instance encryption key** — provisioning **done** (Phase 1: Fernet key auto-generated at first run into `DATA_DIR/config/secret.key`, 0600, never in DB; losing it means re-entering all secrets). **Rotation** remains a later utility.
+- ~~**Move journaling / crash recovery** for an interrupted directory rename (§8.5).~~ — **resolved**: filesystem journal, atomic-rename-as-commit with roll-forward, locked-file safe, bulk-isolated; see [`docs/atomic-moves.md`](docs/atomic-moves.md).
+- ~~**Title sanitization** rules for deriving `itemname` from a user-entered title~~ — **resolved** (NFKD→ASCII→lowercase→`[a-z0-9-]`, 80-char cap, collision-proofed by `<key>`): see [`docs/sidecar-schema.md`](docs/sidecar-schema.md) §2.

@@ -1,0 +1,154 @@
+# PartFolder 3D — production docker compose (built images, static frontend).
+#
+# Bring up the full stack:
+#   docker compose up -d --build
+#
+# Migrations run automatically: the backend's image entrypoint applies
+# `alembic upgrade head` on startup (RUN_MIGRATIONS=true) before uvicorn; the
+# worker waits for the backend to be healthy. No separate one-shot container,
+# and a fresh stack is usable with no manual steps.
+#
+# For local development with hot reload, use the self-contained dev file
+# (all services + build in one file):
+#   docker compose -f docker-compose.dev.yml up --build
+#
+# Required: copy .env.example → .env and fill in secrets before first run.
+
+services:
+
+  # ── PostgreSQL database ──
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: partfolder3d
+      POSTGRES_USER: partfolder3d
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-changeme}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U partfolder3d -d partfolder3d"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Redis (job queue broker) ──
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── FastAPI backend ──
+  # RUN_MIGRATIONS=true → the image entrypoint runs `alembic upgrade head`
+  # before uvicorn starts, so migrations are bundled into startup (no separate
+  # one-shot container that would show as "exited" in docker ps / Portainer).
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/crzykidd/partfolder3d:dev
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false   # .env is optional; env vars can be set directly
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://partfolder3d:${POSTGRES_PASSWORD:-changeme}@db:5432/partfolder3d"
+      REDIS_URL: "redis://redis:6379"
+      DATA_DIR: /data
+      RUN_MIGRATIONS: "true"
+    volumes:
+      - ./data:/data
+      # Library mounts — add one bind-mount per library, e.g.:
+      #   - /mnt/nas/3dprints:/library/main
+      # Then register each path in the app under Admin → Libraries.
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s     # allow time for migrations + boot
+
+  # ── arq background worker ──
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/crzykidd/partfolder3d:dev
+    restart: unless-stopped
+    command: ["python", "worker.py"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://partfolder3d:${POSTGRES_PASSWORD:-changeme}@db:5432/partfolder3d"
+      REDIS_URL: "redis://redis:6379"
+      DATA_DIR: /data
+      # Render thread caps — override the Dockerfile defaults from RENDER_CPU_THREADS.
+      # All six vars must be set so every numeric-thread library sees the cap.
+      RENDER_CPU_THREADS: "${RENDER_CPU_THREADS:-2}"
+      OMP_NUM_THREADS: "${RENDER_CPU_THREADS:-2}"
+      OPENBLAS_NUM_THREADS: "${RENDER_CPU_THREADS:-2}"
+      MKL_NUM_THREADS: "${RENDER_CPU_THREADS:-2}"
+      VECLIB_MAXIMUM_THREADS: "${RENDER_CPU_THREADS:-2}"
+      NUMEXPR_NUM_THREADS: "${RENDER_CPU_THREADS:-2}"
+      LP_NUM_THREADS: "${RENDER_CPU_THREADS:-2}"
+    volumes:
+      - ./data:/data
+      # Library mounts — mirror the backend mounts exactly so the worker can
+      # read/write files.  Example:
+      #   - /mnt/nas/3dprints:/library/main
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy   # migrations run in backend startup
+
+  # ── Frontend build (produces static assets into the frontend_dist volume) ──
+  frontend:
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+      target: prod
+    image: ghcr.io/crzykidd/partfolder3d-frontend:dev
+    volumes:
+      - frontend_dist:/dist
+    restart: "no"          # build-and-exit; nginx depends on completion
+
+  # ── nginx reverse proxy (serves frontend + proxies /api/) ──
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8973}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - frontend_dist:/usr/share/nginx/html:ro
+      # Logo images (served under /img/): maps docs/images/ into nginx's html root.
+      - ./docs/images:/usr/share/nginx/html/img:ro
+    depends_on:
+      frontend:
+        condition: service_completed_successfully
+      backend:
+        condition: service_healthy
+
+volumes:
+  db_data:
+    driver: local
+  redis_data:
+    driver: local
+  frontend_dist:
+    driver: local

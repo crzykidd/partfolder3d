@@ -3,54 +3,51 @@ description: Prepare a release — bump version, roll changelog, sync docs, vali
 argument-hint: <version>   (e.g. 0.3.6)
 ---
 
-<!--
-Template from standards/release-prep-and-cut @ v1.0.0
-(crzynet/homelab-configs/standards/release-prep-and-cut/README.md).
-
-Before using this command, replace every <PLACEHOLDER> below with your
-project's value. The placeholders are:
-
-  <VERSION_FILE>             Path to the canonical version file.
-                             Examples:
-                               - backend/version.py    (Python: __version__ = "X.Y.Z")
-                               - package.json          (Node:   "version": "X.Y.Z")
-                               - Cargo.toml            (Rust:   version = "X.Y.Z")
-                               - pyproject.toml        (Python: version = "X.Y.Z")
-
-  <VERSION_LITERAL>          How the bare version is written in that file
-                             (literal substring to find / replace).
-                             Examples:
-                               - __version__ = "<current>"
-                               - "version": "<current>"
-
-  <README_BADGE_PATTERN>     How the version appears in the README badge.
-                             Example: version-<current>-gold
-
-  <README_WHATSNEW_SECTION>  Heading of the README "What's New" section
-                             where the new release entry is inserted at top.
-                             Example: ## What's New
-
-  <DOCS_TO_SYNC>             List of doc files and what to update in each.
-                             Examples:
-                               - docs/PRD.md   revision-history table + version annotations
-                               - CLAUDE.md     Build Status block (Current release target / Last shipped public release)
-
-  <LOCAL_CHECKS>             Exact commands CI runs. Examples:
-                               - ruff check backend/
-                               - cd backend && DATABASE_URL=sqlite:///./_release_check.db alembic upgrade head && alembic current
-                               - docker compose config --quiet
-                               - python -c "import yaml; yaml.safe_load(open('backend/defaults.yaml'))"
-
-  <CHANGELOG_ARCHIVE_DIR>    Where per-minor archive files live.
-                             Default: docs/   (archive files: docs/CHANGELOG-<minor>.x.md)
--->
-
 # Release Prep
 
 You are preparing release **v$ARGUMENTS**. This command does ONLY the prep + PR
 steps. It does **not** merge and does **not** create the GitHub release — the
 human merges, and `/release-cut` (run after `main` CI is green) creates the
 release.
+
+## Project-specific values
+
+| Key | Value |
+|-----|-------|
+| Version source-of-truth | `backend/app/version.py` — literal `__version__ = "<current>"`. Also sync `frontend/package.json` `"version": "<current>"` (same bare semver). |
+| README badge pattern | `version-<current>-0FA4AB` (teal badge) |
+| README What's New heading | `## What's New` |
+| Docs to sync | `CLAUDE.md` — update the top `> **Status:**` line to reference the new version if it names a specific version. |
+| Changelog archive dir | `docs/` (archive files: `docs/CHANGELOG-<minor>.x.md`) |
+
+## Local validation checks (same commands CI runs)
+
+Run in order; stop on first failure:
+
+```
+# 1. Backend lint
+ruff check backend/
+
+# 2. Frontend type-check
+cd frontend && npx tsc --noEmit
+
+# 3. Frontend tests
+cd frontend && npx vitest run
+
+# 4. Backend tests (requires live Postgres — set DATABASE_URL or skip with a note)
+#    DATABASE_URL=postgresql+asyncpg://... cd backend && pytest -v
+
+# 5. Migration check (requires live Postgres)
+#    cd backend && alembic upgrade head && alembic current
+
+# 6. Compose validation (both configs must pass)
+docker compose config --quiet
+docker compose -f docker-compose.dev.yml config --quiet
+```
+
+> Note: steps 4 and 5 require a live Postgres instance. If one is not available in
+> the current environment, run 1–3 and 6, note the skipped steps in the commit body,
+> and flag them in the PR description so CI covers them.
 
 ## Execution rules
 
@@ -65,16 +62,16 @@ release.
   not match `MAJOR.MINOR.PATCH` exactly (three integers, dot-separated, no
   pre-release/build suffix), STOP and ask for a valid version.
 - Reminder on the `v` convention: the version is stored and used BARE
-  everywhere (`<VERSION_FILE>`, changelog header, README badge, in-code image
-  tags). The `v` prefix is added in exactly one place — the git tag / GitHub
-  release — and that happens in `/release-cut`, not here.
+  everywhere (`backend/app/version.py`, `frontend/package.json`, changelog header,
+  README badge, in-code image tags). The `v` prefix is added in exactly one place —
+  the git tag / GitHub release — and that happens in `/release-cut`, not here.
 
 ## Step 0 — Preflight
 
 1. Confirm the current branch is `dev`. If not, STOP and report.
 2. Confirm the working tree is clean (`git status --porcelain` empty). If
    there are uncommitted changes, STOP and show them — the user must decide.
-3. Read the current version from `<VERSION_FILE>`. Parse both the current
+3. Read the current version from `backend/app/version.py`. Parse both the current
    version and `$ARGUMENTS` into `(MAJOR, MINOR, PATCH)` integer triples for
    comparison.
 
@@ -133,9 +130,11 @@ Do not proceed on any warned tier without a clear affirmative ("yes",
 
 ## Step 1 — Bump the version
 
-Update `<VERSION_FILE>` so the literal `<VERSION_LITERAL>` reflects
-`$ARGUMENTS`. This is the single source of truth — CI and the in-app version
-display both read from it. Do not touch helper functions or surrounding code.
+Update `backend/app/version.py` so `__version__ = "<current>"` reflects
+`$ARGUMENTS`. Also update `frontend/package.json` `"version": "<current>"` to
+match. These two are the only version source-of-truth files — CI and the in-app
+version display both read from `backend/app/version.py` (via `GET /api/version`).
+Do not touch helper functions or surrounding code.
 
 ## Step 2 — Roll the changelog
 
@@ -164,9 +163,8 @@ such closed series `<minor>.x`:
 
 1. **Move the full detail to the archive.** Move the entire series (all its
    `## [<minor>.PATCH] — <date>` blocks, full content) out of `CHANGELOG.md` into
-   `<CHANGELOG_ARCHIVE_DIR>/CHANGELOG-<minor>.x.md`, newest-first, matching the
-   format of any existing archive file. Full Keep-a-Changelog detail is preserved
-   here.
+   `docs/CHANGELOG-<minor>.x.md`, newest-first, matching the format of any
+   existing archive file. Full Keep-a-Changelog detail is preserved here.
 2. **Leave a summary in the active file.** In place of each moved version, write a
    condensed summary block:
    - Heading: `## [<version>] — <date> (summary)`.
@@ -175,7 +173,7 @@ such closed series `<minor>.x`:
      keep user-visible features and significant fixes. Phrase each as a tight
      one-liner.
    - End the block with a deep link to the full archived section, e.g.
-     `[Full notes →](<CHANGELOG_ARCHIVE_DIR>/CHANGELOG-<minor>.x.md#<anchor>)`
+     `[Full notes →](docs/CHANGELOG-<minor>.x.md#<anchor>)`
      (anchor = the GitHub-style slug of the full header, e.g. `031--2026-06-21`).
 3. Prepend a link to each new archive file in the "Archived releases" index at the
    bottom of `CHANGELOG.md` (create the index if absent).
@@ -187,36 +185,32 @@ such closed series `<minor>.x`:
 
 In `README.md`:
 
-1. Update the version badge: in `<README_BADGE_PATTERN>`, replace the current
-   version with `$ARGUMENTS` (e.g. `version-<old>-gold` → `version-$ARGUMENTS-gold`).
-2. Add a `### v$ARGUMENTS (<today>)` entry at the top of the
-   `<README_WHATSNEW_SECTION>` section, summarising this release in
-   user-facing language drawn from the changelog entries you just rolled. Keep
-   it consistent with the voice of the existing entries.
+1. Update the version badge: replace `version-<old>-0FA4AB` with
+   `version-$ARGUMENTS-0FA4AB` in the badge `src` URL.
+2. Add a `### v$ARGUMENTS (<today>)` entry at the top of the `## What's New`
+   section, summarising this release in user-facing language drawn from the
+   changelog entries you just rolled. Keep it consistent with the voice of the
+   existing entries.
 3. Update any top-of-file new-in banner / one-line status blurb to reference
    `$ARGUMENTS` if it currently names a specific version.
 
 ## Step 5 — Sync long-form docs
 
-For each entry in `<DOCS_TO_SYNC>`:
-
-1. Apply the per-file update listed (e.g. add a row to a Revision History
-   table with today's date and a one-line summary drawn from the changelog;
-   update any "(planned)" or version-tagged annotations to
-   "($ARGUMENTS — shipped)").
-2. Do not invent new sections — only adjust version-referencing content that
-   already exists.
+For `CLAUDE.md`:
+- Find the top `> **Status:**` block and update it to reflect the new release
+  if it currently names a specific version (e.g. change "alpha" + a specific
+  version reference). Do not invent new sections — only adjust content that
+  already references a version.
 
 ## Step 6 — Validate locally BEFORE committing
 
-Run the same checks CI will run, so a red PR is caught now. The minimum
-matrix is `<LOCAL_CHECKS>`; run each in order. If ANY check fails, STOP,
-report exactly what failed, and do not commit.
+Run the local validation checks listed in the "Local validation checks" section
+above. If ANY check fails, STOP, report exactly what failed, and do not commit.
 
 Also grep for version-string drift: confirm no stale `<old-version>`
-references remain in `README.md`, `<VERSION_FILE>`, or any file listed in
-`<DOCS_TO_SYNC>`. Report any other occurrences you find rather than blindly
-editing.
+references remain in `README.md`, `backend/app/version.py`,
+`frontend/package.json`, or `CLAUDE.md`. Report any other occurrences you find
+rather than blindly editing.
 
 ## Step 7 — Commit
 
@@ -226,10 +220,11 @@ body that lists what changed. Template:
 ```
 chore(release): prepare v$ARGUMENTS
 
-- <VERSION_FILE> bumped to $ARGUMENTS
+- backend/app/version.py bumped to $ARGUMENTS
+- frontend/package.json bumped to $ARGUMENTS
 - CHANGELOG: rolled [Unreleased] → [$ARGUMENTS] — <today>
 - README: version badge + What's New entry
-- <one line per doc in DOCS_TO_SYNC>
+- CLAUDE.md: Status line updated
 <- archive line ONLY if a new-minor archive was performed>
 ```
 

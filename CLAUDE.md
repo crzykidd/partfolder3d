@@ -7,8 +7,8 @@ anything the adopted standards govern (branching, commits, releases, handoff pro
 It is the in-repo source of truth for which engineering standards this project conforms
 to, and at which versions.
 
-> **Status:** design/planning phase — see [`README.md`](README.md) and [`PRD.md`](PRD.md).
-> No application code yet; scaffolding is the next milestone.
+> **Status:** alpha (v0.1.1) — see [`README.md`](README.md) and [`PRD.md`](PRD.md).
+> Full stack is built; first tagged release pending.
 
 ## Operating model (project-specific)
 
@@ -154,7 +154,9 @@ coding agent must honor by default:
 If you're unsure whether an action would violate one of the above, stop and
 ask before acting.
 
-> **Parked until scaffolding:** the `/release-prep` and `/release-cut` commands in
-> `.claude/commands/` still contain `<PLACEHOLDER>` values (version file, local checks,
-> docs to sync, workflow + image-tag names). They are filled once the app's version file
-> and CI exist. See [`standards.md`](standards.md).
+> **Filled (Phase 10b):** the `/release-prep` and `/release-cut` commands in
+> `.claude/commands/` have been updated with project-specific values — version file
+> `backend/app/version.py` (+ `frontend/package.json` sync), image registry
+> `ghcr.io/crzykidd/partfolder3d`, publish workflow `Build and publish Docker images`,
+> local checks matching CI, and `docs/` as the changelog archive dir. The release
+> commands are ready to use. See [`standards.md`](standards.md).

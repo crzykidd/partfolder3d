@@ -1,0 +1,162 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    /* Tells the browser to render native controls (select popups, scrollbars,
+       spinners) in the light palette. Overridden to dark by .dark below. */
+    color-scheme: light;
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    /* Native dropdown lists, scrollbars, etc. render dark to match the theme. */
+    color-scheme: dark;
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 224.3 76.3% 48%;
+  }
+}
+
+/* ── Aurora shell theme tokens ─────────────────────────────────────────────
+   Used by SideNavShell / TopNavShell / StatStrip / QuickImportRail.
+   Pages keep the existing shadcn variables above; only the shell references these.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Light aurora */
+  --aurora-bg-from: #E8F4F5;
+  --aurora-bg-to:   #F0F7FF;
+  --aurora-glass:          rgba(255,255,255,0.72);
+  --aurora-glass-border:   rgba(0,0,0,0.08);
+  --aurora-glass-hover:    rgba(255,255,255,0.88);
+  --aurora-pill:           rgba(15,164,171,0.10);
+  --aurora-pill-border:    rgba(15,164,171,0.35);
+  --aurora-glow:           0 0 16px rgba(15,164,171,0.20);
+  --aurora-text:           #0F1E2D;
+  --aurora-text-dim:       #2D4A62;
+  --aurora-muted:          #7A9EB5;
+  --aurora-accent:         #0FA4AB;
+  --aurora-accent-fg:      #FFFFFF;
+  --aurora-accent-glow:    rgba(15,164,171,0.30);
+  --aurora-divider:        rgba(0,0,0,0.07);
+  --aurora-input-bg:       rgba(255,255,255,0.80);
+  --aurora-input-border:   rgba(0,0,0,0.10);
+  --aurora-card:           rgba(255,255,255,0.75);
+  --aurora-card-border:    rgba(0,0,0,0.07);
+  --aurora-danger:         #DC2626;
+  --aurora-stat1:          #0FA4AB;
+  --aurora-stat2:          #16A34A;
+  --aurora-stat3:          #D97706;
+  --aurora-stat4:          #7C3AED;
+  --aurora-stat5:          #DB2777;
+  --aurora-palette-bg:     rgba(255,255,255,0.97);
+  --aurora-palette-border: rgba(0,0,0,0.10);
+  --aurora-palette-hover:  rgba(15,164,171,0.08);
+}
+
+.dark {
+  /* Dark aurora */
+  --aurora-bg-from: #050D1C;
+  --aurora-bg-to:   #081728;
+  --aurora-glass:          rgba(255,255,255,0.04);
+  --aurora-glass-border:   rgba(255,255,255,0.08);
+  --aurora-glass-hover:    rgba(255,255,255,0.07);
+  --aurora-pill:           rgba(15,164,171,0.18);
+  --aurora-pill-border:    rgba(15,164,171,0.45);
+  --aurora-glow:           0 0 18px rgba(15,164,171,0.28);
+  --aurora-text:           #E0EAF4;
+  --aurora-text-dim:       #8BAFC7;
+  --aurora-muted:          #4A6B84;
+  --aurora-accent:         #0FA4AB;
+  --aurora-accent-fg:      #FFFFFF;
+  --aurora-accent-glow:    rgba(15,164,171,0.40);
+  --aurora-divider:        rgba(255,255,255,0.07);
+  --aurora-input-bg:       rgba(255,255,255,0.06);
+  --aurora-input-border:   rgba(255,255,255,0.10);
+  --aurora-card:           rgba(255,255,255,0.03);
+  --aurora-card-border:    rgba(255,255,255,0.07);
+  --aurora-danger:         #EF4444;
+  --aurora-stat1:          #0FA4AB;
+  --aurora-stat2:          #22C55E;
+  --aurora-stat3:          #F59E0B;
+  --aurora-stat4:          #8B5CF6;
+  --aurora-stat5:          #EC4899;
+  --aurora-palette-bg:     rgba(10,20,38,0.97);
+  --aurora-palette-border: rgba(255,255,255,0.12);
+  --aurora-palette-hover:  rgba(15,164,171,0.12);
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer components {
+  /* Shared input/select base style, consistent with the shadcn new-york slate theme. */
+  .input-base {
+    display: block;
+    border-radius: calc(var(--radius) - 2px);
+    border: 1px solid hsl(var(--border));
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    padding: 0.375rem 0.625rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .input-base:focus {
+    border-color: hsl(var(--ring));
+    box-shadow: 0 0 0 2px hsl(var(--ring) / 0.2);
+  }
+
+  .input-base::placeholder {
+    color: hsl(var(--muted-foreground));
+  }
+}

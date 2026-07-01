@@ -1,0 +1,74 @@
+# PartFolder 3D backend dependencies
+# Python 3.12
+
+# Web framework
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+
+# Database
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+
+# Settings / validation
+pydantic-settings==2.7.0
+
+# Job queue
+arq==0.26.1
+
+# Cryptography (secrets at rest, Phase 1)
+cryptography==44.0.0
+
+# Password hashing (Phase 1, adding deps now)
+argon2-cffi==23.1.0
+passlib[argon2]==1.7.4
+
+# Storage / sidecar (Phase 2)
+# python-slugify handles NFKD → ASCII transliteration + slug sanitization.
+# text-unidecode is the transliteration back-end (non-GPL, MIT licensed).
+python-slugify==8.0.4
+text-unidecode==1.3
+# PyYAML for sidecar read/write (already transitive via alembic; pinned here).
+PyYAML==6.0.2
+
+# Rendering (Phase 4)
+# trimesh: parse STL/OBJ/PLY/3MF; vtk: offscreen CPU render (Mesa software rasterizer).
+# pyrender+PyOpenGL: EGL/OSMesa path (tried first; falls back to vtk when unavailable).
+# Pillow: image I/O helper. numpy: mesh math.
+trimesh==4.5.3
+# lxml: trimesh's 3MF loader parses the zipped XML via lxml.etree. It's an OPTIONAL
+# trimesh extra (not pulled in by the base install), so without it 3MF renders fail
+# with "No module named 'lxml'" — even though STL/OBJ/PLY parse fine. 3MF is a v1
+# format, so this is required.
+lxml==6.1.1
+pyrender==0.1.45
+Pillow==11.1.0
+# pyrender hard-pins PyOpenGL==3.1.0, so this >= line resolves to 3.1.0 here —
+# which LACKS OSMesaCreateContextAttribs (need >=3.1.7) and is too old for the
+# EGL/OSMesa offscreen paths. The Dockerfile installs a newer PyOpenGL AFTER this
+# (a separate `pip install "PyOpenGL>=3.1.7"`) to override the pin in the image.
+PyOpenGL>=3.1.0
+vtk==9.3.1
+numpy>=1.24.0,<3.0
+
+# Import wizard / URL scraping (Phase 5)
+# httpx is already listed under Dev/testing (used in tests); keep it there.
+# selectolax: fast CSS-based HTML parser for scraping Open Graph / meta tags.
+selectolax==0.4.10
+# python-multipart: required by FastAPI for the Add Asset multipart file upload.
+python-multipart==0.0.20
+
+# AI providers (Phase 8)
+# Claude: official Anthropic Python SDK.
+# OpenAI + Ollama: openai SDK; Ollama uses base_url override (OpenAI-compatible).
+# Keys are stored Fernet-encrypted in the DB, never in env vars.
+anthropic==0.112.0
+openai==1.109.1
+
+# Dev / testing
+ruff==0.8.4
+pytest==8.3.4
+pytest-asyncio==0.25.0
+httpx==0.28.1
+anyio[trio]==4.7.0
+pydantic[email]

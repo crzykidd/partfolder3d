@@ -3,47 +3,36 @@ description: Cut a GitHub release after the dev→main PR has merged and main CI
 argument-hint: <version>   (e.g. 0.3.6 — must match what /release-prep prepared)
 ---
 
-<!--
-Template from standards/release-prep-and-cut @ v1.0.0
-(crzynet/homelab-configs/standards/release-prep-and-cut/README.md).
-
-Replace every <PLACEHOLDER> below with your project's value:
-
-  <VERSION_FILE>           Path to the canonical version file
-                           (same value used by /release-prep)
-
-  <MAIN_CI_WORKFLOW>       Name of the CI workflow that runs lint / tests / migrations
-                           on push to main. Example: "CI"
-
-  <PUBLISH_WORKFLOW>       Name of the workflow that builds and pushes Docker images
-                           on push to main and on release: published.
-                           Example: "Build and publish Docker images"
-
-  <RELEASE_IMAGE_TAGS>     The image tags the release event publishes. With the
-                           code-checkin-and-pr standard adopted, these are:
-                             :latest, :<semver>, :<major>
--->
-
 # Release Cut
 
 You are publishing the GitHub release for **v$ARGUMENTS**. Run this ONLY
 after:
 
 - `/release-prep $ARGUMENTS` has merged into `main`, and
-- the push-to-`main` CI + image-publish workflows are green and `:latest`
-  images are in the registry.
+- the `CI` (lint / tests / migrations / compose) and `Build and publish Docker images`
+  workflows on `main` are green and `:latest` images are live in the registry.
 
-Publishing the release triggers the `release: published` workflow, which
-builds and pushes the production `:latest`, `:$ARGUMENTS`, and `:<major>`
-images. So this step is the point of no return for production images —
-verify before tagging.
+Publishing the release triggers the `release: published` event on the
+`Build and publish Docker images` workflow, which builds and pushes the production
+`:latest`, `:$ARGUMENTS`, and `:<major>` images. So this step is the point of
+no return for production images — verify before tagging.
+
+## Project-specific values
+
+| Key | Value |
+|-----|-------|
+| Version source-of-truth | `backend/app/version.py` (`__version__ = "<version>"`) |
+| Main CI workflow | `CI` |
+| Publish workflow | `Build and publish Docker images` |
+| Image registry | `ghcr.io/crzykidd/partfolder3d` (backend) + `ghcr.io/crzykidd/partfolder3d-frontend` |
+| Release image tags | `:latest`, `:<semver>`, `:<major>` (e.g. `:0.3.6`, `:0`) |
 
 ## Execution rules
 
 - `$ARGUMENTS` SHOULD be bare semver (no `v` prefix). If a leading `v` was
   typed (`v0.3.6`), strip it silently. After stripping, if the value does
   not match `MAJOR.MINOR.PATCH` exactly, STOP and ask for a valid version.
-- The bare value MUST equal the current version in `<VERSION_FILE>` on
+- The bare value MUST equal the current version in `backend/app/version.py` on
   `main`. If it does not, STOP.
 - The release tag is `v$ARGUMENTS` (with the `v` prefix — matches the
   existing tag convention and the Docker `type=semver` extraction). Before
@@ -55,8 +44,8 @@ verify before tagging.
 ## Step 1 — Verify we are releasing the right commit
 
 1. `git fetch origin` and check out `main`: `git checkout main && git pull`.
-2. Confirm the version in `<VERSION_FILE>` equals `$ARGUMENTS`. If not, the
-   prep PR is not merged (or the wrong version was passed) — STOP.
+2. Confirm the version in `backend/app/version.py` equals `$ARGUMENTS`. If not,
+   the prep PR is not merged (or the wrong version was passed) — STOP.
 3. Confirm the working tree is clean.
 4. Confirm `git log` shows the `chore(release): prepare v$ARGUMENTS` commit on
    `main`. If absent, STOP — the PR has not been merged.
@@ -66,8 +55,8 @@ verify before tagging.
 Use `gh` to confirm the latest runs on `main` for this commit succeeded:
 
 1. `gh run list --branch main --limit 10` and confirm the most recent runs
-   for the release commit concluded `success` for BOTH `<MAIN_CI_WORKFLOW>`
-   and `<PUBLISH_WORKFLOW>`.
+   for the release commit concluded `success` for BOTH `CI` and
+   `Build and publish Docker images`.
 2. If a run is still in progress, tell the user to wait and STOP — do not tag
    a commit whose images may not exist yet.
 3. If a run failed, STOP and report which job failed.
@@ -101,9 +90,9 @@ Do not try to inline multi-line release notes.
 
 ## Step 6 — Verify the production build fired
 
-1. `gh run list --workflow "<PUBLISH_WORKFLOW>" --limit 3` and confirm a run
-   triggered by the `release` event for `v$ARGUMENTS` has started or
-   succeeded.
+1. `gh run list --workflow "Build and publish Docker images" --limit 3` and
+   confirm a run triggered by the `release` event for `v$ARGUMENTS` has started
+   or succeeded.
 2. Report its status.
 
 ## Step 7 — Report
@@ -114,7 +103,7 @@ Print:
 - The tag created (`v$ARGUMENTS`).
 - The status of the production image build.
 - A reminder of the expected image tags once the build finishes:
-  `<RELEASE_IMAGE_TAGS>` (typically `:latest`, `:$ARGUMENTS`, and
-  `:<major>` per the code-checkin-and-pr publishing matrix).
+  `ghcr.io/crzykidd/partfolder3d` and `ghcr.io/crzykidd/partfolder3d-frontend`
+  will receive `:latest`, `:$ARGUMENTS`, and `:<major>` (e.g. `:0`).
 
 Done — the release is live.

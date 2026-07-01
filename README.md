@@ -11,19 +11,50 @@
 </div>
 
 > [!WARNING]
-> 🚧 **Early development — no working code yet.** PartFolder 3D is in the design/planning
-> phase. There is nothing to install or run today. This README describes the *intended*
-> product, not a shipping one. Watch/star to follow along.
+> 🚧 **Early alpha — not yet released.** PartFolder 3D is functional but has not had
+> its first tagged release. The Docker images are not yet published. Watch/star to
+> follow along; see [Getting started](#getting-started) for the dev-stack instructions.
 
 <div align="center">
 
-![Status](https://img.shields.io/badge/status-planning-blue)
-![Stage](https://img.shields.io/badge/stage-pre--alpha-orange)
-![Code](https://img.shields.io/badge/code-none%20yet-lightgrey)
+![Version](https://img.shields.io/badge/version-0.1.1-0FA4AB)
+![Status](https://img.shields.io/badge/status-alpha-blue)
+![Stage](https://img.shields.io/badge/stage-alpha-orange)
+![Code](https://img.shields.io/badge/code-yes-brightgreen)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![PRs](https://img.shields.io/badge/PRs-not%20yet-inactive)
 
 </div>
+
+---
+
+## What's New
+
+### v0.1.1 (2026-07-01)
+
+Render controls and reliability, complete job lifecycle management, per-type issue
+resolution, and catalog polish. Adds: configurable `RENDER_MODE` (all / no-images /
+off), per-render subprocess kill-timeout and CPU-thread cap, render crash recovery on
+worker restart; job cancel / restart / archive / retention with a context-sensitive
+*Clear…* button and archive view; per-type issue resolution actions (orphan → Import /
+Delete / Ignore; conflict, dead-link, corruption, missing-file, and sidecar-error each
+get a targeted fix) with issue deduplication; clickable home-page stat tiles; sortable
+Category and Uses columns on the admin Tags table. Key fixes: scraped-image filename
+collision on MakerWorld import, tag-cloud font scaling cap, admin sidebar
+active-section highlight, and dark-theme native dropdowns/scrollbars.
+See [CHANGELOG.md](CHANGELOG.md) for the full details.
+
+### v0.1.0 (2026-07-01)
+
+First full-stack alpha covering all core features: multi-user catalog with full-text
+search and tag cloud browse; item library with YAML sidecars and atomic renames;
+import/inbox wizard with URL scraping and tag reconciliation; headless CPU mesh
+rendering (STL/3MF/OBJ/PLY) with subprocess isolation, configurable timeout/mode, and
+orphan recovery; reconcile engine with actionable per-type issue resolution, change log,
+and review queue; print history with gcode parsing; tokenized share links with audit;
+optional AI tagging (Claude / OpenAI / Ollama); admin backup, JSON export, and tag
+management; enhanced job lifecycle (cancel, restart, retry, archive, retention).
+See [CHANGELOG.md](CHANGELOG.md) for the full details.
 
 ---
 
@@ -41,8 +72,8 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> All features below are **planned**. None of this is implemented yet — see the
-> [Roadmap](#roadmap--status).
+> The full feature set below is **built** (early alpha, not yet tagged/released) — see the
+> [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
 
@@ -57,9 +88,9 @@ transfer, and resilience against database loss.
 
 ---
 
-## Planned features
+## Features
 
-> Everything in this section is **planned**, not built.
+> Built and working in the current alpha (pending the first tagged release).
 
 ### 📚 Catalog, search & browse
 - Shared multi-user catalog — everyone sees the same items, files, and images.
@@ -68,6 +99,9 @@ transfer, and resilience against database loss.
 - Item page: image carousel + default-image picker, full metadata, source link,
   license, full directory path with a configurable **path-prefix rewrite** and copy
   button to jump to the source folder on your machine.
+- **Per-library × per-OS local path prefixes** — each library carries independent
+  Windows `\` and Linux/macOS `/` prefixes; the browser auto-detects your OS and picks
+  the right one (overridable in Settings).
 - Theme: dark / light / **system default**, with a persisted per-user override.
 
 ### 🏷️ Tagging
@@ -77,6 +111,15 @@ transfer, and resilience against database loss.
 - **New-tag approval queue** keeps the vocabulary clean.
 - **Virtual tag-browse tree** derived from the most-used tags, N levels deep
   (default 4) — purely a DB/UI construct; tags never move files on disk.
+- **Tag delete** — removes a tag from all items that use it (items are never deleted);
+  safe to run on active or pending tags.
+- **Typeahead autocomplete** in the import-wizard Tags step — prefix search on existing
+  tags with keyboard navigation.
+- **Starter-tags loader** — seeds a curated 57-tag vocabulary (7 categories: type,
+  function, feature, theme, process, audience, mechanical) from the Tags page
+  (Content section).
+- Tag-cloud **Alpha / Number sort** toggle; **in-use-only** filter hides zero-item tags.
+- Admin Tags table (`/admin/content/tags`) sortable by **Category** and **Uses**.
 
 ### 📥 Import & inbox
 - **Inbox folder drop** — drop model files + a URL/link + an optional sidecar; a
@@ -93,6 +136,26 @@ transfer, and resilience against database loss.
 - Blender / Fusion / STEP / CAD: generic icon + any scraped/manual image (optional
   add-on renderer containers later).
 - Renders cached per file hash; re-rendered automatically when a file changes.
+- Renders run in an **isolated subprocess** with a wall-clock kill timeout
+  (`RENDER_TIMEOUT_S`, default 300 s) and a CPU-thread cap (`RENDER_CPU_THREADS`,
+  default 2) so the worker is never blocked by a runaway mesh.
+- **Render mode** — configure when thumbnails auto-render via Settings → Instance
+  settings (admin) or the `RENDER_MODE` env var: *Render all models* / *Render only
+  when a model has no images* / *Disable rendering*; the DB setting overrides the env.
+- Orphaned "running" render jobs are **auto-recovered** on worker restart — marked
+  failed and re-queued so no render silently disappears.
+- Renders are **surfaced as gallery images** in the item carousel alongside scraped and
+  uploaded images.
+- **Per-item image upload and delete** — add or remove curated images at any time;
+  stored in `images/` next to the model files.
+- **Delete to trash** — moves an item directory to a recoverable trash folder inside
+  `DATA_DIR` rather than permanently removing it.
+
+### 📐 Asset analysis
+- **Estimated filament use** — per-object grams and color count for STL and 3MF files,
+  computed from mesh volume (filament density and infill % are configurable site-wide
+  settings).
+- Non-watertight meshes are flagged with a **low-confidence** badge on the item page.
 
 ### 🔄 Reconciliation / scan engine
 - Bidirectional **sidecar ⇄ DB sync**; conflicts raised as Issues.
@@ -102,6 +165,15 @@ transfer, and resilience against database loss.
   and a live **job/queue monitor**.
 - **Atomic, all-or-nothing** directory operations with crash-safe rollback.
 - Per-item **"Rescan disk"** button for on-demand reconciliation.
+- **Per-type issue resolution** — the Issues page (`/admin/activity/issues`) offers
+  actionable, context-aware choices instead of a blanket "mark resolved": orphan →
+  Import wizard (prefilled from sidecar) / Delete (→ trash) / Ignore; conflict → keep
+  DB / keep sidecar; dead link → clear source URL; corruption → accept new hash;
+  missing file → remove record; sidecar error → retry. Resolved and ignored issues are
+  **deduplicated** — the scan never re-creates the same issue.
+- **Modification tracking** — detects when local model files have been changed from the
+  originally downloaded versions; items show a "modified copy" notice on public share
+  pages when flagged.
 
 ### 🖨️ Print history
 - Per-item print records (all fields optional): note + **private/public** visibility,
@@ -124,6 +196,11 @@ transfer, and resilience against database loss.
 - Tag suggestion/matching, description cleanup, web-scrape summarization.
 - Prefers existing canonical tags; routes a few genuinely new tags to the queue.
 - **Manual-only always works** with zero AI configured.
+- Optional **AgentQL fallback scraper** — for Cloudflare-gated sites (e.g. MakerWorld)
+  that block the built-in static scraper; BYO API key with configurable free-allowance
+  and monthly $ cap (AI & Scraping section).
+- **AI usage tracking** — per-provider call log with input/output token counts and
+  estimated cost per 24 h / 7 d / 30 d window (AI & Scraping section).
 
 ### 🛠️ Admin & multi-user
 - First-run wizard creates the admin; **no open registration** — users join via a
@@ -134,6 +211,21 @@ transfer, and resilience against database loss.
 - **Scheduled backup of DB + config** (library files are *not* backed up by design).
 - Full-catalog **JSON export**; library, tag, and site-capability administration.
 - **Scheduled-jobs** view (last run / next run / running now) + manual triggers.
+- **Job lifecycle controls** — the job monitor (`/admin/activity/jobs`) supports: cancel
+  + restart of running jobs; retry of failed jobs (the retry supersedes the original
+  once it succeeds); a context-sensitive **Clear…** button that archives rows by the
+  active status filter; and an **archive view** for historical records.
+- **Job retention** — succeeded rows are pruned after 7 days, failed/cancelled/superseded
+  after 30 days; configurable via `JOB_RETENTION_SUCCEEDED_DAYS` /
+  `JOB_RETENTION_FAILED_DAYS`.
+- **Aurora UI** — switchable **top-bar or side navigation** (per-user preference in
+  Settings); **customizable widget dashboard** on the home page (stat tiles link to
+  their detail pages); **Quick Start** onboarding page.
+- **5-section admin nav** — Content · Users & Access · AI & Scraping · Jobs & Activity ·
+  Data & Backups — consolidates 17+ old entries into a tabbed layout; old `/admin/*`
+  paths redirect automatically to their new locations.
+- **Import management** — delete an in-progress import session, remove a staged image,
+  or clear an inbox folder from the Imports page.
 
 ### 🔌 API
 - **Full REST API** covering everything the UI can do.
@@ -241,56 +333,66 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is at the **planning** stage.
+Honest snapshot — this project is at the **alpha** stage (v0.1.1).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
-- [ ] Repository scaffolding (docker-compose, services, CI)
-- [ ] Data model + database migrations
-- [ ] Authentication, invites, password reset, API keys
-- [ ] Storage layout, sidecar read/write, sharding
-- [ ] Reconciliation / scan engine (Auto vs. Review, Issues, Change Log)
-- [ ] Import wizard + inbox watcher
-- [ ] Mesh rendering / thumbnail pipeline (STL / 3MF / OBJ / PLY)
-- [ ] Catalog UI — search, tag tree, table/grid views, favorites
-- [ ] Print history + gcode parsing + stats
-- [ ] Sharing (per-item & full-site links) + share audit
-- [ ] AI-assisted tagging (optional providers)
-- [ ] Admin tools — backups, JSON export, scheduled jobs
-- [ ] Full REST API + OpenAPI docs
-- [ ] First-run setup wizard
+- [x] Repository scaffolding (docker-compose, services, CI)
+- [x] Data model + database migrations (10 migration files)
+- [x] Authentication, invites, password reset, API keys
+- [x] Storage layout, sidecar read/write, sharding
+- [x] Reconciliation / scan engine (Auto vs. Review, Issues, Change Log)
+- [x] Import wizard + inbox watcher
+- [x] Mesh rendering / thumbnail pipeline (STL / 3MF / OBJ / PLY)
+- [x] Catalog UI — full-text search, tag cloud, table/grid views, favorites
+- [x] Print history + gcode parsing + stats
+- [x] Sharing (per-item & full-site links) + share audit
+- [x] AI-assisted tagging (Claude / OpenAI / Ollama — optional)
+- [x] Admin tools — backups, JSON export, tag admin, scheduled jobs
+- [x] Full REST API + OpenAPI docs
+- [x] First-run setup wizard
+- [ ] First tagged release + published Docker images
+- [ ] Load testing at 100k-item scale
+- [ ] SSO (OIDC/SAML), email delivery, OctoPrint integration (out-of-scope / future)
 
-Indicative phases drawn from the PRD: data model → storage/sidecars → reconciliation
-engine → import/render → UI → print history/sharing → AI/admin → API polish. The PRD
-also tracks an explicit [out-of-scope / future](PRD.md) list (native CAD rendering,
-GPU rendering, SSO, email delivery, OctoPrint integration, federated sync).
+See the [CHANGELOG](CHANGELOG.md) for the full delivered feature list.
 
 ---
 
 ## Getting started
 
-> [!WARNING]
-> **Nothing to run yet.** There is no code, no published image, and no
-> `docker-compose.yml` in this repository today. The steps below describe the
-> **intended** future experience.
+> [!NOTE]
+> **Alpha — no published image yet.** The code and `docker-compose.dev.yml` exist; a
+> tagged release and registry images are coming with v0.1.1. For now, build locally
+> from source.
 
 <details>
-<summary><strong>Planned — not yet functional</strong></summary>
+<summary><strong>Build from source (dev stack)</strong></summary>
 
 ```bash
-# (planned) clone and start the stack
+# clone and start the dev stack
 git clone https://github.com/crzykidd/partfolder3d.git
 cd partfolder3d
-docker compose up -d
+cp .env.example .env
+docker compose -f docker-compose.dev.yml up -d --build
 ```
+
+Database migrations run automatically on startup — the backend's image
+entrypoint runs `alembic upgrade head` before uvicorn (the worker waits for the
+backend to be healthy), so there is no manual migration step and no extra
+container. The dev stack bind-mounts all storage under
+`./private_data/data/` (Postgres, Redis, app data) for easy host inspection.
 
 Then open **http://localhost:8973** and complete the **first-run wizard**:
 
 1. Create the admin account + instance basics (name, external URL/port, time zone).
-2. *(Optional, skippable)* add a first library path, set storage layout and tag-tree
-   depth, configure an AI provider, and seed tags / a backup schedule.
+2. Add your first library on the **Libraries** page (Content section) — give it a name
+   and set the mount path to the container path of the mounted volume (e.g. `/library`
+   for the dev stack, or `/library/main` for a custom prod mount).
+3. *(Optional, skippable)* Load Starter Tags (Tags page, Content section), enable an AI
+   provider (AI & Scraping section), or schedule backups (Data & Backups section).
 
-The default external port is **`8973`** and is changeable in `docker-compose.yml`.
+The default external port is **`8973`** and is changeable in `docker-compose.dev.yml`.
 
 </details>
 
@@ -331,6 +433,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — design/planning phase · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — alpha (v0.1.1) · built by <code>crzykidd</code></sub>
 
 </div>
