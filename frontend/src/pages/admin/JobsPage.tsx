@@ -354,7 +354,7 @@ export function JobsPage() {
   const queryClient = useQueryClient()
 
   const clearMutation = useMutation({
-    mutationFn: () => api.clearSucceededJobs(),
+    mutationFn: (status: 'succeeded' | 'failed' | 'cancelled') => api.clearJobsByStatus(status),
     onSuccess: (data) => {
       setClearCount(data.archived)
       void queryClient.invalidateQueries({ queryKey: ['jobs'] })
@@ -382,10 +382,23 @@ export function JobsPage() {
     setClearCount(null)
   }
 
-  const handleClearSucceeded = () => {
-    if (!window.confirm('Archive all succeeded jobs? They will be moved to the archive and hidden from the live view.')) return
+  // Contextual clear button, keyed to the active status filter:
+  //   all / succeeded → Clear succeeded · failed → Clear all failed ·
+  //   cancelled → Clear cancelled · running / queued → no button.
+  const clearConfig: { status: 'succeeded' | 'failed' | 'cancelled'; label: string } | null =
+    statusFilter === '' || statusFilter === 'succeeded'
+      ? { status: 'succeeded', label: 'Clear succeeded' }
+      : statusFilter === 'failed'
+        ? { status: 'failed', label: 'Clear all failed' }
+        : statusFilter === 'cancelled'
+          ? { status: 'cancelled', label: 'Clear cancelled' }
+          : null
+
+  const handleClear = () => {
+    if (!clearConfig) return
+    if (!window.confirm(`Archive all ${clearConfig.status} jobs? They will be moved to the archive and hidden from the live view.`)) return
     setClearCount(null)
-    clearMutation.mutate()
+    clearMutation.mutate(clearConfig.status)
   }
 
   return (
@@ -408,15 +421,15 @@ export function JobsPage() {
 
       {/* Top controls */}
       <div className="flex flex-wrap items-center gap-3">
-        {!archived && (
+        {!archived && clearConfig && (
           <Button
             variant="ghost"
             size="sm"
-            onClick={handleClearSucceeded}
+            onClick={handleClear}
             disabled={clearMutation.isPending}
           >
             <Archive size={12} />
-            {clearMutation.isPending ? 'Clearing…' : 'Clear succeeded'}
+            {clearMutation.isPending ? 'Clearing…' : clearConfig.label}
           </Button>
         )}
         {clearCount != null && (
@@ -449,7 +462,7 @@ export function JobsPage() {
             <FilterPill
               key={s || 'all'}
               active={statusFilter === s}
-              onClick={() => { setStatusFilter(s); setPage(1) }}
+              onClick={() => { setStatusFilter(s); setPage(1); setClearCount(null) }}
             >
               {STATUS_LABELS[s]}
             </FilterPill>

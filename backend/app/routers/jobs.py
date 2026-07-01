@@ -7,7 +7,8 @@ GET    /api/jobs/{id}             → single job detail (admin)
 POST   /api/jobs/{id}/retry       → re-enqueue a failed job (admin + CSRF)
 POST   /api/jobs/{id}/cancel      → cancel a running job (admin + CSRF)
 POST   /api/jobs/{id}/restart     → restart a job of any status (admin + CSRF)
-POST   /api/jobs/clear-succeeded  → archive all non-archived succeeded jobs (admin + CSRF)
+POST   /api/jobs/clear?status=X   → archive all non-archived jobs of a terminal status
+                                    (succeeded|failed|cancelled) (admin + CSRF)
 POST   /api/jobs/{id}/archive     → archive one terminal job (admin + CSRF)
 DELETE /api/jobs/{id}             → hard-delete one job row (admin + CSRF)
 
@@ -219,20 +220,34 @@ async def list_jobs(
     )
 
 
-@router.post("/clear-succeeded", response_model=ArchiveOut)
-async def clear_succeeded_jobs(
+# Terminal statuses that can be bulk-cleared (archived) by status.
+_ARCHIVABLE_STATUSES = {"succeeded", "failed", "cancelled"}
+
+
+@router.post("/clear", response_model=ArchiveOut)
+async def clear_jobs_by_status(
     _admin: Annotated[User, Depends(require_admin)],
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    status_filter: Annotated[str, Query(alias="status")],
 ) -> ArchiveOut:
-    """Set archived_at=now on all non-archived succeeded jobs.
+    """Archive (set archived_at=now) all non-archived jobs of a terminal status.
 
-    Returns the count of jobs archived.
+    ``status`` must be one of: succeeded, failed, cancelled.  Returns the count
+    archived.  422 if the status is not bulk-clearable.
     """
+    if status_filter not in _ARCHIVABLE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Cannot clear status {status_filter!r}. "
+                f"Must be one of {sorted(_ARCHIVABLE_STATUSES)}."
+            ),
+        )
     now = datetime.now(UTC)
     result = await db.execute(
         select(Job).where(
-            Job.status == "succeeded",
+            Job.status == status_filter,
             Job.archived_at.is_(None),
         )
     )

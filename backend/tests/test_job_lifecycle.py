@@ -249,17 +249,17 @@ async def test_cancel_non_running_returns_409(
 
 
 # ---------------------------------------------------------------------------
-# §6 — clear-succeeded + archive + delete + list filtering
+# §6 — clear-by-status + archive + delete + list filtering
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_clear_succeeded_archives_all_succeeded(
+async def test_clear_jobs_by_status_succeeded(
     client: AsyncClient,
     db_session: AsyncSession,
     tmp_path: Path,
 ) -> None:
-    """POST /api/jobs/clear-succeeded sets archived_at on all succeeded jobs."""
+    """POST /api/jobs/clear?status=succeeded archives all non-archived succeeded jobs only."""
     from app.worker.job_tracker import create_job, finish_job  # noqa: PLC0415
 
     j1 = await create_job(db_session, "render", payload={"item_id": 10})
@@ -273,21 +273,119 @@ async def test_clear_succeeded_archives_all_succeeded(
     csrf = await _setup_and_login(client, tmp_path)
 
     resp = await client.post(
-        "/api/jobs/clear-succeeded",
+        "/api/jobs/clear?status=succeeded",
         headers={"X-CSRF-Token": csrf},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["archived"] == 2, f"expected 2, got {body['archived']}"
+    assert body["archived"] == 2, f"expected 2 succeeded archived, got {body['archived']}"
 
-    # Verify in DB
+    # Succeeded jobs must be archived; failed job must not be touched
     for jid in (j1, j2):
         res = await db_session.execute(select(Job).where(Job.id == jid))
-        job = res.scalar_one()
-        assert job.archived_at is not None
+        assert res.scalar_one().archived_at is not None, f"succeeded job {jid} must be archived"
 
     res_fail = await db_session.execute(select(Job).where(Job.id == j_fail))
-    assert res_fail.scalar_one().archived_at is None
+    assert res_fail.scalar_one().archived_at is None, "failed job must not be archived"
+
+
+@pytest.mark.asyncio
+async def test_clear_jobs_by_status_failed(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+) -> None:
+    """POST /api/jobs/clear?status=failed archives only failed jobs, leaves succeeded alone."""
+    from app.worker.job_tracker import create_job, finish_job  # noqa: PLC0415
+
+    j_fail1 = await create_job(db_session, "render", payload={"item_id": 13})
+    j_fail2 = await create_job(db_session, "render", payload={"item_id": 14})
+    j_ok = await create_job(db_session, "render", payload={"item_id": 15})
+    await finish_job(db_session, j_fail1, succeeded=False, error="err1")
+    await finish_job(db_session, j_fail2, succeeded=False, error="err2")
+    await finish_job(db_session, j_ok, succeeded=True)
+    await db_session.commit()
+
+    csrf = await _setup_and_login(client, tmp_path)
+
+    resp = await client.post(
+        "/api/jobs/clear?status=failed",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["archived"] == 2, f"expected 2 failed archived, got {body['archived']}"
+
+    for jid in (j_fail1, j_fail2):
+        res = await db_session.execute(select(Job).where(Job.id == jid))
+        assert res.scalar_one().archived_at is not None, f"failed job {jid} must be archived"
+
+    res_ok = await db_session.execute(select(Job).where(Job.id == j_ok))
+    assert res_ok.scalar_one().archived_at is None, (
+        "succeeded job must not be archived by failed clear"
+    )
+
+
+@pytest.mark.asyncio
+async def test_clear_jobs_by_status_cancelled(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+) -> None:
+    """POST /api/jobs/clear?status=cancelled archives only cancelled jobs."""
+    from app.worker.job_tracker import create_job, finish_job  # noqa: PLC0415
+
+    j_cancel1 = await create_job(db_session, "render", payload={"item_id": 16})
+    j_cancel2 = await create_job(db_session, "render", payload={"item_id": 17})
+    j_fail = await create_job(db_session, "render", payload={"item_id": 18})
+    await db_session.flush()
+
+    # Simulate cancel (same pattern as the cancel endpoint)
+    for jid in (j_cancel1, j_cancel2):
+        res = await db_session.execute(select(Job).where(Job.id == jid))
+        row = res.scalar_one()
+        row.status = "cancelled"
+        row.finished_at = datetime.now(UTC)
+    await finish_job(db_session, j_fail, succeeded=False, error="err")
+    await db_session.commit()
+
+    csrf = await _setup_and_login(client, tmp_path)
+
+    resp = await client.post(
+        "/api/jobs/clear?status=cancelled",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["archived"] == 2, f"expected 2 cancelled archived, got {body['archived']}"
+
+    for jid in (j_cancel1, j_cancel2):
+        res = await db_session.execute(select(Job).where(Job.id == jid))
+        assert res.scalar_one().archived_at is not None, f"cancelled job {jid} must be archived"
+
+    res_fail = await db_session.execute(select(Job).where(Job.id == j_fail))
+    assert res_fail.scalar_one().archived_at is None, (
+        "failed job must not be archived by cancelled clear"
+    )
+
+
+@pytest.mark.asyncio
+async def test_clear_non_archivable_status_returns_422(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+) -> None:
+    """POST /api/jobs/clear?status=<non-archivable> returns 422 for running and queued."""
+    csrf = await _setup_and_login(client, tmp_path)
+
+    for bad_status in ("running", "queued"):
+        resp = await client.post(
+            f"/api/jobs/clear?status={bad_status}",
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 422, (
+            f"expected 422 for status={bad_status!r}, got {resp.status_code}: {resp.text}"
+        )
 
 
 @pytest.mark.asyncio
