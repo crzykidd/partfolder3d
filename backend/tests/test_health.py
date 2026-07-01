@@ -25,7 +25,9 @@ def test_version_returns_version() -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["version"] == __version__
-    assert __version__ == "0.1.0"
+    # Assert semver shape (MAJOR.MINOR.PATCH), not a brittle literal that breaks on every bump.
+    parts = __version__.split(".")
+    assert len(parts) == 3 and all(p.isdigit() for p in parts), __version__
 
 
 def test_openapi_schema_accessible() -> None:
