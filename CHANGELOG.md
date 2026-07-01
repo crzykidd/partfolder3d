@@ -20,11 +20,80 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
-_Nothing yet — all delivered features are listed under the v0.1.0 entries below._
+_Nothing yet — all delivered features are listed under the v0.1.1 entry below._
 
 ---
 
-## [0.1.0] — unreleased
+## [0.1.1] — 2026-07-01
+
+> Render controls and reliability, complete job lifecycle management, per-type issue
+> resolution, and catalog polish on top of the 0.1.0 baseline.
+
+### Added
+
+**Render controls**
+- **Render mode setting** — a new instance setting (`Settings → Instance → Render mode`,
+  or `RENDER_MODE` env var) controls when thumbnail rendering fires: *Render all models*
+  (default), *Render only when a model has no images*, or *Disable rendering* entirely.
+  The DB setting takes precedence over the env var. Lets image-heavy catalogs skip slow
+  CPU renders without sacrificing scraped or uploaded images.
+- **Subprocess isolation & safety** — each render now runs in a dedicated, killable
+  subprocess with a configurable wall-clock timeout (`RENDER_TIMEOUT_S`, default 300 s)
+  and a CPU-thread cap (`RENDER_CPU_THREADS`, default 2). A runaway or hung mesh can no
+  longer block the worker indefinitely.
+- **Render crash recovery** — render jobs still marked *running* when the worker
+  restarts are automatically detected, marked failed, and re-queued so no render
+  silently disappears after an unclean shutdown.
+
+**Job lifecycle controls**
+- **Cancel & restart** — running jobs can be cancelled from the job monitor
+  (`/admin/activity/jobs`); failed or cancelled jobs can be restarted. A restart creates
+  a new job that supersedes the original once it succeeds, keeping history clean.
+- **Archive & retention** — jobs can be individually archived; the *Clear…* button
+  archives all rows matching the active status filter (context-sensitive to the current
+  view). Automatic retention prunes succeeded rows after 7 days and
+  failed/cancelled/superseded rows after 30 days (configurable via
+  `JOB_RETENTION_SUCCEEDED_DAYS` / `JOB_RETENTION_FAILED_DAYS`).
+- **Archive view** — a dedicated archive tab on the job monitor surfaces historical
+  records separately from the live queue.
+
+**Issue resolution**
+- **Per-type corrective actions** — the Issues page (`/admin/activity/issues`) now
+  shows context-aware action buttons instead of a generic *Mark resolved*:
+  - *Orphan* (directory + sidecar with no DB record) → **Import** (opens the import
+    wizard prefilled from the sidecar) / **Delete to trash** / **Ignore**
+  - *Conflict* → **Keep DB version** / **Keep sidecar version**
+  - *Dead link* → **Clear source URL**
+  - *Corruption* → **Accept new hash**
+  - *Missing file* → **Remove file record**
+  - *Sidecar error* → **Retry sync**
+- **Issue deduplication** — once an issue is resolved or ignored the reconcile engine
+  will not recreate the same issue on subsequent scans, preventing alert fatigue on
+  recurring problems.
+
+**Catalog polish**
+- **Clickable stat tiles** — the home-page dashboard stat strip now links directly to
+  the corresponding detail page (e.g. *Total items* → catalog, *Jobs* → job monitor).
+- **Sortable Tags table** — the admin Tags table (`/admin/content/tags`) supports
+  sorting by *Category* and *Uses* columns in addition to the existing name sort.
+
+### Fixed
+
+- **Scraped-image filename collision** — importing an asset from MakerWorld (and other
+  sites where scraped images share a generic filename) no longer overwrites an existing
+  image; filenames are deduplicated on import commit.
+- **Tag-cloud font scaling** — the popularity-weighted tag-cloud font scale is now
+  capped at ~14 px so a handful of very popular tags no longer visually dominate the
+  cloud at the expense of readability.
+- **Sidebar active-section highlight** — the admin sidebar now correctly highlights the
+  active section when navigating between sub-tabs within a section (e.g. Content → Tags,
+  Activity → Jobs); previously the highlight reset on sub-tab navigation.
+- **Dark-theme native controls** — native `<select>` dropdowns and scrollbars now render
+  dark in dark mode via explicit CSS overrides, matching the rest of the UI.
+
+---
+
+## [0.1.0] — 2026-07-01
 
 > First full-stack alpha release covering Phases 0–10 of the build plan.
 

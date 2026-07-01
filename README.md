@@ -17,7 +17,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.1.0-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.1.1-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![Stage](https://img.shields.io/badge/stage-alpha-orange)
 ![Code](https://img.shields.io/badge/code-yes-brightgreen)
@@ -30,7 +30,21 @@
 
 ## What's New
 
-### v0.1.0 (unreleased)
+### v0.1.1 (2026-07-01)
+
+Render controls and reliability, complete job lifecycle management, per-type issue
+resolution, and catalog polish. Adds: configurable `RENDER_MODE` (all / no-images /
+off), per-render subprocess kill-timeout and CPU-thread cap, render crash recovery on
+worker restart; job cancel / restart / archive / retention with a context-sensitive
+*Clear…* button and archive view; per-type issue resolution actions (orphan → Import /
+Delete / Ignore; conflict, dead-link, corruption, missing-file, and sidecar-error each
+get a targeted fix) with issue deduplication; clickable home-page stat tiles; sortable
+Category and Uses columns on the admin Tags table. Key fixes: scraped-image filename
+collision on MakerWorld import, tag-cloud font scaling cap, admin sidebar
+active-section highlight, and dark-theme native dropdowns/scrollbars.
+See [CHANGELOG.md](CHANGELOG.md) for the full details.
+
+### v0.1.0 (2026-07-01)
 
 First full-stack alpha covering all core features: multi-user catalog with full-text
 search and tag cloud browse; item library with YAML sidecars and atomic renames;
@@ -319,7 +333,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is at the **alpha** stage (v0.1.0, unreleased).
+Honest snapshot — this project is at the **alpha** stage (v0.1.1).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -349,7 +363,7 @@ See the [CHANGELOG](CHANGELOG.md) for the full delivered feature list.
 
 > [!NOTE]
 > **Alpha — no published image yet.** The code and `docker-compose.dev.yml` exist; a
-> tagged release and registry images are coming with v0.1.0. For now, build locally
+> tagged release and registry images are coming with v0.1.1. For now, build locally
 > from source.
 
 <details>
@@ -419,6 +433,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — alpha (v0.1.0 unreleased) · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — alpha (v0.1.1) · built by <code>crzykidd</code></sub>
 
 </div>
