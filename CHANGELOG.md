@@ -45,6 +45,9 @@ prefix appears only on git tags and GitHub releases.
 - **Sidebar over-highlighting** — a nav item is now highlighted only for its own route:
   selecting "API Keys" (`/settings/api-keys`) no longer also highlights the parent
   "Settings" (`/settings`). Section items still highlight across their sub-tabs.
+- **Catalog / My Favorites highlighted together** — the sidebar now distinguishes the two
+  by the `?favorited=true` query (they share the `/catalog` pathname), so selecting one no
+  longer highlights both. Tolerant of other catalog query params (search/filters).
 - **Quick Start "Import" and "Backups" steps never showed a Done badge** — added live
   status detection for both: the Import step flags done when `total > 0` items exist
   (universal, works for non-admin users); the Backups step flags done when at least one
