@@ -105,10 +105,14 @@ prefix appears only on git tags and GitHub releases.
 - **Thumbnail priority chain enforced** — renders are only set as the default image when
   no scraped, uploaded, or embedded image exists. Previously renders could displace
   higher-priority images in the default slot.
-- **Render stack collapsed to VTK-only** — `pyrender`, `PyOpenGL`, and the EGL/OSMesa
-  detection/code paths removed. VTK's bundled Mesa software rasterizer is the sole render
-  backend. `libegl1`, `libgbm1`, `libosmesa6`, `libxrender1`, and `libxi6` removed from
-  the Dockerfile (no longer needed).
+- **Render stack collapsed to a single headless VTK backend** — `pyrender`, `PyOpenGL`,
+  and the EGL/OSMesa detection/code paths removed. The **`vtk-osmesa`** wheel (Kitware
+  wheel index) is the sole render backend, doing true offscreen rendering with no X
+  server. This **requires `libosmesa6`**; `libegl1`, `libgbm1`, `libxrender1`, and
+  `libxi6` are removed from the Dockerfile. (The stock PyPI `vtk` wheel is X11-only and
+  cannot render headless — see `docs/decisions.md` 2026-07-02.) **`networkx`** is now an
+  explicit dependency (required by trimesh for scene-graph ops during analysis; it was
+  previously pulled in transitively by `pyrender`).
 - **Embedded thumbnails excluded from sidecar** — like renders, embedded 3MF thumbnails
   are regenerated deterministically on scan and are not written to `sidecar.yaml`.
 - **`ImageSource.embedded` added** — migration 0021 adds the new enum value to
