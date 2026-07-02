@@ -20,6 +20,16 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Added
+
+- **Configurable `PUID`/`PGID` runtime user** — backend, worker, and frontend
+  containers now run as the UID:GID set by `PUID`/`PGID` env vars (defaulting
+  to `1000:1000`). This enables NFS-friendly file ownership so files written to
+  library mounts and `/data` land with the correct host ownership. Set `PUID`
+  and `PGID` in `.env` to match your NFS share owner. Operators upgrading should
+  ensure their library mount(s) and `/data` volume are readable/writable by the
+  configured `PUID:PGID`.
+
 ### Changed
 
 - CI backend test suite now runs in parallel via `pytest-xdist -n auto` with

@@ -52,8 +52,17 @@ COPY backend/alembic/ ./alembic/
 COPY backend/docker-entrypoint.sh ./
 RUN chmod +x ./docker-entrypoint.sh
 
-# Data directory will be mounted at runtime (./data:/data in compose)
-RUN mkdir -p /data
+# Runtime-user env: set HOME and XDG_CACHE_HOME to /tmp so that libraries
+# writing to $HOME (e.g. fontconfig, matplotlib) don't fail when the container
+# runs as an arbitrary UID that has no passwd entry.  PUID/PGID are applied at
+# container start via compose `user:` — no hardcoded USER here.
+ENV HOME=/tmp \
+    XDG_CACHE_HOME=/tmp
+
+# Data directory will be mounted at runtime (./data:/data or named volume).
+# 0777 so any UID (set via compose user: PUID:PGID) can write the named volume
+# on first mount — Docker copies this mode when initialising a new named volume.
+RUN mkdir -p /data && chmod 0777 /data
 
 # The entrypoint applies DB migrations when RUN_MIGRATIONS=true (set on the
 # backend service), then execs the service command — so migrations are bundled
