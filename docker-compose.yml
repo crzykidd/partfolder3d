@@ -10,6 +10,7 @@
 # Images:
 #   ghcr.io/crzykidd/partfolder3d:latest          (backend + worker)
 #   ghcr.io/crzykidd/partfolder3d-frontend:latest (frontend static build)
+#   ghcr.io/crzykidd/partfolder3d-nginx:latest    (nginx — config + logos baked in)
 # To pin a specific release swap :latest → e.g. :0.1.1
 #
 # Migrations run automatically: the backend entrypoint applies `alembic upgrade head`
@@ -140,16 +141,21 @@ services:
     restart: "no"          # runs once to copy assets into the volume; nginx depends on completion
 
   # ── nginx reverse proxy (serves frontend + proxies /api/) ──
+  # The nginx config and logo images are baked into the image — no bind-mounts
+  # required for a pull-images-only host. Logos are served under /img/ from the
+  # baked image layer; frontend static assets come from the frontend_dist volume.
   nginx:
-    image: nginx:1.27-alpine
+    image: ghcr.io/crzykidd/partfolder3d-nginx:latest   # pin a version: :0.1.1
     restart: unless-stopped
     ports:
       - "${APP_PORT:-8973}:80"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - frontend_dist:/usr/share/nginx/html:ro
-      # Logo images (served under /img/): maps docs/images/ into nginx's html root.
-      - ./docs/images:/usr/share/nginx/html/img:ro
+      # Optional: override the baked nginx config with a custom one.
+      # Uncomment to supply your own default.conf (e.g. to add TLS termination,
+      # adjust upload limits, or change proxy timeouts). Watch release notes for
+      # "nginx config changed" callouts before upgrading — reconcile your copy.
+      # - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       frontend:
         condition: service_completed_successfully

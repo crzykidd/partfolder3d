@@ -20,6 +20,30 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Added
+
+- **Published `partfolder3d-frontend` and `partfolder3d-nginx` images** — the
+  publish workflow now builds and pushes all three images (`ghcr.io/crzykidd/partfolder3d`,
+  `ghcr.io/crzykidd/partfolder3d-frontend`, `ghcr.io/crzykidd/partfolder3d-nginx`)
+  on every push to `dev`/`main` and on release events, with the same tag scheme
+  (`dev`, `sha-<short>`, `latest`, semver) applied to each.
+
+### Changed
+
+- **nginx config baked into the `partfolder3d-nginx` image** — the production
+  nginx config (`client_max_body_size 1024m`, `/api/` proxy, `/health` proxy,
+  `/img/` logo alias, SPA fallback) is now compiled into a dedicated nginx image
+  (`nginx/Dockerfile`). The production `docker-compose.yml` no longer bind-mounts
+  `./nginx/nginx.conf` or `./docs/images`; a commented-out optional override line
+  is provided for operators running a custom config.
+- **Logo images moved to `/img/` alias** — brand images (`docs/images/`) are baked
+  into the nginx image at `/usr/share/nginx/img/` and served under `/img/` via an
+  explicit `location /img/ { alias …; }` block, separate from the `frontend_dist`
+  volume mount at `/usr/share/nginx/html`.
+- **Production compose is now fully self-contained** — a fresh host running
+  `docker compose up -d` with only `docker-compose.yml` + `.env` gets a fully
+  working stack; no repo files (nginx config, logo images) are required on the host.
+
 ## [0.2.2] — 2026-07-02
 
 ### Added

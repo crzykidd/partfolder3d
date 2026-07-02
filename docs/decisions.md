@@ -2,6 +2,48 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-02 — Baked nginx image: dedicated Dockerfile, `/img/` alias, release-note callout rule
+
+**Problem (why a dedicated nginx image):** `publish.yml` originally built only the backend
+image. The `nginx` compose service used the stock `nginx:1.27-alpine` image with two
+required bind-mounts: `./nginx/nginx.conf` (the proxy config) and `./docs/images` (logo
+assets). A pull-images-only production host without the repo clone would get nginx falling
+back to its built-in empty config: no `/api/` proxy (API 404s), no SPA fallback (deep
+links broken on refresh), and the stock 1 MB upload cap (model uploads rejected with 413).
+This silently defeats the "zero repo files needed" promise of the production compose.
+
+**Decision: bake config + logos into `nginx/Dockerfile`:**
+- `FROM nginx:1.27-alpine`; `COPY nginx/nginx.conf /etc/nginx/conf.d/default.conf` bakes
+  the proxy config (1024m upload cap, `/api/` proxy, `/health` proxy, SPA fallback).
+- `COPY docs/images/ /usr/share/nginx/img/` bakes the brand assets at a path *outside*
+  the `frontend_dist` volume mount (`/usr/share/nginx/html`), so logos are always present
+  regardless of whether the volume has been populated.
+- `RUN nginx -t` in the build validates the baked config at build time — a bad conf fails
+  the Docker build immediately rather than silently at runtime.
+
+**`/img/` alias (not `/img/` under html root):** mounting `frontend_dist` at
+`/usr/share/nginx/html` at runtime would shadow anything baked at `.../html/img/`.
+Instead the logos live at `/usr/share/nginx/img/` and a dedicated `location /img/ { alias
+/usr/share/nginx/img/; }` block serves them. The `frontend_dist` volume only covers
+`/usr/share/nginx/html` so there is no mount-shadow conflict.
+
+**Optional operator override:** operators running a custom nginx config (e.g. with TLS
+termination) can uncomment the single bind-mount line in `docker-compose.yml`. The
+bind-mount takes precedence over the baked config at runtime, preserving the full
+override path without requiring a custom image build.
+
+**Release-note callout rule:** because operators may run a custom config, `release-prep.md`
+now includes a Step 6b that diffs `nginx/nginx.conf` against the previous release tag. If
+the config changed, it prepends a `⚠️ nginx config changed` callout to the release notes
+so operators know to reconcile their copy. This is the least-surprise upgrade path for
+overriding operators while keeping the baked default zero-friction for everyone else.
+
+**publish.yml matrix:** expanded from a single `build-push` job to a 3-entry matrix
+(backend / frontend / nginx), each with its own `docker/metadata-action` `images:` and
+`build-push-action` params. GHA cache scopes are keyed by `matrix.name` to prevent
+cross-image cache pollution. The same tag scheme (`dev` / `sha-<short>` / `latest` /
+semver) applies to all three.
+
 ## 2026-07-02 — Fixed the perpetual release-PR bypass: required checks bind by BARE job name
 
 Every `dev`→`main` release PR (v0.1.0 through v0.2.1) had to be merged with "bypass rules"

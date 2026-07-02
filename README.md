@@ -412,13 +412,24 @@ docker compose up -d
 
 What happens on first `docker compose up -d`:
 
-- Images are pulled from `ghcr.io/crzykidd/partfolder3d(-frontend):latest`.
+- Images are pulled from `ghcr.io/crzykidd/partfolder3d(-frontend|-nginx):latest`.
   To pin a specific release, edit the image tags in `docker-compose.yml` (e.g. `:0.1.1`).
 - **Migrations run automatically** — the backend entrypoint runs `alembic upgrade head`
   before uvicorn starts (`RUN_MIGRATIONS=true`); the worker waits for the backend to be
   healthy. No manual migration step, no extra container.
 - **Data lives in named volumes** (`db_data`, `redis_data`) and the `./data/` bind-mount
   for thumbnails, backups, and config. Library files stay on your host wherever you mount them.
+- **nginx config is baked into the `partfolder3d-nginx` image** — the reverse proxy config
+  (`client_max_body_size 1024m`, `/api/` proxy, SPA fallback, `/img/` logos) ships inside
+  the image so no host config files are needed. The baked default is the supported path.
+
+> [!TIP]
+> **Custom nginx config** — if you need to adjust the nginx config (e.g. to add TLS
+> termination, change upload limits, or tune proxy timeouts), uncomment the bind-mount
+> line in the `nginx:` section of `docker-compose.yml` and supply your own
+> `./nginx/nginx.conf`. Watch release notes for **"⚠️ nginx config changed"** callouts
+> before upgrading — the callout means the baked default changed and you should reconcile
+> your custom copy.
 
 **First-run wizard** — open **http://localhost:8973** and follow the prompts:
 

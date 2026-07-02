@@ -212,6 +212,31 @@ references remain in `README.md`, `backend/app/version.py`,
 `frontend/package.json`, or `CLAUDE.md`. Report any other occurrences you find
 rather than blindly editing.
 
+## Step 6b — Check for nginx config changes
+
+Run:
+
+```bash
+git diff v<previous-tag>..HEAD -- nginx/nginx.conf
+```
+
+(Replace `<previous-tag>` with the most recent release tag, e.g. `v0.2.2`.)
+
+If `nginx/nginx.conf` has changed since the previous release tag, prepend a
+prominent callout to the changelog section you are about to roll:
+
+```
+> ⚠️ **nginx config changed** — if you are running a custom nginx config
+> (the `./nginx/nginx.conf` bind-mount in `docker-compose.yml`), compare your
+> copy against the updated `nginx/nginx.conf` in this release and reconcile any
+> differences before upgrading.
+```
+
+Place the callout at the very top of the `## [$ARGUMENTS] — <today>` block,
+before the `### Added` / `### Changed` / etc. entries.
+
+If `nginx/nginx.conf` has NOT changed, skip this step with no action.
+
 ## Step 7 — Commit
 
 Stage everything and make ONE commit. Use a conventional-commit subject and a
