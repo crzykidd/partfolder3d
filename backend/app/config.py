@@ -4,7 +4,10 @@ Values are read from environment variables (or a .env file if present).
 See .env.example for documentation of every variable.
 """
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Annotated
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -27,7 +30,30 @@ class Settings(BaseSettings):
     DATA_DIR: str = "/data"
 
     # ---- API / CORS ----
-    ALLOWED_ORIGINS: list[str] = ["http://localhost:8973", "http://localhost:5173"]
+    # Accepts the operator-friendly comma-separated form documented in
+    # .env.example (ALLOWED_ORIGINS=https://a.example,https://b.example), a JSON
+    # array, or empty. NoDecode disables pydantic-settings' JSON-only decoding so
+    # a plain comma-separated value no longer raises a SettingsError at boot.
+    ALLOWED_ORIGINS: Annotated[list[str], NoDecode] = [
+        "http://localhost:8973",
+        "http://localhost:5173",
+    ]
+
+    @field_validator("ALLOWED_ORIGINS", mode="before")
+    @classmethod
+    def _parse_allowed_origins(cls, v: object) -> object:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return []
+            if s.startswith("["):  # explicit JSON array
+                import json
+
+                return json.loads(s)
+            return [part.strip() for part in s.split(",") if part.strip()]
+        return v
 
     # ---- Session cookies ----
     # Set to False for local http:// dev (Docker or plain uvicorn).

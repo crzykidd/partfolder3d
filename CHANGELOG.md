@@ -22,6 +22,13 @@ prefix appears only on git tags and GitHub releases.
 
 ### Fixed
 
+- **`ALLOWED_ORIGINS` no longer crashes the app when set as a comma-separated
+  string** — `.env.example` documents the comma form
+  (`ALLOWED_ORIGINS=https://a,https://b`), but pydantic-settings JSON-decodes
+  list env vars, so a plain/empty value raised `SettingsError: error parsing
+  value for field "ALLOWED_ORIGINS"` at boot (the app exited before serving). The
+  setting now accepts a comma-separated string, a JSON array, or an empty value.
+
 - **Backend startup now logs and fails loudly instead of hanging silently** — the
   container entrypoint previously printed only "applying database migrations…" and
   then went dark on any problem, so a bad DB host/credentials, an unwritable data
