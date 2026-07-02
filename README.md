@@ -11,7 +11,7 @@
 </div>
 
 > [!WARNING]
-> **Early alpha (v0.2.3) — under active development.** This is an early release: expect rough
+> **Early alpha (v0.2.4) — under active development.** This is an early release: expect rough
 > edges, and **breaking changes can land between releases** (database schema, config, or API).
 > It's usable and published — pull the images and follow [Getting started](#getting-started) — but
 > **pin a specific version, back up your data, and read the release notes before upgrading.**
@@ -19,7 +19,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.2.3-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.2.4-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![Stage](https://img.shields.io/badge/stage-alpha-orange)
 ![Code](https://img.shields.io/badge/code-yes-brightgreen)
@@ -31,6 +31,18 @@
 ---
 
 ## What's New
+
+### v0.2.4 (2026-07-02)
+
+Production reliability + admin UX. **Fixes production image display** — nginx was 404-ing
+item thumbnails/renders and logos (`/api/…/*.png`), so nothing rendered; now fixed. Adds
+**fail-loud startup logging** to the backend and frontend containers (version banner, DB
+preflight, writable checks, streamed migrations with a hard timeout, redacted config) so a
+"won't start" is never a silent hang. Fixes `ALLOWED_ORIGINS` crashing boot when set as a
+comma-separated string. Adds an **admin folder browser** for picking a library mount path
+(instead of typing it), stops offering **disabled libraries** as an add-item destination,
+fixes a stale settings-nav link, and makes native **dark-mode dropdowns** render dark.
+See [CHANGELOG.md](CHANGELOG.md) for the full details.
 
 ### v0.2.3 (2026-07-02)
 
@@ -105,7 +117,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.2.3 alpha) — see the
+> The full feature set below is **built and released** (v0.2.4 alpha) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -369,7 +381,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is at the **alpha** stage (v0.2.3).
+Honest snapshot — this project is at the **alpha** stage (v0.2.4).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -534,6 +546,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — alpha (v0.2.3) · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — alpha (v0.2.4) · built by <code>crzykidd</code></sub>
 
 </div>

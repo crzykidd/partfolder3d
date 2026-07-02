@@ -20,15 +20,12 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
-### Fixed
+## [0.2.4] — 2026-07-02
 
-- **Native `<select>` dropdowns no longer render a white option list in dark mode**
-  (fixes #6, #10) — the signup Timezone picker and the Add Asset Library selector
-  showed a white popup because the aurora input background is semi-transparent
-  (`rgba(255,255,255,0.06)`), which over a native option popup's own light base is
-  effectively white, and `color-scheme: dark` alone doesn't reliably darken option
-  lists (notably Chrome on Windows). Options now get an explicit opaque dark surface
-  + light text in dark mode.
+> ⚠️ **nginx config changed** — if you are running a custom nginx config
+> (the `./nginx/nginx.conf` bind-mount in `docker-compose.yml`), compare your
+> copy against the updated `nginx/nginx.conf` in this release and reconcile any
+> differences before upgrading.
 
 ### Added
 
@@ -42,6 +39,14 @@ prefix appears only on git tags and GitHub releases.
   to `/`, `/etc`, `/proc`, or arbitrary absolute paths). (Closes #8)
 
 ### Fixed
+
+- **Native `<select>` dropdowns no longer render a white option list in dark mode**
+  (fixes #6, #10) — the signup Timezone picker and the Add Asset Library selector
+  showed a white popup because the aurora input background is semi-transparent
+  (`rgba(255,255,255,0.06)`), which over a native option popup's own light base is
+  effectively white, and `color-scheme: dark` alone doesn't reliably darken option
+  lists (notably Chrome on Windows). Options now get an explicit opaque dark surface
+  + light text in dark mode.
 
 - **Disabled libraries no longer appear as import destinations** — soft-deleted
   (`enabled = false`) libraries were still offered in the Add Asset modal (both
