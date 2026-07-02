@@ -1,6 +1,9 @@
 # PartFolder 3D backend dependencies
 # Python 3.12
 
+# vtk-osmesa (headless VTK render backend) is published on Kitware's wheel index.
+--extra-index-url https://wheels.vtk.org
+
 # Web framework
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
@@ -31,24 +34,23 @@ text-unidecode==1.3
 # PyYAML for sidecar read/write (already transitive via alembic; pinned here).
 PyYAML==6.0.2
 
-# Rendering (Phase 4)
-# trimesh: parse STL/OBJ/PLY/3MF; vtk: offscreen CPU render (Mesa software rasterizer).
-# pyrender+PyOpenGL: EGL/OSMesa path (tried first; falls back to vtk when unavailable).
+# Rendering (Phase 4 / render-rework-A)
+# trimesh: parse STL/OBJ/PLY/3MF mesh geometry.
+# vtk-osmesa: the OSMesa-built VTK wheel — true offscreen rendering with NO X server
+#      (default render window is vtkOSOpenGLRenderWindow). The stock PyPI `vtk` wheel only
+#      ships vtkXOpenGLRenderWindow and cannot render headless; requires libosmesa6 (see
+#      Dockerfile). VTK is the only render backend; pyrender/PyOpenGL/EGL are unused.
+# lxml: XML parsing for 3MF sidecar files (slice_info.config, model_settings.config,
+#       3dmodel.model color extraction) and trimesh's 3MF geometry loader.
+# networkx: REQUIRED by trimesh for scene-graph ops (multi-body load/split used in
+#       analysis). Previously pulled in transitively by pyrender; must be explicit now
+#       that pyrender is gone, else analyze_item crashes with "No module named 'networkx'".
 # Pillow: image I/O helper. numpy: mesh math.
 trimesh==4.5.3
-# lxml: trimesh's 3MF loader parses the zipped XML via lxml.etree. It's an OPTIONAL
-# trimesh extra (not pulled in by the base install), so without it 3MF renders fail
-# with "No module named 'lxml'" — even though STL/OBJ/PLY parse fine. 3MF is a v1
-# format, so this is required.
 lxml==6.1.1
-pyrender==0.1.45
+networkx==3.6.1
 Pillow==11.1.0
-# pyrender hard-pins PyOpenGL==3.1.0, so this >= line resolves to 3.1.0 here —
-# which LACKS OSMesaCreateContextAttribs (need >=3.1.7) and is too old for the
-# EGL/OSMesa offscreen paths. The Dockerfile installs a newer PyOpenGL AFTER this
-# (a separate `pip install "PyOpenGL>=3.1.7"`) to override the pin in the image.
-PyOpenGL>=3.1.0
-vtk==9.3.1
+vtk-osmesa==9.3.1
 numpy>=1.24.0,<3.0
 
 # Import wizard / URL scraping (Phase 5)

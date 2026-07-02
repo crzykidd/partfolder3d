@@ -170,6 +170,21 @@ export function ImageCarousel({
               Rendered
             </span>
           )}
+          {active.source === 'embedded' && (
+            <span
+              style={{
+                background: 'rgba(16,185,129,0.18)',
+                color: '#10B981',
+                border: '1px solid rgba(16,185,129,0.4)',
+                borderRadius: 20,
+                fontSize: 10,
+                fontWeight: 700,
+                padding: '3px 8px',
+              }}
+            >
+              Slicer
+            </span>
+          )}
         </div>
 
         {/* Top-right: Set-default + Delete buttons (owner only) */}
@@ -332,6 +347,24 @@ export function ImageCarousel({
                         }}
                       >
                         R
+                      </span>
+                    )}
+                    {img.source === 'embedded' && (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          bottom: 2,
+                          right: 2,
+                          background: 'rgba(16,185,129,0.85)',
+                          color: '#fff',
+                          borderRadius: 4,
+                          fontSize: 8,
+                          fontWeight: 700,
+                          padding: '1px 3px',
+                          lineHeight: 1.2,
+                        }}
+                      >
+                        S
                       </span>
                     )}
                   </button>

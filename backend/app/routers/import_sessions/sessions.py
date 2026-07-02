@@ -39,6 +39,7 @@ from ...models.tag import Tag, TagStatus
 from ...models.user import User
 from ...services.item_helpers import (
     _attach_tags,
+    _enqueue_extract_archives,
     _enqueue_render,
     _update_search_vector,
     _write_item_sidecar,
@@ -716,6 +717,13 @@ async def commit_import_session(
 
         # ---- 13. Enqueue render (fire-and-forget) ----
         await _enqueue_render(item.id)
+
+        # ---- 14. Enqueue ZIP extraction when the item contains any ZIP ----
+        # Best-effort: a bad archive must not fail the import.
+        from ...models.file import FileRole as _FileRole  # noqa: PLC0415
+        has_zip = any(rec.role == _FileRole.zip for rec in records)
+        if has_zip:
+            await _enqueue_extract_archives(item.id)
 
         return CommitResponse(
             item_key=item.key,

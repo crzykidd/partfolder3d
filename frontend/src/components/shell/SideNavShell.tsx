@@ -53,10 +53,19 @@ interface NavItemProps {
 function SideNavItem({ item, collapsed, onAction, pendingBadge }: NavItemProps) {
   const Icon = item.icon
   const isAction = Boolean(item.action)
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
   // Section items (e.g. Admin tabs) point at a default sub-route but should
   // stay highlighted across the whole section — match on the prefix instead.
   const sectionActive = item.match ? pathname.startsWith(item.match) : false
+  // Query-aware active for the Catalog / My Favorites pair: both use the /catalog
+  // pathname (differing only by ?favorited=true), and NavLink ignores the query string,
+  // so without this they would highlight together. Tolerant of other query params.
+  const [itemPathname, itemQuery] = (item.path ?? '').split('?')
+  const isCatalogPair = itemPathname === '/catalog'
+  const catalogPairActive =
+    pathname === '/catalog' &&
+    (new URLSearchParams(search).get('favorited') === 'true') ===
+      (new URLSearchParams(itemQuery ?? '').get('favorited') === 'true')
 
   const commonStyle: React.CSSProperties = {
     display: 'flex',
@@ -138,10 +147,13 @@ function SideNavItem({ item, collapsed, onAction, pendingBadge }: NavItemProps) 
   return (
     <NavLink
       to={item.path}
-      end={item.path === '/catalog'}
+      // Exact-match the item's own path so a parent link (e.g. /settings) doesn't also
+      // highlight for a child route (/settings/api-keys). Section items highlight across
+      // their sub-tabs via `sectionActive` (item.match), handled in the style callback below.
+      end
       title={collapsed ? item.label : undefined}
       style={({ isActive }) => {
-        const active = isActive || sectionActive
+        const active = isCatalogPair ? catalogPairActive : isActive || sectionActive
         return {
           ...commonStyle,
           background: active ? 'var(--aurora-pill)' : 'transparent',

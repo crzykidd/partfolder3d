@@ -6,7 +6,7 @@
 
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as api from '@/lib/api'
 import { AURORA_CARD, AURORA_BTN_GHOST } from './styles'
 
@@ -78,6 +78,22 @@ export function SummaryStep({ session, onPrev, onCancelled }: SummaryStepProps) 
   const [commitError, setCommitError] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
 
+  // Fetch libraries to display name instead of raw ID in the summary.
+  // Uses the shared ['libraries'] key so the result is served from cache if
+  // another page (CatalogPage, SettingsPage, etc.) already fetched it.
+  const librariesQ = useQuery({
+    queryKey: ['libraries'],
+    queryFn: api.listLibraries,
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const libraryDisplay =
+    session.library_id == null
+      ? '—'
+      : (librariesQ.data?.find((l) => l.id === session.library_id)?.name ??
+         `ID ${session.library_id}`)
+
   const commitMutation = useMutation({
     mutationFn: () => api.commitImportSession(session.id),
     onSuccess: (result) => {
@@ -126,7 +142,7 @@ export function SummaryStep({ session, onPrev, onCancelled }: SummaryStepProps) 
             />
             <SummaryRow
               label="Library"
-              value={session.library_id != null ? `ID ${session.library_id}` : '—'}
+              value={libraryDisplay}
             />
             <SummaryRow
               label="Source"

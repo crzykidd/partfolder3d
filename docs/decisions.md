@@ -2,6 +2,225 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-02 — Per-file 3MF thumbnail path stored in `object_analysis`
+
+**Problem:** `_reconcile_embedded_thumbnail` wrote the thumbnail to disk and
+created an item-level `Image` row but returned nothing. `analyze_item` had no
+per-file record of which thumbnail came from which `.3mf`, so the UI had to
+fall back to "first embedded image for the item" — wrong when there are two or
+more `.3mf` files.
+
+**Decision:** Have `_reconcile_embedded_thumbnail` return the item-relative path
+(`thumbs/embedded/<sha256>.png`) on success, `None` on disk write failure.
+`analyze_item` injects that path as `thumbnail_path` into the `object_analysis`
+dict before writing it to `File.object_analysis` (JSONB). No migration needed.
+
+**Alternatives rejected:**
+- Adding a `thumbnail_image_id` FK on `File` — requires a migration and adds
+  coupling between File and Image models; JSONB field is simpler and consistent
+  with the existing analysis result schema.
+- Storing the path as a separate `File` column — same migration cost, no gain.
+
+**Backfill:** Cached analyses missing `thumbnail_path` are updated in-place on
+the next `analyze_item` run (sha still matches → skip full analysis, but
+reconcile thumbnail and write `thumbnail_path` into the cached dict).
+
+**Frontend:** `ThreeMfPanel` reads `analysis.thumbnail_path` directly (via
+`fileDownloadUrl`) rather than receiving an `embeddedThumbnail: ImageOut` prop
+threaded from the parent. Removed the Phase-C "first embedded image" fallback
+(`firstEmbeddedImage`) from `DownloadsPanel` entirely.
+
+## 2026-07-02 — Render backend fix: `vtk-osmesa` wheel (the "VTK bundles Mesa" assumption was wrong)
+
+Testing render-rework-A against a freshly built `:dev` image exposed a shipping-blocker: **no
+render backend worked**. `get_backend()` returned `none`, so STL/OBJ thumbnails silently didn't
+generate. Two compounding mistakes in Phase A's stack-slim:
+
+1. The Dockerfile dropped `libxrender1`, but the **stock PyPI `vtk` wheel links libXrender** — so
+   `import vtk` failed with `libXrender.so.1: cannot open shared object file` (ironically, Phase A's
+   own *deleted* comment warned of exactly this).
+2. Even with libXrender restored, the stock `vtk` wheel ships **only `vtkXOpenGLRenderWindow`** (no
+   `vtkOSOpenGLRenderWindow`/`vtkEGLRenderWindow`) — it renders through X11/GLX and **cannot render
+   headless**. Offscreen render aborted with `bad X server connection. DISPLAY=` (the SIGABRT the
+   old Phase-4 note predicted). "VTK bundles its own Mesa software rasterizer, no libs needed" was
+   simply false for the PyPI wheel.
+
+Verified two working fixes empirically in containers built from the same image:
+- **Xvfb + stock `vtk`** — works, but needs a virtual X server (xvfb + xauth + libgl1 + libxrender1)
+  running alongside the worker.
+- **`vtk-osmesa` wheel + `libosmesa6`** — true offscreen (default window becomes
+  `vtkOSOpenGLRenderWindow`), **no X server**, identical PNG output. Chosen: it keeps the VTK-only
+  single-backend architecture, needs no runtime X server, and is a two-file change.
+
+**Fix:** `backend/requirements.txt` → `vtk-osmesa==9.3.1` (+ `--extra-index-url
+https://wheels.vtk.org`, Kitware's wheel index); `Dockerfile` → add `libosmesa6`. No code change —
+`render_mesh._try_vtk()` now passes because offscreen works. Lesson: render-backend viability is
+**not** locally verifiable without a built image + headless probe; always run `get_backend()` + a
+real render inside the actual image before trusting a stack change.
+
+## 2026-07-01 — Asset-detail / 3D-preview rework: read-don't-render, browser viewer, ZIP extraction
+
+The server-side mesh renderer (pyrender EGL→OSMesa→VTK fallback chain) was overloading the
+worker — sliced 3MF files are huge (multi-plate, multi-object, often 2–3 per item) and CPU
+software-rasterizing them per item was the main cost. Reworking the whole asset-detail /
+file-preview experience around a **"read, don't render whenever the file already carries the
+answer"** principle. Locked decisions:
+
+- **Never server-render 3MF.** Sliced 3MF already embeds a slicer thumbnail
+  (`Metadata/plate_1.png` / `thumbnail.png`) and real metadata (`slice_info.config` →
+  grams/meters/print-time per filament; `project_settings.config` → filament hex colors, types,
+  printer/slicer). We extract that (`zipfile` + lxml/JSON, no GL) instead of rendering. Real slice
+  numbers flip `est_method` `"volume"`→`"sliced"`; unsliced 3MF falls back to today's volume
+  estimate.
+- **Server render becomes a bounded fallback for raw STL/OBJ only** — used only when the item has
+  no higher-priority image and the mesh is under a size/triangle cap (over cap → skip, not an
+  error). **Thumbnail priority chain:** user-default > curated (scraped/uploaded) > embedded 3MF
+  thumbnail > STL/OBJ render > placeholder icon.
+- **Render stack collapsed to VTK-only.** VTK bundles Mesa and runs headless with no GL system
+  libs; drops `pyrender`, `PyOpenGL`, OSMesa/EGL code paths and the `libegl1`/`libgbm1`/`libosmesa6`
+  apt packages. Kept: `trimesh` (STL/OBJ metadata + mesh load), subprocess isolation, timeout,
+  SHA-cache, crash recovery. (Image-build + render smoke test is a CI/Docker follow-up — not
+  locally verifiable, consistent with prior render work.)
+- **In-browser viewer** via `@react-three/fiber` + `drei` (three.js STL/OBJ/3MF loaders), **lazy
+  loaded / code-split** so it stays out of the catalog bundle. Loads the raw file from the existing
+  `/api/items/{key}/files/{path}` endpoint — no server conversion. Gated by a configurable
+  ~50 MB cap (`preview_3d` flag on `FileOut`); over cap → static thumbnail only.
+- **ZIP uploads are auto-extracted** into the item dir preserving internal folders — **strip a lone
+  top-level wrapper folder**, **rename on collision** (`cover (1).png`), reject zip-slip, skip
+  `__MACOSX`/`.DS_Store`/`Thumbs.db`, enforce uncompressed-size/file-count caps, don't recurse into
+  nested archives. Original `.zip` **discarded** after success (whole-item ZIP is reconstructable
+  via `build_zip_bundle`). Extracted files flow through the normal inventory→analyze→render path.
+- **UI:** flat `DownloadsPanel` becomes a **folder tree** (built client-side from the `path` field,
+  no API change). 3MF detail is a **collapsible per-file element** — collapsed summary shows totals
+  (sliced badge · print time · filament g · objects · plates · thumb); expanded shows filament rows
+  (color swatch · type · g · m), per-plate breakdown, per-object list.
+- **New `ImageSource.embedded`** for extracted 3MF thumbnails (migration 0021, PG `ALTER TYPE ADD
+  VALUE` — must run outside the alembic transaction). Embedded thumbnails are **excluded from the
+  sidecar** (like renders) — regenerated deterministically from the portable 3MF on scan.
+
+Sequenced as four handoff prompts: **A** backend (read-don't-render foundation + 3MF read + stack
+slim + migration), **B** backend (ZIP extraction), **C** frontend (file tree + 3MF collapsible),
+**D** frontend (browser viewer). Dispatched sequentially — B/C/D branch off A's committed state to
+avoid migration/config/worker-registry conflicts.
+
+### Phase D implementation details (2026-07-01)
+
+- **`@react-three/fiber@8.18.0` (not 9.x) — React 18 constraint.** fiber 9.x
+  requires React `>=19 <19.3`. This project uses React `^18.3.1`. Pinned to fiber
+  8.18.0 (latest 8.x, peer requires `>=18 <19`) + drei 9.121.5 (peer `^18` +
+  `@react-three/fiber ^8`) + three 0.177.0 + @types/three 0.177.0 (three 0.177.x
+  ships no bundled `.d.ts` files; @types/three provides the declarations including
+  `examples/jsm/loaders`).
+- **Code-split via `React.lazy` at module scope in `DownloadsPanel.tsx`.**
+  `const LazyModelViewer = React.lazy(() => import('@/components/viewer/ModelViewer'))`
+  placed at module scope (not inside a component) so Vite sees the dynamic import
+  at build time and splits `ModelViewer.tsx` and all its transitive deps (three,
+  fiber, drei) into `ModelViewer-*.js`. Confirmed: entry chunk `index-*.js`
+  (≈800 kB) does not include three.js; lazy chunk `ModelViewer-*.js` (≈902 kB)
+  contains three.js + fiber + drei.
+- **Viewer state lives in `DownloadsSection`, not in `FileRow`.** Holding
+  `viewerFile` at the panel level means only one viewer modal is ever open;
+  passing `onOpenViewer` down through `TreeNodes` → `FolderNode` → `FileRow` is
+  shallow (2 levels) and avoids the complexity of a global modal registry.
+- **No per-geometry `dispose()` on the lazy-cached STL/OBJ/3MF resources.**
+  `useLoader` in r3f caches loaded resources by URL. Calling `geometry.dispose()`
+  in a cleanup effect would corrupt the cache for subsequent opens. The material
+  (created via `useMemo` and not cached by r3f) IS explicitly disposed on unmount.
+  WebGL GPU memory is freed by the `Canvas` renderer's `gl.dispose()` call (r3f
+  triggers this when the Canvas unmounts). JS heap is GC'd. For this modal-based
+  viewer this is acceptable.
+- **`ThreeMFLoader` cast via `unknown`.** The `ThreeMFLoader` from
+  `three/examples/jsm/loaders/3MFLoader.js` returns `THREE.Group` but r3f's
+  `useLoader` generic uses `new () => THREE.Loader<T>` which ThreeMFLoader's
+  declared type doesn't exactly satisfy. Cast `ThreeMFLoader as unknown as
+  new () => THREE.Loader<THREE.Group>` to satisfy TypeScript without a `@ts-ignore`.
+- **Background via `SceneBackground` component (not Canvas `style`).** Setting
+  `style.background` on the `<Canvas>` div has no effect on the WebGL clear colour.
+  Instead, a `SceneBackground` component uses `useThree()` to access `scene` and
+  sets `scene.background = new THREE.Color(...)`, restoring the prior value on
+  unmount. Theme detection uses `window.matchMedia('(prefers-color-scheme: dark)')`.
+- **`ViewIn3DButton.onView` simplified to `() => void`.** Phase C declared
+  `onView?: (filePath: string, fileId: number) => void`. Phase D simplifies to
+  `onView?: () => void` since the button no longer needs to know its own path —
+  `FileRow` closes over `file.path` and passes a bound handler. The `filePath` and
+  `fileId` props (unused in Phase C's onclick) are removed from the interface.
+
+### Phase C implementation details (2026-07-01)
+
+- **Embedded thumbnail matching is best-effort in Phase C** — the backend stores
+  embedded 3MF thumbnails as `Image` rows with `source=embedded`, but there is no
+  `file_id` FK linking an image to its source 3MF file. Phase C shows the first
+  `source=embedded` image from `item.images` as the thumbnail in all 3MF collapsed
+  panels. When an item has multiple 3MF files with distinct thumbnails this will show
+  the wrong thumbnail for all but the first. Deferred to Phase D (or a future schema
+  addition of `file_id` on `Image`) to do per-file correlation.
+- **3MF Detail toggle is a separate button, not integrated into the folder expand.**
+  The file row has a "Details" button that independently opens the inline ThreeMfPanel.
+  Opening Details auto-passes `defaultExpanded=true` to the panel so no second click
+  is needed. This keeps the Download and View-in-3D affordances always visible without
+  requiring the user to expand the 3MF analysis first.
+- **STL/OBJ ObjectBreakdown section now filters out sliced 3MF files** — it only
+  shows files with `est_method !== 'sliced'`. When every model file is a sliced 3MF
+  the section renders an explanatory redirect note. This avoids duplicating data between
+  the inline 3MF panels (in the file tree) and the Object Breakdown section.
+- **"View in 3D" button is a disabled stub** — Phase C renders the button for every
+  file with `preview_3d=true`, but it is always disabled (opacity 0.45, cursor
+  not-allowed, tooltip "coming in the next update"). The `ViewIn3DButton` component
+  accepts an optional `onView` prop; Phase D passes the real viewer handler there
+  without restructuring the file row.
+- **Top-level folder nodes default to expanded; deeper nodes default collapsed** —
+  `FolderNode` receives `defaultExpanded` from its parent. `TreeNodes` at `depth=0`
+  passes `defaultExpanded={true}`; at `depth>0` it passes nothing (defaults false).
+  This heuristic keeps short item directories fully visible while preventing deep
+  hierarchies from overwhelming the panel.
+
+### Phase B implementation details (2026-07-01)
+
+- **Cap failures are pre-scan only** — file-count, total-uncompressed-size, and zip-bomb ratio
+  caps are all computable from the ZIP central directory (no decompression needed). All cap checks
+  happen before any bytes are written to the item directory, so `ArchiveError` from a cap failure
+  leaves `dest_dir` completely untouched.
+- **Temp dir for in-flight safety** — extraction writes to a sibling temp dir then moves files
+  to `dest_dir` one-by-one. The `finally` block rmtrees the temp dir so a mid-extraction crash
+  or per-file I/O error can never leave half-written files in the item directory. Per-entry
+  errors are recorded in `ExtractResult.errors` (non-fatal) — extraction of other entries
+  continues.
+- **Inventory resync via focused diff** — after extraction the task calls `inventory_item()`
+  then diffs against current File rows (delete rows whose path is gone from disk, add rows for
+  newly found paths). The full `reconcile_one_item()` engine is intentionally not used here:
+  it generates Issues/ChangeLogs which are inappropriate for an automated extraction event.
+- **`_FileRole` import is inline in sessions.py** — `FileRole` was already imported inline in
+  section 6b of `commit_import_session`. Section 14 (the new enqueue step) follows the same
+  inline-import pattern (`# noqa: PLC0415`) to keep the outer function dependency surface narrow.
+- **No new DB migration** — Phase B is purely logic (new task, new helper, new config keys).
+  No schema changes needed.
+
+### Phase A implementation details (2026-07-01)
+
+- **`threemf.py` is GL-free and trimesh-free** — uses only `zipfile` + `lxml` + `json`. No
+  geometry loading: thumbnails are raw PNG/JPG bytes, slice metadata comes from Bambu/Orca XML/JSON
+  config files. Unsliced 3MF still falls through to the existing trimesh `_analyze_3mf()` for
+  the volume estimate.
+- **`RenderCapSkip` is not an error** — a new exception class signals "file is over cap, skip
+  silently" vs `RenderError` which marks the Job failed. Propagated through the subprocess
+  boundary via a `__CAP_SKIP__:` prefix in the err-file, checked before `RenderError` in
+  `run_render_subprocess`. Callers add to `skipped[]` not `errors[]`.
+- **Size cap checked in parent, triangle cap in subprocess** — file size is a single `stat()` call
+  in `render_item` (no trimesh load); triangle count requires loading the mesh, so it's checked
+  inside `render_mesh_file()` after `_load_as_trimesh()` returns. This avoids a double-load in
+  the parent while still giving a clean skip signal.
+- **Thumbnail SHA is of the raw PNG bytes, not the 3MF file** — so the same slicer thumbnail
+  re-used across 3MF revisions stays a cache-hit even when the geometry changes. Stored in
+  `thumbs/embedded/<thumb_sha>.png` inside the item dir.
+- **`model_validator(mode='after')` computes `preview_3d`** in `FileOut` from `path` and `size`
+  fields already populated from the ORM. Avoids building `FileOut` objects manually and
+  keeps the schema self-contained. Settings read lazily inside the validator.
+- **Embedded images excluded from sidecar alongside renders** — `_build_sidecar_data` now
+  excludes both `ImageSource.render` and `ImageSource.embedded` via a `_SIDECAR_EXCLUDED` set.
+- **`_enqueue_render` accepts optional `model_extensions`** — callers who know the file types
+  (post-inventory) can pass `model_extensions=['.3mf']` to skip the Redis enqueue entirely for
+  3MF-only items. Callers that don't know pass `None` and `render_item` handles the per-file skip.
+
 ## 2026-07-01 — CodeQL triage on the first release PR (v0.1.1): 12 fixed, 24 dismissed
 
 The first-ever CodeQL run (release PR #1) raised 36 alerts (1 critical, 20 high, 15 medium) —

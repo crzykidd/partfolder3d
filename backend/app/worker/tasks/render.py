@@ -1,4 +1,4 @@
-"""Render task — render mesh thumbnails."""
+"""Render task — render mesh thumbnails (STL/OBJ/PLY only)."""
 from __future__ import annotations
 
 import logging
@@ -19,10 +19,10 @@ async def _reconcile_render_images(
     - Create Image rows for render PNGs not yet tracked.
     - Delete Image rows whose render PNG no longer exists on disk.
     - No duplicates: match by (item_id, source=render, path).
-    - Default image: if the item has NO is_default image, set one render row as
-      default so the catalog thumbnail appears.  If a curated image is already
-      default, leave it.
-    - Render images sort after curated images (order > max curated order).
+    - Default image: if the item has NO is_default image AND no embedded/curated
+      image exists, set one render row as default.  Priority chain:
+      user-default > curated (scraped/uploaded) > embedded > render.
+    - Render images sort after all curated and embedded images (order > max).
     - Excludes render Images from the sidecar (handled in items.py).
     - Best-effort: caller catches and logs any exception.
 
@@ -35,6 +35,9 @@ async def _reconcile_render_images(
 
     from app.db import SessionLocal  # noqa: PLC0415
     from app.models.image import Image, ImageSource  # noqa: PLC0415
+
+    # Sources that outrank renders in the priority chain
+    _HIGHER_PRIORITY = [ImageSource.scraped, ImageSource.uploaded, ImageSource.embedded]
 
     async def _do_reconcile(db: object) -> None:  # type: ignore[type-arg]
         """Inner function that operates on a given session."""
@@ -81,14 +84,14 @@ async def _reconcile_render_images(
                 await db.delete(row)  # type: ignore[union-attr]
                 del existing_by_path[path]
 
-        # Compute starting order for new render rows
-        curated_order_result = await db.execute(  # type: ignore[union-attr]
+        # Compute starting order for new render rows (after all higher-priority images)
+        higher_order_result = await db.execute(  # type: ignore[union-attr]
             sa.select(sa.func.max(Image.order)).where(
                 Image.item_id == item_id,
-                Image.source.in_([ImageSource.scraped, ImageSource.uploaded]),
+                Image.source.in_(_HIGHER_PRIORITY),
             )
         )
-        max_curated_order = curated_order_result.scalar_one_or_none() or 0
+        max_higher_order = higher_order_result.scalar_one_or_none() or 0
 
         render_order_result = await db.execute(  # type: ignore[union-attr]
             sa.select(sa.func.max(Image.order)).where(
@@ -97,7 +100,7 @@ async def _reconcile_render_images(
             )
         )
         max_render_order = render_order_result.scalar_one_or_none() or 0
-        next_order = max(max_curated_order, max_render_order) + 1
+        next_order = max(max_higher_order, max_render_order) + 1
 
         # Create rows for new render PNGs
         for rp in sorted(current_render_paths):
@@ -114,7 +117,8 @@ async def _reconcile_render_images(
 
         await db.flush()  # type: ignore[union-attr]
 
-        # Set a render as default if the item has NO is_default image
+        # Set a render as default ONLY if the item has NO is_default image AND
+        # no higher-priority (curated or embedded) image exists.
         default_result = await db.execute(  # type: ignore[union-attr]
             sa.select(Image).where(
                 Image.item_id == item_id,
@@ -122,20 +126,32 @@ async def _reconcile_render_images(
             ).limit(1)
         )
         has_default = default_result.scalar_one_or_none() is not None
+
         if not has_default and current_render_paths:
-            first_render_result = await db.execute(  # type: ignore[union-attr]
-                sa.select(Image).where(
+            # Check for any higher-priority image before promoting a render
+            hp_result = await db.execute(  # type: ignore[union-attr]
+                sa.select(sa.func.count()).select_from(Image).where(
                     Image.item_id == item_id,
-                    Image.source == ImageSource.render,
-                ).order_by(Image.order).limit(1)
-            )
-            first_render = first_render_result.scalar_one_or_none()
-            if first_render is not None:
-                first_render.is_default = True
-                log.info(
-                    "_reconcile_render_images: set render %s as default for item %s",
-                    first_render.path, item_id,
+                    Image.source.in_(_HIGHER_PRIORITY),
                 )
+            )
+            hp_count = hp_result.scalar_one() or 0
+
+            if hp_count == 0:
+                # No curated/embedded images — promote the first render
+                first_render_result = await db.execute(  # type: ignore[union-attr]
+                    sa.select(Image).where(
+                        Image.item_id == item_id,
+                        Image.source == ImageSource.render,
+                    ).order_by(Image.order).limit(1)
+                )
+                first_render = first_render_result.scalar_one_or_none()
+                if first_render is not None:
+                    first_render.is_default = True
+                    log.info(
+                        "_reconcile_render_images: set render %s as default for item %s",
+                        first_render.path, item_id,
+                    )
 
         log.info(
             "_reconcile_render_images: item=%s current_renders=%d",
@@ -153,25 +169,26 @@ async def _reconcile_render_images(
 
 
 async def render_item(ctx: dict, item_id: int, retry_of_job_id: str | None = None) -> None:
-    """Render all mesh files for an item into renders/<sha256>.png.
+    """Render STL/OBJ/PLY mesh files for an item into renders/<sha256>.png.
 
     PRD §7: SHA-256-keyed cache — skips files whose render already exists.
     Re-renders if the file hash changed (new sha256 → different cache key).
 
+    3MF files are NEVER rendered here — they have embedded slicer thumbnails
+    extracted by the analyze_item task instead.
+
+    Files exceeding RENDER_MAX_FILE_MB (size) or RENDER_MAX_TRIANGLES are
+    skipped silently (logged, no Image row created, no Job failure).
+
     A render failure marks the Job row failed and is visible in the monitor.
     It does NOT crash the worker and does NOT block item creation or rescan.
 
-    Non-mesh files (Blender/CAD/gcode) are silently skipped with no Job failure.
-
     Error handling:
     - Per-file RenderError / RenderTimeout → appended to errors[], job marked
-      failed at the end but the function RETURNS NORMALLY so arq does not retry
-      (which would create duplicate Job rows).
-    - Unexpected Exception (DB hiccup, I/O error) → job marked failed, function
-      returns normally (same reasoning: no retry, no duplicate rows).
-    - BaseException (asyncio.CancelledError from arq timeout / shutdown) →
-      job marked failed best-effort using a fresh DB session, then re-raised so
-      arq knows the task was cancelled.
+      failed at the end but the function RETURNS NORMALLY so arq does not retry.
+    - RenderCapSkip → appended to skipped[] (not an error).
+    - Unexpected Exception (DB hiccup, I/O error) → job marked failed, returns.
+    - BaseException (asyncio.CancelledError) → finalizes best-effort, re-raises.
     """
     import hashlib  # noqa: PLC0415
     import json  # noqa: PLC0415
@@ -190,11 +207,13 @@ async def render_item(ctx: dict, item_id: int, retry_of_job_id: str | None = Non
         update_job_progress,
     )
     from app.worker.render_mesh import MESH_EXTENSIONS, RenderError  # noqa: PLC0415
-    from app.worker.render_subprocess import RenderTimeout, run_render_subprocess  # noqa: PLC0415
+    from app.worker.render_subprocess import (  # noqa: PLC0415
+        RenderCapSkip,
+        RenderTimeout,
+        run_render_subprocess,
+    )
 
     # ---- Background-render mode gate (before creating a Job row) ----
-    # Read the DB setting first; fall back to the env/config default.
-    # Valid values: "all", "no_images", "off".  Unknown values are treated as "all".
     _VALID_RENDER_MODES = {"all", "no_images", "off"}
     render_mode = settings.RENDER_MODE  # env/config fallback
 
@@ -232,7 +251,7 @@ async def render_item(ctx: dict, item_id: int, retry_of_job_id: str | None = Non
                 )
                 return
 
-    # Create the Job row — capture arq's internal job_id for cancel/abort support
+    # Create the Job row
     async with SessionLocal() as db:
         job_id = await create_job(
             db,
@@ -286,6 +305,8 @@ async def render_item(ctx: dict, item_id: int, retry_of_job_id: str | None = Non
 
         resolution = settings.RENDER_RESOLUTION
         timeout_s = settings.RENDER_TIMEOUT_S
+        max_file_mb = settings.RENDER_MAX_FILE_MB
+        max_triangles = settings.RENDER_MAX_TRIANGLES
         rendered: list[str] = []
         skipped: list[str] = []
         errors: list[str] = []
@@ -293,6 +314,11 @@ async def render_item(ctx: dict, item_id: int, retry_of_job_id: str | None = Non
         for idx, f in enumerate(model_files):
             file_path = item_dir / f.path
             suffix = file_path.suffix.lower()
+
+            # 3MF is never rendered — use embedded slicer thumbnail instead
+            if suffix == ".3mf":
+                skipped.append(f"{f.path} (3MF — uses embedded thumbnail)")
+                continue
 
             # Skip non-mesh types gracefully
             if suffix not in MESH_EXTENSIONS:
@@ -302,6 +328,22 @@ async def render_item(ctx: dict, item_id: int, retry_of_job_id: str | None = Non
             if not file_path.exists():
                 errors.append(f"{f.path}: file not found on disk")
                 continue
+
+            # File-size cap: skip before loading (fast path)
+            try:
+                file_mb = file_path.stat().st_size / (1024 * 1024)
+                if file_mb > max_file_mb:
+                    skipped.append(
+                        f"{f.path} (over size cap {max_file_mb} MB — "
+                        f"file is {file_mb:.1f} MB)"
+                    )
+                    log.info(
+                        "render_item: item=%s %s skipped — %.1f MB > cap %d MB",
+                        item_id, f.path, file_mb, max_file_mb,
+                    )
+                    continue
+            except OSError:
+                pass  # can't stat → let subprocess try and fail gracefully
 
             # Compute sha256 (use cached value or hash now)
             sha = f.sha256
@@ -320,7 +362,10 @@ async def render_item(ctx: dict, item_id: int, retry_of_job_id: str | None = Non
             try:
                 renders_dir.mkdir(parents=True, exist_ok=True)
                 png_bytes = await run_render_subprocess(
-                    file_path, resolution=resolution, timeout_s=timeout_s
+                    file_path,
+                    resolution=resolution,
+                    timeout_s=timeout_s,
+                    max_triangles=max_triangles,
                 )
                 render_path.write_bytes(png_bytes)
                 rendered.append(f.path)
@@ -328,6 +373,9 @@ async def render_item(ctx: dict, item_id: int, retry_of_job_id: str | None = Non
                     "render_item: item=%s rendered %s → renders/%s.png",
                     item_id, f.path, sha[:12],
                 )
+            except RenderCapSkip as exc:
+                skipped.append(f"{f.path}: {exc}")
+                log.info("render_item: item=%s %s", item_id, exc)
             except (RenderError, RenderTimeout) as exc:
                 errors.append(f"{f.path}: {exc}")
                 log.warning("render_item: item=%s %s", item_id, exc)
@@ -339,7 +387,6 @@ async def render_item(ctx: dict, item_id: int, retry_of_job_id: str | None = Non
                 await db.commit()
 
         # Reconcile render Image rows to match current renders/*.png files.
-        # This is best-effort: a DB hiccup must not crash the worker.
         try:
             await _reconcile_render_images(item_id, item_dir, renders_dir)
         except Exception:
@@ -368,9 +415,6 @@ async def render_item(ctx: dict, item_id: int, retry_of_job_id: str | None = Non
         _job_finalized = True
 
     except Exception as exc:
-        # Unexpected pipeline error (DB hiccup, I/O, etc.).
-        # Mark failed and return normally — arq must not retry (that would spawn
-        # a duplicate Job row since we already created one above).
         if not _job_finalized:
             log.exception("render_item: unexpected error for item %s", item_id)
             try:
@@ -383,9 +427,6 @@ async def render_item(ctx: dict, item_id: int, retry_of_job_id: str | None = Non
                 )
 
     except BaseException:
-        # asyncio.CancelledError (arq job_timeout / graceful shutdown).
-        # Best-effort finalization using a FRESH session (the in-flight one may
-        # be poisoned), then re-raise so arq knows the task was interrupted.
         if not _job_finalized:
             log.error(
                 "render_item: cancelled/shutdown for item %s — finalizing job %s as failed",

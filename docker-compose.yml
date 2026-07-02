@@ -1,18 +1,27 @@
-# PartFolder 3D — production docker compose (built images, static frontend).
+# PartFolder 3D — production deploy (pulls published images; no building required).
 #
-# Bring up the full stack:
-#   docker compose up -d --build
+# Quick start:
+#   1. cp .env.example .env          — set a strong POSTGRES_PASSWORD + APP_PORT
+#   2. Edit the library mount(s) below in the `backend` and `worker` sections
+#   3. docker compose up -d
+#   4. Open http://localhost:8973 → complete the first-run wizard
+#   5. Visit http://localhost:8973/quick-start for the in-app Quick Start guide
 #
-# Migrations run automatically: the backend's image entrypoint applies
-# `alembic upgrade head` on startup (RUN_MIGRATIONS=true) before uvicorn; the
-# worker waits for the backend to be healthy. No separate one-shot container,
-# and a fresh stack is usable with no manual steps.
+# Images:
+#   ghcr.io/crzykidd/partfolder3d:latest          (backend + worker)
+#   ghcr.io/crzykidd/partfolder3d-frontend:latest (frontend static build)
+# To pin a specific release swap :latest → e.g. :0.1.1
 #
-# For local development with hot reload, use the self-contained dev file
-# (all services + build in one file):
+# Migrations run automatically: the backend entrypoint applies `alembic upgrade head`
+# before uvicorn starts (RUN_MIGRATIONS=true); the worker waits for the backend to be
+# healthy. No separate migration container and no manual migration step.
+#
+# Data durability: db_data, redis_data, and frontend_dist are named Docker volumes
+# (survive container restarts/upgrades). ./data is bind-mounted for easy host access
+# to thumbnails, config, backups, and logs.
+#
+# For local development with hot reload, use the self-contained dev file instead:
 #   docker compose -f docker-compose.dev.yml up --build
-#
-# Required: copy .env.example → .env and fill in secrets before first run.
 
 services:
 
@@ -50,10 +59,7 @@ services:
   # before uvicorn starts, so migrations are bundled into startup (no separate
   # one-shot container that would show as "exited" in docker ps / Portainer).
   backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: ghcr.io/crzykidd/partfolder3d:dev
+    image: ghcr.io/crzykidd/partfolder3d:latest   # pin a version: :0.1.1
     restart: unless-stopped
     env_file:
       - path: .env
@@ -65,9 +71,15 @@ services:
       RUN_MIGRATIONS: "true"
     volumes:
       - ./data:/data
-      # Library mounts — add one bind-mount per library, e.g.:
-      #   - /mnt/nas/3dprints:/library/main
-      # Then register each path in the app under Admin → Libraries.
+      # ── Library mounts ──────────────────────────────────────────────────────
+      # Mount your 3D-print library directory (or directories) into the container.
+      # Add the SAME bind-mounts to BOTH the `backend` and `worker` sections.
+      # After first login, register each container path on the Libraries admin
+      # page (Admin → Content → Libraries) to make it visible in the catalog.
+      #
+      # Uncomment and edit the host path on the left:
+      #   - /mnt/nas/3dprints:/library/main   # <-- EDIT: host path → container path
+      #   - /mnt/nas/minis:/library/minis     # add as many libraries as you need
     depends_on:
       db:
         condition: service_healthy
@@ -82,10 +94,7 @@ services:
 
   # ── arq background worker ──
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: ghcr.io/crzykidd/partfolder3d:dev
+    image: ghcr.io/crzykidd/partfolder3d:latest   # pin a version: :0.1.1
     restart: unless-stopped
     command: ["python", "worker.py"]
     env_file:
@@ -106,9 +115,12 @@ services:
       LP_NUM_THREADS: "${RENDER_CPU_THREADS:-2}"
     volumes:
       - ./data:/data
-      # Library mounts — mirror the backend mounts exactly so the worker can
-      # read/write files.  Example:
-      #   - /mnt/nas/3dprints:/library/main
+      # ── Library mounts ──────────────────────────────────────────────────────
+      # Mirror the backend library mounts exactly — the worker reads/writes the
+      # same files (thumbnails, imports, etc.). Keep both sections in sync.
+      #
+      #   - /mnt/nas/3dprints:/library/main   # <-- EDIT: same mounts as backend
+      #   - /mnt/nas/minis:/library/minis
     depends_on:
       db:
         condition: service_healthy
@@ -117,16 +129,12 @@ services:
       backend:
         condition: service_healthy   # migrations run in backend startup
 
-  # ── Frontend build (produces static assets into the frontend_dist volume) ──
+  # ── Frontend static build (populates frontend_dist for nginx to serve) ──
   frontend:
-    build:
-      context: frontend
-      dockerfile: Dockerfile
-      target: prod
-    image: ghcr.io/crzykidd/partfolder3d-frontend:dev
+    image: ghcr.io/crzykidd/partfolder3d-frontend:latest   # pin a version: :0.1.1
     volumes:
       - frontend_dist:/dist
-    restart: "no"          # build-and-exit; nginx depends on completion
+    restart: "no"          # runs once to copy assets into the volume; nginx depends on completion
 
   # ── nginx reverse proxy (serves frontend + proxies /api/) ──
   nginx:

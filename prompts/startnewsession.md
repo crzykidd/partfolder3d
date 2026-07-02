@@ -8,89 +8,95 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-06-30 (ALL post-revamp work DONE + pushed + CI green on real code; **AT THE v0.1.0 RELEASE GATE**, awaiting owner go)
+**Last updated:** 2026-07-02 (render/asset-detail rework landed on `dev` — 5 commits, verified against
+a rebuilt image; now 9 commits unreleased on `dev`; no release gate currently open)
 
-> ## CURRENT STATE (2026-06-30) — at the v0.1.0 release gate
-> Everything below is **done, on `origin/dev`, and CI-green** (latest commit `23575fc`; `dev` was
-> pushed for the first time this session — ~88 commits — and CI now runs on dev/main). Health:
-> **481 backend / 229 vitest**, ruff + vite build clean, migrations at **0018**.
+> ## CURRENT STATE (2026-07-02) — render rework done on `dev`; v0.1.1 still latest on `main`
+> **Render / asset-detail rework is complete and verified on `dev`** (5 commits, `247dfa6`→`5797b0c`).
+> A four-phase "read-don't-render" feature + a render-backend fix. Full design + rationale in
+> `docs/decisions.md` (2026-07-02 and 2026-07-01 entries). What landed:
+> - **A `247dfa6`** — 3MF is now READ, not rendered: extracts the embedded slicer thumbnail
+>   (`ImageSource.embedded`, migration **0021**) + real slice metadata (`slice_info.config` /
+>   `project_settings.config` → grams/meters/print-time/filament colors, `est_method="sliced"`).
+>   Server render bounded to STL/OBJ/PLY under size/triangle caps; 3MF never rendered. Thumbnail
+>   priority chain (user > curated > embedded > render). `FileOut.preview_3d` flag.
+> - **B `974b443`** — uploaded/imported ZIPs auto-extract into the item dir (structure preserved,
+>   lone wrapper stripped, junk skipped, collision-renamed, zip-slip/bomb guarded, original discarded).
+> - **C `778f4d0`** — flat downloads list → **folder tree**; 3MF detail is a **collapsible per-file
+>   panel** (totals collapsed; filament/plate/object breakdown expanded).
+> - **D `a58a393`** — in-browser **three.js viewer** (STL/OBJ/3MF), lazy-loaded/code-split
+>   (`@react-three/fiber` 8.x + drei), size-capped ~50MB, wired to a "View in 3D" button.
+> - **fix `5797b0c`** — render backend: the stock PyPI `vtk` wheel CANNOT render headless (X11-only;
+>   `get_backend()` returned `none`). Switched to the **`vtk-osmesa` wheel** (Kitware index) +
+>   `libosmesa6`. Verified against a rebuilt image: `get_backend()=="vtk"`, STL/OBJ/PLY all render.
 >
-> Shipped this session (all committed): AgentQL fallback scraper (MakerWorld/Cloudflare, BYO key +
-> budget, mig 0018) — **confirmed working** (1 call recorded); per-object asset analysis (colors +
-> est. grams, 0016); local-modified tracking + public-share notice (0015); renders-as-gallery-images
-> (0014); per-library×per-OS path prefixes (0017); image upload/delete; item delete-to-trash
-> (cross-device); tag delete/autocomplete/starter-tags; browse-cloud Alpha/Number sort + real counts;
-> AI usage+$cost; job retry; Quick Start page; import management. **Then** the modularization refactor
-> (`api.ts`→`lib/api/*`; `ItemPage`→`pages/item/*`; `ImportWizardPage`→`pages/import-wizard/*`;
-> `worker.py` 1741→160 + `app/worker/tasks/*` + `app/services/item_helpers.py`; `import_sessions.py`→
-> package; `examples/` retired). **Then** nav reorg: admin **17 → 5 tabbed sections** (Content ·
-> Users&Access · AI&Scraping · Jobs&Activity · Data&Backups) via `AdminSectionLayout` + 18 back-compat
-> redirects (route map in `docs/nav-architecture.md`). **Then** docs refresh (README, .env, build-plan,
-> + new features-overview.md / nav-architecture.md).
+> **Verified against the rebuilt `:dev` image** (docker exec probes): migration 0021 live + `embedded`
+> enum, 3MF reader (sliced metadata + thumbnail), ZIP extractor (wrapper/junk/collision), and the
+> VTK-OSMesa render (STL/OBJ/PLY → valid PNGs, no X server). Backend 560/582 pytest green on
+> ephemeral PG; frontend tsc + vitest + vite build clean with three.js code-split confirmed.
+> **Only unverified bit:** actually clicking "View in 3D" in the running UI (needs a real browser).
 >
-> Roadmap steps 1–5 (push → refactor → full test → nav → docs) = **DONE**. Only step 6 remains:
+> **`dev` is now 9 commits ahead of `main`** (the 4 prior polish commits + these 5). All captured in
+> `CHANGELOG.md [Unreleased]`; ship with the next release.
 >
-> ### NEXT: v0.1.0 release (queued — needs owner)
-> 1. Owner: **rebuild + smoke-test** (`docker compose -f docker-compose.dev.yml up -d --build`).
-> 2. `/release-prep 0.1.0` (version bump + CHANGELOG roll + dev→main PR; version source =
->    `backend/app/version.py`, mirror `frontend/package.json`).
-> 3. PR runs CI **+ the FIRST-EVER CodeQL run** (CodeQL only triggers on main PR/push — never run yet;
->    triage any alerts).
-> 4. **Make the 2 CodeQL checks REQUIRED** on `main` branch protection — owner action (GitHub settings
->    or `gh api`); they run but aren't gating yet.
-> 5. Merge PR → publish workflow pushes `:latest` images → `/release-cut v0.1.0` (only after CI green +
->    images published; never re-tag).
+> ---
 >
-> ### OPEN / DEFERRED (post-v0.1.0 ideas, not started)
-> - **Rotate the AgentQL API key** (owner pasted it in chat during testing).
-> - Watch whether AgentQL **tetra proxy adds cost** beyond $0.02/call; default is proxy-on (beat
->   Cloudflare) — can switch off if costly.
-> - Real **slicing** for accurate filament grams/colors (current = volume estimate; `est_method` field
->   reserved). Type-2 **"newer version online"** upstream check (`source_version` captured, unused).
-> - **Trash purge / empty-trash admin UI** (delete-to-trash accumulates under `private_data/data/app/trash`).
-> - Print-log **gcode multi-filament** parsing + `.bgcode` (separate from the asset-analysis path).
+> ## PRIOR STATE (2026-07-01) — v0.1.1 released, no open release gate
+> **v0.1.1 is live on `main` and tagged.** PR #1 (`dev`→`main`) merged as `79ed44b`; tag `v0.1.1`
+> points at `1b3990a` on `main`. `/release-prep 0.1.1` bumped `backend/app/version.py` +
+> `frontend/package.json`, rolled `CHANGELOG.md`, synced docs (ruff clean, tsc clean, **229/229
+> vitest**, vite build clean, both compose configs valid). The PR triggered the **first-ever
+> CodeQL run** — 36 alerts (1 critical/20 high/15 medium, because `main` was empty so it scanned
+> the whole tree at once) — triaged in one pass: **12 fixed in code**, **24 dismissed** as verified
+> false positives via the code-scanning API (full disposition in `docs/decisions.md`, 2026-07-01
+> entry). CI (6 checks) + CodeQL both green; `Build and publish Docker images` pushed `:latest`.
 >
-> **Verify discipline:** backend = `ruff check backend/` (pinned 0.8.4 + `backend/pyproject.toml`
-> config — unpinned/no-config gives false UP042/F841) + ephemeral-PG pytest (`alembic upgrade head`
-> first — conftest needs schema); frontend = tsc + vitest + **`npx vite build`** (real gate; tsc/vitest
-> miss babel parse errors). **Worker has NO hot-reload** (restart for worker/task/scraper edits);
-> backend uses uvicorn --reload. Spawned agents reporting "13 ruff UP042 errors" = ran ruff w/o config
-> (false). CI gotchas already fixed in `ci.yml` (pinned ruff + migrate-before-pytest).
-
-> **UI REVAMP underway (owner-directed, autonomous run).** Owner chose **Aurora** (`/example3`)
-> as the real look. Locked spec:
-> - **Theme:** Aurora, cohesive across both layouts, dark + light. Examples KEPT (not deleted).
-> - **Nav:** per-user setting `nav_layout` (server-side, like theme pref); **default by role:
->   admin→sidebar, others→top-bar**; user-menu toggle overrides; ONE shared `navConfig` →
->   `TopNavShell` + `SideNavShell`.
-> - **Two customizable regions (one widget framework):** (1) **top stat strip** = customizable
->   stat tiles, role-based defaults, user-addable, flexible sizing/rows (admin may want 2 rows of
->   smaller tiles); (2) **right rail** = collapsible widget panel, add/remove/reorder, **default
->   = Quick Import widget**, extensible registry. Per-user layout persisted server-side; real data.
-> - **Phasing:** A1 = Aurora shell + switchable nav + version/release-notes + default stat strip +
->   Quick Import rail (real data, functional, not-yet-customizable). A2 = the widget framework
->   (make both regions customizable). B = restyle real pages (catalog/item/import/admin) to Aurora.
-> - Reference screenshot the owner circled: `private_data/screenshot/` (right Quick-Import panel
->   = the future widget rail).
-
-> **Phase 10a hardening landed** (`a2b612b`): fixed **2 HIGH SSRF holes** (scraper + instance
-> import now block internal/link-local/metadata IPs via `backend/app/storage/ssrf_guard.py`);
-> verified path-traversal/admin-gating/share-privacy/key-masking (tests added); migration **0010**
-> adds 8 hot-path indexes; **356 pytest** (DNS-rebinding SSRF variant deferred + documented;
-> 100k load-test deferred — needs a seed harness).
-
-> **Release machinery still UNFILLED (Phase 10b, orchestrator to do after 10a):** version
-> source-of-truth (only `frontend/package.json`=0.1.0 today; no bare VERSION file), the
-> `.claude/commands/release-{prep,cut}.md` placeholders (36 + 17), and there's no `CHANGELOG.md`.
-> Fill these to make `/release-prep` + `/release-cut` functional. **Do NOT cut the release**
-> until after the UI revamp + explicit owner go.
-
-> **UI prototypes for owner review** are live at `/examples`, `/example1` (Mission Control —
-> dense dark left rail), `/example2` (Atelier — airy light top-nav + Radix dropdowns),
-> `/example3` (Aurora — glassy dark + ⌘K palette). Public mock routes (no auth), under
-> `frontend/src/pages/examples/`. Owner picks one → revamp real pages to match, then delete the
-> losers. Requirements captured: collapsible localStorage sidebar, expand/collapse groups,
-> role-based menus, version + release-notes bottom-left.
+> **Since the tag, 4 more commits landed on `dev`** (pushed to `origin/dev`, matches local exactly
+> — nothing queued for release):
+> - `97dcd1b` docs — `docker-compose.yml` converted to a **production, image-based deploy**
+>   (`build:` blocks removed, pulls `ghcr.io/crzykidd/partfolder3d[-frontend]:latest`); README
+>   Getting Started rewritten production-first with a Quick Start (`/quick-start`) callout.
+>   `docker-compose.dev.yml` (build-from-source, hot-reload) untouched.
+> - `f2b6353` / `b53b8d9` — sidebar highlight fixes: a nav item now highlights only its own route
+>   (API Keys no longer also lights up Settings), and Catalog vs. My Favorites are distinguished by
+>   the `?favorited=true` query since they share the `/catalog` pathname.
+> - `2ff3c4c` — QuickStart page's Import/Backups steps now get real done-detection (item count /
+>   backup existence); import wizard Summary step shows the resolved library **name** instead of
+>   its numeric ID.
+>
+> All four are captured in `CHANGELOG.md [Unreleased]`. **`dev` is 4 commits ahead of `main`** —
+> these ship next time the owner wants a release (v0.1.2, or bundled with whatever's next).
+>
+> ### OPEN ITEMS
+> - **CodeQL still NOT a required check on `main`.** Confirmed via
+>   `gh api repos/crzykidd/partfolder3d/branches/main/protection/required_status_checks` — contexts
+>   are still just the original 6 CI jobs (`Lint`/`Config validation`/`Migration check`/
+>   `Compose validation`/`Image build`/`Test`); the 2 CodeQL contexts run on PRs but don't gate
+>   merges yet. Owner action (GitHub branch-protection settings or `gh api`).
+> - **Rotate the AgentQL API key** (owner pasted it in chat during earlier testing) — still
+>   outstanding.
+> - Watch whether AgentQL **tetra proxy adds cost** beyond $0.02/call (default proxy-on, beats
+>   Cloudflare) — switch off if it gets costly.
+> - Real **slicing** for accurate filament grams/colors (currently a volume estimate;
+>   `est_method` field reserved for when this lands). Type-2 **"newer version online"** upstream
+>   check (`source_version` captured, unused).
+> - **Trash purge / empty-trash admin UI** — delete-to-trash accumulates under
+>   `private_data/data/app/trash` with no way to clear it from the UI.
+> - Print-log **gcode multi-filament** parsing + `.bgcode` support.
+>
+> **Verify discipline (unchanged):** backend = `ruff check backend/` (pinned 0.8.4 +
+> `backend/pyproject.toml` config — unpinned/no-config gives false UP042/F841) + ephemeral-PG
+> pytest (`alembic upgrade head` first, now at migration **0021**, 21 revisions; suite = **582**);
+> frontend = tsc + vitest (**279 passing** after the render rework) + **`npx vite build`** (real
+> gate; tsc/vitest miss babel/esbuild parse errors). **Worker has NO hot-reload** (restart for
+> worker/task/scraper edits); backend uses uvicorn --reload.
+>
+> **⚠️ Render-backend gotcha (2026-07-02):** headless rendering uses the **`vtk-osmesa`** wheel
+> (Kitware index `https://wheels.vtk.org`) + `libosmesa6` — NOT the stock PyPI `vtk` wheel, which is
+> X11-only and silently yields `get_backend()=="none"`. Render viability is **only** verifiable in a
+> **built image**: `docker exec <worker> python -c "from app.worker.render_mesh import get_backend;
+> print(get_backend())"` must print `vtk`, then render a test STL. Never trust a render/Dockerfile
+> change from unit tests alone.
 
 ---
 
@@ -113,19 +119,15 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 
 ## Current status
 
-- **ALL PHASES 0–10 COMPLETE** on `dev`. Full app built + hardened. **Full test pass GREEN**
-  (2026-06-28): **356 backend pytest** (real PG, alembic at `0010`), **ruff clean**, **131 vitest**,
-  **tsc clean**, both compose configs valid. Latest: Phase 9 (`930a075`/`da49b50`), Phase 10a
-  hardening (`a2b612b`), Phase 10b release-machinery (`867c460`).
-- **NEXT ACTIONS (awaiting owner):**
-  1. **Pick a UI theme** from `/examples` (`/example1` Mission Control, `/example2` Atelier,
-     `/example3` Aurora) → then **UI revamp**: restyle real pages to the chosen direction (left/
-     top nav, collapsible groups, role-based menu, version+release-notes), delete the losing
-     prototypes under `frontend/src/pages/examples/`. This is the main remaining build.
-  2. **Cut v1** when owner gives the go: `/release-prep <version>` → review/merge PR → wait for
-     main CI green + `:latest` published → `/release-cut <version>`. Machinery is filled + ready
-     (version source `backend/app/version.py`=0.1.0). **Held for explicit go** (outward-facing).
-- **Release/UI both DEFERRED to owner.** Do NOT cut the release or push to main without the go.
+- **v0.1.1 released and tagged on `main`** (PR #1 merged `79ed44b`, tag at `1b3990a`). All of
+  Phases 0–10 + the Aurora UI revamp + issue-resolution framework (Phases 1–3) + render
+  reliability/lifecycle work shipped in that release. See the CURRENT STATE block above for the
+  full detail and what's landed on `dev` since.
+- **NEXT ACTIONS:** none blocking — no release gate is currently open. When the owner wants the
+  next release: `/release-prep <version>` (rolls the 4 unreleased `dev` commits already in
+  `CHANGELOG.md [Unreleased]`) → review/merge PR → wait for main CI + CodeQL green + `:latest`
+  published → `/release-cut <version>` (never re-tag). Also worth doing at that point: make the
+  2 CodeQL checks required on `main` branch protection (still open, see above).
 - **Deploy-readiness fix (committed):** scaffolding gap (since Phase 0) — nothing ran migrations
   on startup, so a fresh stack came up on an empty DB and the wizard failed. Fixed by **bundling
   migrations into the backend's image entrypoint** (`backend/docker-entrypoint.sh`:
@@ -149,8 +151,8 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
   `apiFetch`/`apiFetchForm` CSRF wrapper. **There is NO Mantine and NO toast library** — a 7a-
   written handoff wrongly said "Mantine"; corrected before dispatch. Tell future frontend
   prompts this explicitly.
-- **Branch:** `dev` (work here). `main` is protected. Nothing pushed/PR'd yet (no dev→main
-  until a working product exists).
+- **Branch:** `dev` (work here). `main` is protected, PR-only — proven out by PR #1 (`dev`→`main`,
+  merged, tagged v0.1.1). `origin/dev` is currently pushed and matches local exactly.
 - **Done so far:** Phases 0–6a committed on `dev`:
   - **0** scaffolding/dev loop; **1** identity/first-run/settings; **2** libraries/storage/
     sidecar/item core (atomic rename); **3** catalog UI (FTS, tag cloud, browse, item page,
@@ -237,22 +239,29 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 | `CLAUDE.md` | Operating model + adopted-standard snippets. |
 | `standards.md` | Adopted standards + pinned versions + deviations. |
 | `prompts/` | Handoff queue; `prompts/done/` + `prompts/failed/` archives. |
-| `.claude/commands/release-{prep,cut}.md` | Release slash commands (parked; placeholders unfilled). |
+| `.claude/commands/release-{prep,cut}.md` | Release slash commands (filled + working; used for v0.1.1). |
 | `.github/workflows/` | CI (`ci`, `codeql`, `publish`, `retention`). |
 | `docs/images/` | Brand assets + usage README. |
 
 ## Open threads (carry these forward)
 
 - [x] **`homelab-configs` registry entry pushed** to Gitea by the user (2026-06-27).
-- [ ] **After Phase 0 CI is green:** add `CodeQL / Analyze (python)` +
-      `CodeQL / Analyze (javascript-typescript)` to `main` required status checks (deferred
-      because CodeQL errors on an empty source tree).
-- [ ] **Remove remaining CI bootstrap guards** per-piece as later phases add them.
-- [ ] **`release-prep`/`release-cut` placeholders** stay parked until a version file + CI
-      exist (Phase 0 adds the version file; fill at first release).
-- [ ] **PRD §18 remaining notes** to honor when their phase arrives: instance-encryption-key
-      provisioning/rotation (Phase 1), move journaling/crash recovery (Phase 2/6), title
-      sanitization (Phase 2).
+- [x] **`release-prep`/`release-cut` filled and proven** — used successfully for v0.1.1
+      (2026-07-01).
+- [ ] **Add the 2 CodeQL contexts to `main` required status checks** — they now run (first CodeQL
+      pass was on the v0.1.1 PR, 36 alerts triaged) but branch protection's
+      `required_status_checks` still only lists the original 6 CI jobs. Owner action.
+- [x] **Render / asset-detail rework landed on `dev`** (2026-07-02, 5 commits `247dfa6`→`5797b0c`) —
+      3MF read-not-render, ZIP auto-extract, file-tree + 3MF collapsible UI, in-browser three.js
+      viewer, vtk-osmesa render fix. Verified against a rebuilt image (see CURRENT STATE).
+- [ ] **Manual check outstanding:** click "View in 3D" on an STL in the running UI
+      (http://localhost:8973) — the only render-rework piece not machine-verifiable here.
+- [ ] **9 unreleased commits sit on `dev`** (4 prior polish commits + the 5 render-rework commits) —
+      captured in `CHANGELOG.md [Unreleased]`, ship with the next release. Re-verify frontend
+      (tsc/vitest/vite build) + backend (ruff/ephemeral-PG pytest, migration 0021) at release-prep.
+- [ ] **Rotate the AgentQL API key** (owner pasted it in chat during earlier testing).
+- [ ] **PRD §18 remaining notes** to honor when relevant: move journaling/crash recovery,
+      real slicing for filament estimates, trash purge UI (see OPEN ITEMS above for detail).
 
 ## Before-`/clear` checklist
 

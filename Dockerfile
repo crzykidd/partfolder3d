@@ -25,35 +25,22 @@ ENV OMP_NUM_THREADS=2 \
 # ---- deps: system libraries + Python packages (cached layer) ----
 FROM base AS deps
 
-# GL/rendering libraries for headless mesh thumbnail generation (Phase 4).
-# Priority order tried by render_mesh.py:
-#   1. pyrender + EGL   (libgl1, libegl1, libgbm1)
-#   2. pyrender + OSMesa (libosmesa6 — Mesa 22+ has OSMesaCreateContextAttribs)
-#   3. VTK offscreen    (Mesa software rasterizer built into the VTK wheel; no extra libs needed)
-# libglib2.0-0 and libfreetype6 are transitive deps of Mesa / Pillow.
-# All are CPU-only — no GPU drivers installed.
+# System libraries for headless rendering (render-rework-A: VTK-only stack).
+# The `vtk-osmesa` wheel does true offscreen rendering via OSMesa — no X server needed —
+# but it links against the system OSMesa runtime, so libosmesa6 is REQUIRED (without it
+# `import vtk`/render falls back to "no backend"). The stock PyPI `vtk` wheel is NOT used:
+# it only ships vtkXOpenGLRenderWindow and cannot render on a headless host.
+# libgl1: pulled in by the Mesa/OSMesa stack. libglib2.0-0 + libfreetype6: VTK / Pillow deps.
+# All CPU-only — no GPU drivers installed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libgl1 \
-        libegl1 \
-        libgbm1 \
         libosmesa6 \
+        libgl1 \
         libglib2.0-0 \
         libfreetype6 \
-        libxrender1 \
-        libxi6 \
     && rm -rf /var/lib/apt/lists/*
-# libxrender1 + libxi6: pyrender imports pyglet at module load (and the vtk
-# wheel links libXrender), so without these X11 client libs `import pyrender`
-# and `import vtk` both fail with "libXrender.so.1: cannot open shared object
-# file" — leaving NO working render backend even though libGL/EGL/OSMesa exist.
 
 COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-# pyrender hard-pins PyOpenGL==3.1.0, which lacks OSMesaCreateContextAttribs and
-# is too old for the EGL/OSMesa offscreen paths render_mesh.py needs. Override to
-# a newer PyOpenGL after the pinned install (3.1.0 is overly strict; pyrender
-# works fine with 3.1.7+). Without this, get_backend() returns "none".
-RUN pip install --no-cache-dir "PyOpenGL>=3.1.7"
 
 # ---- runtime: copy application source ----
 FROM deps AS runtime

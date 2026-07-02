@@ -24,6 +24,13 @@ class RenderTimeout(Exception):
     """Raised when the render child process exceeds RENDER_TIMEOUT_S."""
 
 
+class RenderCapSkip(Exception):
+    """Raised when the child signals a cap-skip (size or triangle limit exceeded).
+
+    Not treated as an error — the caller should log and silently skip.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Child-process entry point
 # ---------------------------------------------------------------------------
@@ -34,18 +41,24 @@ def _render_worker(
     resolution: int,
     out_file: str,
     err_file: str,
+    max_triangles: int = 1_000_000,
 ) -> None:
     """Top-level entry point executed in the spawned child process.
 
     Writes PNG bytes to *out_file* on success; writes an error string to
     *err_file* on failure.  Both paths are pre-created temporaries.
     Imports are deferred so the fresh interpreter loads them clean.
+
+    Cap-skip (file too large) is signalled with the ``__CAP_SKIP__:`` prefix
+    so the parent can raise ``RenderCapSkip`` (not treated as an error).
     """
-    from app.worker.render_mesh import RenderError, render_mesh_file  # noqa: PLC0415
+    from app.worker.render_mesh import RenderCapSkip, RenderError, render_mesh_file  # noqa: PLC0415
 
     try:
-        png = render_mesh_file(Path(path_str), resolution=resolution)
+        png = render_mesh_file(Path(path_str), resolution=resolution, max_triangles=max_triangles)
         Path(out_file).write_bytes(png)
+    except RenderCapSkip as exc:
+        Path(err_file).write_text(f"__CAP_SKIP__: {exc}")
     except RenderError as exc:
         Path(err_file).write_text(str(exc))
     except Exception as exc:  # noqa: BLE001
@@ -61,6 +74,7 @@ async def run_render_subprocess(
     path: Path,
     resolution: int,
     timeout_s: int,
+    max_triangles: int = 1_000_000,
 ) -> bytes:
     """Run ``render_mesh_file`` in a spawned child; return PNG bytes.
 
@@ -79,6 +93,7 @@ async def run_render_subprocess(
 
     Raises:
         RenderTimeout:  Child exceeded the wall-clock timeout and was killed.
+        RenderCapSkip:  Child reported a cap-skip (size or triangle limit).
         RenderError:    Child reported a render failure.
     """
     from app.worker.render_mesh import RenderError  # noqa: PLC0415
@@ -93,7 +108,7 @@ async def run_render_subprocess(
 
     proc = ctx.Process(
         target=_render_worker,
-        args=(str(path), resolution, out_path, err_path),
+        args=(str(path), resolution, out_path, err_path, max_triangles),
         daemon=True,
     )
 
@@ -119,6 +134,8 @@ async def run_render_subprocess(
 
         # Child exited — read results.
         err_text = Path(err_path).read_text().strip()
+        if err_text.startswith("__CAP_SKIP__:"):
+            raise RenderCapSkip(err_text[len("__CAP_SKIP__:"):].strip())
         if err_text:
             raise RenderError(err_text)
 

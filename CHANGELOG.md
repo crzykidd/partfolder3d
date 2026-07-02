@@ -20,7 +20,142 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
-_Nothing yet._
+## [0.2.0] — 2026-07-01
+
+### Added
+
+- **Per-file 3MF thumbnails** — each `.3mf` file now carries its own thumbnail
+  path in `File.object_analysis.thumbnail_path` (item-relative, written by the
+  analysis worker). The 3MF collapsible panel displays the file's own embedded
+  thumbnail instead of the first embedded image for the whole item, fixing the
+  wrong-image bug when an item has two or more `.3mf` files. Existing cached
+  analyses are backfilled on the next analysis run. The field is generic
+  (`thumbnail_path`) so STL/OBJ server renders can populate it in the future.
+
+### Fixed
+
+- 3MF panels no longer share one thumbnail when an item has multiple `.3mf`
+  files — each panel now shows the thumbnail extracted from its own file.
+
+- **File-tree browser** — the flat file list in the "Files & Downloads" section
+  is replaced with a collapsible folder hierarchy built client-side from each
+  file's path. Folders expand/collapse with chevron controls; top-level folders
+  default to expanded. Per-file row shows: role badge · file size · Download
+  link. Image files show a small inline thumbnail.
+- **In-browser 3D viewer** — clicking "View in 3D" on any `.stl`, `.obj`, or
+  `.3mf` file (those with `preview_3d=true`) opens an interactive modal canvas
+  powered by three.js + `@react-three/fiber`. Supports rotate/zoom/pan via
+  OrbitControls; auto-fits the camera to the model bounding box on load; applies
+  a two-light setup with a neutral material; background matches the active
+  light/dark theme. Shows a loading-progress overlay while the mesh is fetching
+  and a graceful error state if the file cannot be parsed. The viewer is
+  lazy-loaded (`React.lazy` + Suspense) so three.js ships in its own async
+  chunk and never inflates the initial page bundle. Over-cap files (where
+  `preview_3d=false`) continue to show only the static thumbnail; no button is
+  offered. ESC key or clicking outside the card closes the viewer.
+- **3MF collapsible detail panel** — each `.3mf` file with a completed
+  analysis shows a "Details" toggle in the file tree. The collapsed summary
+  shows: Sliced/Unsliced badge · total print time · total filament weight ·
+  plate count · filament count · embedded slicer thumbnail. Expanded view
+  shows per-filament rows (color swatch · type · grams · meters), per-plate
+  breakdown (index · time · weight), and the per-object/filament-slot list.
+  Sliced data is clearly labelled "Real slicer data"; unsliced shows a
+  volume-estimate warning.
+- **"Slicer" badge on embedded thumbnails** — images with `source=embedded`
+  (extracted from `.3mf` files by Phase A) now appear in the image carousel
+  with a green "Slicer" badge, consistent with the "Rendered" badge for
+  server-rendered images. The thumbnail strip also shows a small "S" indicator.
+- **STL/OBJ Object Breakdown is now collapsible per-file** — the "Object
+  Breakdown" section uses the same expand/collapse pattern as the 3MF panel,
+  with each analyzed file starting collapsed. When all model files are sliced
+  3MFs the section shows a note directing users to the inline panels above.
+
+- **ZIP auto-extraction** — uploaded or imported ZIP files are automatically
+  extracted into the item directory when the import is committed. Internal folder
+  structure is preserved; a lone top-level wrapper folder is stripped; filenames
+  that collide with existing files are renamed (`cover (1).png`, …). Zip-slip
+  paths, `__MACOSX/`, `.DS_Store`, `Thumbs.db`, and `desktop.ini` entries are
+  discarded. Nested archives (`.zip` inside `.zip`) are extracted as plain files
+  (no recursion). Size/count caps (`ZIP_MAX_UNCOMPRESSED_MB` default 2048,
+  `ZIP_MAX_FILES` default 10 000) and a zip-bomb ratio guard prevent runaway
+  extractions. The original `.zip` is discarded after a successful extraction
+  (it is reconstructable via the existing ZIP-bundle download). Extracted files
+  flow through the normal inventory → analyze → render pipeline.
+- **3MF embedded thumbnail extraction** — the analysis worker now reads the
+  slicer-embedded thumbnail from `.3mf` files (`Metadata/plate_1.png` preferred)
+  and creates a tracked `Image` row (`source=embedded`). Embedded thumbnails appear
+  in the item image carousel and are used as the default image when no scraped or
+  uploaded image exists.
+- **3MF sliced metadata** — when a `.3mf` was sliced by Bambu Studio / OrcaSlicer,
+  `analyze_item` reads `slice_info.config` (per-plate print time, filament grams/meters)
+  and `project_settings.config` (filament colours, printer model) instead of the
+  volume estimate. `est_method` is set to `"sliced"` in `object_analysis`, signalling
+  that numbers come from the slicer (not a rough volume estimate).
+- **`preview_3d` flag on `FileOut`** — `GET /api/items/{key}` now includes
+  `preview_3d: bool` for each file. True when the file extension is `.stl`, `.obj`,
+  or `.3mf` and the file size is ≤ `BROWSER_PREVIEW_MAX_MB` (default 50 MB).
+  Used by Phase C/D frontend to decide whether to show the in-browser 3D viewer.
+- **New config settings** — `RENDER_MAX_FILE_MB` (default 50), `RENDER_MAX_TRIANGLES`
+  (default 1 000 000), `BROWSER_PREVIEW_MAX_MB` (default 50) in `config.py`.
+
+### Changed
+
+- **Server rendering bounded to STL/OBJ/PLY only** — `.3mf` files are never rendered
+  server-side; embedded slicer thumbnails are used instead. STL/OBJ/PLY files over
+  `RENDER_MAX_FILE_MB` or `RENDER_MAX_TRIANGLES` are skipped silently (no render, no
+  error, no Image row).
+- **Thumbnail priority chain enforced** — renders are only set as the default image when
+  no scraped, uploaded, or embedded image exists. Previously renders could displace
+  higher-priority images in the default slot.
+- **Render stack collapsed to a single headless VTK backend** — `pyrender`, `PyOpenGL`,
+  and the EGL/OSMesa detection/code paths removed. The **`vtk-osmesa`** wheel (Kitware
+  wheel index) is the sole render backend, doing true offscreen rendering with no X
+  server. This **requires `libosmesa6`**; `libegl1`, `libgbm1`, `libxrender1`, and
+  `libxi6` are removed from the Dockerfile. (The stock PyPI `vtk` wheel is X11-only and
+  cannot render headless — see `docs/decisions.md` 2026-07-02.) **`networkx`** is now an
+  explicit dependency (required by trimesh for scene-graph ops during analysis; it was
+  previously pulled in transitively by `pyrender`).
+- **Embedded thumbnails excluded from sidecar** — like renders, embedded 3MF thumbnails
+  are regenerated deterministically on scan and are not written to `sidecar.yaml`.
+- **`ImageSource.embedded` added** — migration 0021 adds the new enum value to
+  PostgreSQL via `ALTER TYPE … ADD VALUE` (outside the transaction, as required by PG).
+
+### Fixed
+
+- **README production-install guide** — `## Getting started` now documents the
+  primary production path (pull published images, configure `.env` + library mounts,
+  `docker compose up -d`) and prominently links the in-app **Quick Start** guide at
+  `/quick-start` for guided first steps (add a library, load Starter Tags, enable AI,
+  schedule backups). A "Build from source (dev)" subsection for contributors is kept as
+  a collapsible secondary path.
+
+### Changed
+
+- **`docker-compose.yml` is now a production, image-based deploy** — `build:` blocks
+  removed; `backend` and `worker` pull `ghcr.io/crzykidd/partfolder3d:latest`; `frontend`
+  pulls `ghcr.io/crzykidd/partfolder3d-frontend:latest`. A version-pin comment (`:0.1.1`)
+  is shown next to each image tag. Library mount placeholders are prominently commented
+  for end-user editing; named volumes (`db_data`, `redis_data`, `frontend_dist`) are
+  preserved for production durability. Header updated with a 5-step quick-start block.
+- **`docker-compose.dev.yml` remains the build-from-source dev stack** — no changes;
+  it continues to build all images locally with hot reload for contributors.
+
+### Fixed
+
+- **Sidebar over-highlighting** — a nav item is now highlighted only for its own route:
+  selecting "API Keys" (`/settings/api-keys`) no longer also highlights the parent
+  "Settings" (`/settings`). Section items still highlight across their sub-tabs.
+- **Catalog / My Favorites highlighted together** — the sidebar now distinguishes the two
+  by the `?favorited=true` query (they share the `/catalog` pathname), so selecting one no
+  longer highlights both. Tolerant of other catalog query params (search/filters).
+- **Quick Start "Import" and "Backups" steps never showed a Done badge** — added live
+  status detection for both: the Import step flags done when `total > 0` items exist
+  (universal, works for non-admin users); the Backups step flags done when at least one
+  backup record exists (`GET /api/admin/backups`, admin-only). Both follow the existing
+  best-effort pattern (badge hidden while loading or on error).
+- **Import wizard showed library ID instead of name** — the Summary step now resolves
+  `library_id` to the library name via `listLibraries()` (shared `['libraries']` cache
+  key), falling back to `ID <n>` while loading and `'—'` when no library is set.
 
 ---
 

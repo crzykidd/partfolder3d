@@ -11,6 +11,7 @@ Phase 6: library_reconcile_scan — daily scheduled reconciliation scan;
 Phase 7: build_zip_bundle extended with include_print_history support;
          share_link_expiry_cleanup — daily cleanup of expired/old share links.
 Phase 9: db_backup — daily in-process DB + config backup with retention pruning.
+Phase B: extract_archives — auto-extract uploaded/imported ZIPs into the item dir.
 """
 
 import asyncio
@@ -69,6 +70,7 @@ SCHEDULED_JOB_REGISTRY: dict[str, tuple[str, str]] = {
 # Task imports (from app.worker.tasks.*)
 # ---------------------------------------------------------------------------
 from app.worker.tasks.analysis import analyze_item  # noqa: E402
+from app.worker.tasks.archive import extract_archives  # noqa: E402
 from app.worker.tasks.bundles import build_zip_bundle  # noqa: E402
 from app.worker.tasks.import_session import (  # noqa: E402, F401
     _try_agentql_fallback,
@@ -234,6 +236,8 @@ class WorkerSettings:
         apply_review_item,
         # Phase 16
         analyze_item,
+        # Phase B (render-rework-B)
+        extract_archives,
     ]
 
     cron_jobs = [

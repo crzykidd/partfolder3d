@@ -18,6 +18,7 @@ class ImageSource(str, enum.Enum):
     scraped = "scraped"
     uploaded = "uploaded"
     render = "render"
+    embedded = "embedded"
 
 
 class Image(Base):
