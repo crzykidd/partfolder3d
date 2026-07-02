@@ -20,6 +20,12 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Changed
+
+- CI backend test suite now runs in parallel via `pytest-xdist -n auto` with
+  per-worker Postgres databases; each xdist worker creates and migrates its own
+  isolated DB at session start, eliminating shared-DB contention.
+
 ## [0.2.0] — 2026-07-01
 
 ### Added

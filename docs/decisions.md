@@ -2,6 +2,36 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-02 — pytest-xdist: per-worker databases, DATABASE_URL set before app imports
+
+**Problem:** Enabling `pytest-xdist -n auto` on a single shared Postgres DB causes
+transaction-rollback isolation to break — workers contend on the same DB and
+transactions from different tests interleave or block each other.
+
+**Decision:** At the top of `conftest.py` (before any `from app import ...`), detect
+`PYTEST_XDIST_WORKER` and rewrite `os.environ["DATABASE_URL"]` to a per-worker DB name
+(e.g. `partfolder3d_gw0`).  A session-scoped `autouse` fixture then drops and recreates
+that DB and runs `alembic upgrade head` against it.  Serial runs (`PYTEST_XDIST_WORKER`
+unset) are left entirely unaffected.
+
+**Why top-of-file env override matters:** `app.config.Settings()` is instantiated at
+module load time; `app.db` creates its engine at import time from `settings.DATABASE_URL`.
+If the env var is set after those modules are imported, the engine silently points at the
+wrong DB.  Setting it at the top of conftest — before any test file imports `app.*` — is
+the only reliable way to ensure both the fixture engine *and* the app's `SessionLocal` use
+the same per-worker URL.
+
+**Alembic invocation:** Uses `subprocess.run([venv/bin/alembic, "upgrade", "head"])` from a
+synchronous session fixture.  The programmatic API (`alembic.command.upgrade`) was attempted
+first but fails because `backend/alembic/__init__.py` exists (alembic stores its migration
+scripts as a package), which shadows the installed `alembic` distribution on `sys.path` when
+`backend/` is on the path.  The subprocess call uses the venv's alembic binary directly,
+bypassing the naming conflict entirely.  DB creation still uses `asyncio.run()` + SQLAlchemy
+async engine (fine since no event loop is active at session fixture setup time).
+
+**CI postgres superuser:** `POSTGRES_USER: partfolder3d` in the GitHub Actions service
+container creates a superuser by the postgres image convention, so workers can `CREATE DATABASE`.
+
 ## 2026-07-02 — Per-file 3MF thumbnail path stored in `object_analysis`
 
 **Problem:** `_reconcile_embedded_thumbnail` wrote the thumbnail to disk and
