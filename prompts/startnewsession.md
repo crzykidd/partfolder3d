@@ -8,10 +8,40 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-07-01 (v0.1.1 shipped + tagged on `main`; 4 follow-up fixes since, sitting
-unreleased on `dev`; no release gate currently open)
+**Last updated:** 2026-07-02 (render/asset-detail rework landed on `dev` — 5 commits, verified against
+a rebuilt image; now 9 commits unreleased on `dev`; no release gate currently open)
 
-> ## CURRENT STATE (2026-07-01) — v0.1.1 released, no open release gate
+> ## CURRENT STATE (2026-07-02) — render rework done on `dev`; v0.1.1 still latest on `main`
+> **Render / asset-detail rework is complete and verified on `dev`** (5 commits, `247dfa6`→`5797b0c`).
+> A four-phase "read-don't-render" feature + a render-backend fix. Full design + rationale in
+> `docs/decisions.md` (2026-07-02 and 2026-07-01 entries). What landed:
+> - **A `247dfa6`** — 3MF is now READ, not rendered: extracts the embedded slicer thumbnail
+>   (`ImageSource.embedded`, migration **0021**) + real slice metadata (`slice_info.config` /
+>   `project_settings.config` → grams/meters/print-time/filament colors, `est_method="sliced"`).
+>   Server render bounded to STL/OBJ/PLY under size/triangle caps; 3MF never rendered. Thumbnail
+>   priority chain (user > curated > embedded > render). `FileOut.preview_3d` flag.
+> - **B `974b443`** — uploaded/imported ZIPs auto-extract into the item dir (structure preserved,
+>   lone wrapper stripped, junk skipped, collision-renamed, zip-slip/bomb guarded, original discarded).
+> - **C `778f4d0`** — flat downloads list → **folder tree**; 3MF detail is a **collapsible per-file
+>   panel** (totals collapsed; filament/plate/object breakdown expanded).
+> - **D `a58a393`** — in-browser **three.js viewer** (STL/OBJ/3MF), lazy-loaded/code-split
+>   (`@react-three/fiber` 8.x + drei), size-capped ~50MB, wired to a "View in 3D" button.
+> - **fix `5797b0c`** — render backend: the stock PyPI `vtk` wheel CANNOT render headless (X11-only;
+>   `get_backend()` returned `none`). Switched to the **`vtk-osmesa` wheel** (Kitware index) +
+>   `libosmesa6`. Verified against a rebuilt image: `get_backend()=="vtk"`, STL/OBJ/PLY all render.
+>
+> **Verified against the rebuilt `:dev` image** (docker exec probes): migration 0021 live + `embedded`
+> enum, 3MF reader (sliced metadata + thumbnail), ZIP extractor (wrapper/junk/collision), and the
+> VTK-OSMesa render (STL/OBJ/PLY → valid PNGs, no X server). Backend 560/582 pytest green on
+> ephemeral PG; frontend tsc + vitest + vite build clean with three.js code-split confirmed.
+> **Only unverified bit:** actually clicking "View in 3D" in the running UI (needs a real browser).
+>
+> **`dev` is now 9 commits ahead of `main`** (the 4 prior polish commits + these 5). All captured in
+> `CHANGELOG.md [Unreleased]`; ship with the next release.
+>
+> ---
+>
+> ## PRIOR STATE (2026-07-01) — v0.1.1 released, no open release gate
 > **v0.1.1 is live on `main` and tagged.** PR #1 (`dev`→`main`) merged as `79ed44b`; tag `v0.1.1`
 > points at `1b3990a` on `main`. `/release-prep 0.1.1` bumped `backend/app/version.py` +
 > `frontend/package.json`, rolled `CHANGELOG.md`, synced docs (ruff clean, tsc clean, **229/229
@@ -56,11 +86,17 @@ unreleased on `dev`; no release gate currently open)
 >
 > **Verify discipline (unchanged):** backend = `ruff check backend/` (pinned 0.8.4 +
 > `backend/pyproject.toml` config — unpinned/no-config gives false UP042/F841) + ephemeral-PG
-> pytest (`alembic upgrade head` first, now at migration **0020**, 20 revisions); frontend = tsc +
-> vitest (**229/229 clean**, last verified at the 0.1.1 release-prep — not re-run since the 4
-> follow-up commits, re-verify before the next release) + **`npx vite build`** (real gate; tsc/
-> vitest miss babel/esbuild parse errors). **Worker has NO hot-reload** (restart for worker/task/
-> scraper edits); backend uses uvicorn --reload.
+> pytest (`alembic upgrade head` first, now at migration **0021**, 21 revisions; suite = **582**);
+> frontend = tsc + vitest (**279 passing** after the render rework) + **`npx vite build`** (real
+> gate; tsc/vitest miss babel/esbuild parse errors). **Worker has NO hot-reload** (restart for
+> worker/task/scraper edits); backend uses uvicorn --reload.
+>
+> **⚠️ Render-backend gotcha (2026-07-02):** headless rendering uses the **`vtk-osmesa`** wheel
+> (Kitware index `https://wheels.vtk.org`) + `libosmesa6` — NOT the stock PyPI `vtk` wheel, which is
+> X11-only and silently yields `get_backend()=="none"`. Render viability is **only** verifiable in a
+> **built image**: `docker exec <worker> python -c "from app.worker.render_mesh import get_backend;
+> print(get_backend())"` must print `vtk`, then render a test STL. Never trust a render/Dockerfile
+> change from unit tests alone.
 
 ---
 
@@ -215,9 +251,14 @@ unreleased on `dev`; no release gate currently open)
 - [ ] **Add the 2 CodeQL contexts to `main` required status checks** — they now run (first CodeQL
       pass was on the v0.1.1 PR, 36 alerts triaged) but branch protection's
       `required_status_checks` still only lists the original 6 CI jobs. Owner action.
-- [ ] **4 unreleased commits sit on `dev`** (prod compose/README rewrite, 2 sidebar highlight
-      fixes, QuickStart/wizard polish) — captured in `CHANGELOG.md [Unreleased]`, ship with the
-      next release.
+- [x] **Render / asset-detail rework landed on `dev`** (2026-07-02, 5 commits `247dfa6`→`5797b0c`) —
+      3MF read-not-render, ZIP auto-extract, file-tree + 3MF collapsible UI, in-browser three.js
+      viewer, vtk-osmesa render fix. Verified against a rebuilt image (see CURRENT STATE).
+- [ ] **Manual check outstanding:** click "View in 3D" on an STL in the running UI
+      (http://localhost:8973) — the only render-rework piece not machine-verifiable here.
+- [ ] **9 unreleased commits sit on `dev`** (4 prior polish commits + the 5 render-rework commits) —
+      captured in `CHANGELOG.md [Unreleased]`, ship with the next release. Re-verify frontend
+      (tsc/vitest/vite build) + backend (ruff/ephemeral-PG pytest, migration 0021) at release-prep.
 - [ ] **Rotate the AgentQL API key** (owner pasted it in chat during earlier testing).
 - [ ] **PRD §18 remaining notes** to honor when relevant: move journaling/crash recovery,
       real slicing for filament estimates, trash purge UI (see OPEN ITEMS above for detail).
