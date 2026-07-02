@@ -20,7 +20,25 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- **README production-install guide** — `## Getting started` now documents the
+  primary production path (pull published images, configure `.env` + library mounts,
+  `docker compose up -d`) and prominently links the in-app **Quick Start** guide at
+  `/quick-start` for guided first steps (add a library, load Starter Tags, enable AI,
+  schedule backups). A "Build from source (dev)" subsection for contributors is kept as
+  a collapsible secondary path.
+
+### Changed
+
+- **`docker-compose.yml` is now a production, image-based deploy** — `build:` blocks
+  removed; `backend` and `worker` pull `ghcr.io/crzykidd/partfolder3d:latest`; `frontend`
+  pulls `ghcr.io/crzykidd/partfolder3d-frontend:latest`. A version-pin comment (`:0.1.1`)
+  is shown next to each image tag. Library mount placeholders are prominently commented
+  for end-user editing; named volumes (`db_data`, `redis_data`, `frontend_dist`) are
+  preserved for production durability. Header updated with a 5-step quick-start block.
+- **`docker-compose.dev.yml` remains the build-from-source dev stack** — no changes;
+  it continues to build all images locally with hot reload for contributors.
 
 ---
 

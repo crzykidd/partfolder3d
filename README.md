@@ -11,9 +11,11 @@
 </div>
 
 > [!WARNING]
-> 🚧 **Early alpha — not yet released.** PartFolder 3D is functional but has not had
-> its first tagged release. The Docker images are not yet published. Watch/star to
-> follow along; see [Getting started](#getting-started) for the dev-stack instructions.
+> **Early alpha (v0.1.1) — under active development.** This is an early release: expect rough
+> edges, and **breaking changes can land between releases** (database schema, config, or API).
+> It's usable and published — pull the images and follow [Getting started](#getting-started) — but
+> **pin a specific version, back up your data, and read the release notes before upgrading.**
+> Watch/star the repo to follow progress.
 
 <div align="center">
 
@@ -72,7 +74,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built** (early alpha, not yet tagged/released) — see the
+> The full feature set below is **built and released** (v0.1.1 alpha) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -239,7 +241,10 @@ transfer, and resilience against database loss.
 
 ## Architecture
 
-### Container layout (docker-compose)
+### Container layout
+
+`docker-compose.yml` is the **production** file (pulls published images; edit library mounts + `.env`).
+`docker-compose.dev.yml` is the **dev** file (builds all images locally; hot reload).
 
 ```
                        ┌─────────────────────────────────────────┐
@@ -351,7 +356,7 @@ Honest snapshot — this project is at the **alpha** stage (v0.1.1).
 - [x] Admin tools — backups, JSON export, tag admin, scheduled jobs
 - [x] Full REST API + OpenAPI docs
 - [x] First-run setup wizard
-- [ ] First tagged release + published Docker images
+- [x] First tagged release + published Docker images (v0.1.0 / v0.1.1)
 - [ ] Load testing at 100k-item scale
 - [ ] SSO (OIDC/SAML), email delivery, OctoPrint integration (out-of-scope / future)
 
@@ -361,38 +366,77 @@ See the [CHANGELOG](CHANGELOG.md) for the full delivered feature list.
 
 ## Getting started
 
-> [!NOTE]
-> **Alpha — no published image yet.** The code and `docker-compose.dev.yml` exist; a
-> tagged release and registry images are coming with v0.1.1. For now, build locally
-> from source.
+### Production install (published images)
 
-<details>
-<summary><strong>Build from source (dev stack)</strong></summary>
+Images are published to GitHub Container Registry on every release and available now.
 
 ```bash
-# clone and start the dev stack
+# 1. Get the files (clone or download docker-compose.yml + .env.example)
+git clone https://github.com/crzykidd/partfolder3d.git
+cd partfolder3d
+
+# 2. Create your .env — set a strong password and your desired port
+cp .env.example .env
+#    edit .env: set POSTGRES_PASSWORD (required) and APP_PORT (default 8973)
+
+# 3. Mount your library directory in docker-compose.yml
+#    In both the `backend` and `worker` sections, uncomment and edit:
+#      - /mnt/nas/3dprints:/library/main   # host path → container path
+
+# 4. Start the stack
+docker compose up -d
+
+# 5. Open the app and complete the first-run wizard
+#    http://localhost:8973
+```
+
+What happens on first `docker compose up -d`:
+
+- Images are pulled from `ghcr.io/crzykidd/partfolder3d(-frontend):latest`.
+  To pin a specific release, edit the image tags in `docker-compose.yml` (e.g. `:0.1.1`).
+- **Migrations run automatically** — the backend entrypoint runs `alembic upgrade head`
+  before uvicorn starts (`RUN_MIGRATIONS=true`); the worker waits for the backend to be
+  healthy. No manual migration step, no extra container.
+- **Data lives in named volumes** (`db_data`, `redis_data`) and the `./data/` bind-mount
+  for thumbnails, backups, and config. Library files stay on your host wherever you mount them.
+
+**First-run wizard** — open **http://localhost:8973** and follow the prompts:
+
+1. Create the admin account and fill in instance basics (name, external URL, time zone).
+2. Add your first library: go to **Admin → Content → Libraries**, click **Add library**,
+   give it a name, and enter the container path you mounted (e.g. `/library/main`).
+3. *(Optional)* Click the trigger to run an initial scan — it finds everything already
+   in the library and builds your catalog.
+
+> [!TIP]
+> **Quick Start guide** — after completing the first-run wizard, visit
+> **[http://localhost:8973/quick-start](http://localhost:8973/quick-start)** for a
+> guided walkthrough: add a library, load Starter Tags, enable AI tagging, and schedule
+> backups — all from one page.
+
+The default external port is **`8973`**, changeable via `APP_PORT` in `.env`.
+
+---
+
+<details>
+<summary><strong>Build from source (dev stack — for contributors)</strong></summary>
+
+The self-contained `docker-compose.dev.yml` builds all images locally and gives you hot
+reload for both the backend (uvicorn `--reload`) and frontend (Vite HMR).
+
+```bash
 git clone https://github.com/crzykidd/partfolder3d.git
 cd partfolder3d
 cp .env.example .env
 docker compose -f docker-compose.dev.yml up -d --build
 ```
 
-Database migrations run automatically on startup — the backend's image
-entrypoint runs `alembic upgrade head` before uvicorn (the worker waits for the
-backend to be healthy), so there is no manual migration step and no extra
-container. The dev stack bind-mounts all storage under
-`./private_data/data/` (Postgres, Redis, app data) for easy host inspection.
+The dev stack bind-mounts all storage under `./private_data/data/` (Postgres, Redis, app
+data, and a sample library at `/library`) so you can inspect every file on the host.
+Migrations run automatically on startup via the same `RUN_MIGRATIONS=true` mechanism.
 
-Then open **http://localhost:8973** and complete the **first-run wizard**:
-
-1. Create the admin account + instance basics (name, external URL/port, time zone).
-2. Add your first library on the **Libraries** page (Content section) — give it a name
-   and set the mount path to the container path of the mounted volume (e.g. `/library`
-   for the dev stack, or `/library/main` for a custom prod mount).
-3. *(Optional, skippable)* Load Starter Tags (Tags page, Content section), enable an AI
-   provider (AI & Scraping section), or schedule backups (Data & Backups section).
-
-The default external port is **`8973`** and is changeable in `docker-compose.dev.yml`.
+Then open **http://localhost:8973** and complete the first-run wizard as above.
+After setup, visit **http://localhost:8973/quick-start** for the in-app Quick Start guide.
 
 </details>
 
