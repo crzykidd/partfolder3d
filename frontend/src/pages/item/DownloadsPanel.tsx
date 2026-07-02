@@ -4,14 +4,14 @@
  * Renders a recursive folder hierarchy built client-side from `FileOut.path`.
  * Type-aware affordances per file row:
  *  - image → small inline thumbnail
- *  - preview_3d === true → "View in 3D" stub button (Phase D wires the viewer)
+ *  - preview_3d === true → "View in 3D" button (Phase D wired; lazy-loads three.js)
  *  - .3mf → collapsible ThreeMfPanel below the file row
  *
  * The "Download all as ZIP" section (with include-print-history toggle and
  * 2-second poll) is kept unchanged below the tree.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight, Download, Box } from 'lucide-react'
 
@@ -20,6 +20,15 @@ import { mapBundleStatus, shouldContinuePolling, type ZipPollStatus } from '@/li
 import { buildFileTree, is3mf, isImagePath, type FileTreeNode, type FileTreeFolder } from '@/lib/file-tree'
 import { ThreeMfPanel } from './ThreeMfPanel'
 import { AURORA_BTN_GHOST, AURORA_BTN_PRIMARY, formatBytes } from './styles'
+
+// ---------------------------------------------------------------------------
+// Lazy-load the 3D viewer so three.js stays out of the entry bundle.
+// Vite splits this into its own async chunk at the dynamic-import boundary.
+// ---------------------------------------------------------------------------
+
+const LazyModelViewer = React.lazy(
+  () => import('@/components/viewer/ModelViewer'),
+)
 
 // ---------------------------------------------------------------------------
 // Role badge
@@ -56,24 +65,25 @@ function RoleBadge({ role }: { role: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// View-in-3D stub (Phase D will slot in the real viewer)
+// View-in-3D button
 // ---------------------------------------------------------------------------
 
 /**
- * "View in 3D" button — stub placeholder for Phase D.
- * Disabled with a tooltip explaining that the viewer is coming soon.
- * Phase D replaces the onClick with the real viewer open handler.
+ * "View in 3D" button.
  *
- * @param onView - Optional callback; when provided the button becomes active.
- *   Phase D passes the real handler here. Phase C leaves it undefined.
+ * When `onView` is undefined (stub mode, Phase C) the button is disabled with
+ * a tooltip.  Phase D passes the real handler which opens the lazy viewer.
+ *
+ * @param onView - No-arg callback that opens the viewer for this file.
+ *   Undefined → disabled stub (Phase C behaviour preserved).
  */
-function ViewIn3DButton({ onView }: { onView?: (filePath: string, fileId: number) => void; filePath?: string; fileId?: number }) {
+function ViewIn3DButton({ onView }: { onView?: () => void }) {
   const isStub = onView == null
   return (
     <button
       disabled={isStub}
       title={isStub ? 'In-browser 3D viewer coming in the next update' : 'Open in 3D viewer'}
-      onClick={isStub ? undefined : () => {/* Phase D wires this */}}
+      onClick={isStub ? undefined : onView}
       style={{
         ...AURORA_BTN_GHOST,
         display: 'flex',
@@ -102,9 +112,11 @@ interface FileRowProps {
   firstEmbeddedImage: api.ImageOut | null
   depth: number
   isLast: boolean
+  /** Opens the viewer for the given file path. Undefined when viewer is unavailable. */
+  onOpenViewer: (filePath: string) => void
 }
 
-function FileRow({ itemKey, file, firstEmbeddedImage, depth }: FileRowProps) {
+function FileRow({ itemKey, file, firstEmbeddedImage, depth, onOpenViewer }: FileRowProps) {
   const [threeMfOpen, setThreeMfOpen] = useState(false)
   const basename = file.path.split('/').pop() ?? file.path
   const isImg = isImagePath(file.path)
@@ -167,9 +179,9 @@ function FileRow({ itemKey, file, firstEmbeddedImage, depth }: FileRowProps) {
 
         {/* Action buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
-          {/* View in 3D stub — Phase D replaces the stub with a real handler */}
+          {/* View in 3D — passes real handler when preview_3d is true */}
           {file.preview_3d && (
-            <ViewIn3DButton />
+            <ViewIn3DButton onView={() => onOpenViewer(file.path)} />
           )}
 
           {/* 3MF expand toggle */}
@@ -238,9 +250,10 @@ interface FolderNodeProps {
   firstEmbeddedImage: api.ImageOut | null
   depth: number
   defaultExpanded?: boolean
+  onOpenViewer: (filePath: string) => void
 }
 
-function FolderNode({ folder, itemKey, firstEmbeddedImage, depth, defaultExpanded = true }: FolderNodeProps) {
+function FolderNode({ folder, itemKey, firstEmbeddedImage, depth, defaultExpanded = true, onOpenViewer }: FolderNodeProps) {
   const [open, setOpen] = useState(defaultExpanded)
 
   return (
@@ -285,6 +298,7 @@ function FolderNode({ folder, itemKey, firstEmbeddedImage, depth, defaultExpande
             itemKey={itemKey}
             firstEmbeddedImage={firstEmbeddedImage}
             depth={depth + 1}
+            onOpenViewer={onOpenViewer}
           />
         </div>
       )}
@@ -301,9 +315,10 @@ interface TreeNodesProps {
   itemKey: string
   firstEmbeddedImage: api.ImageOut | null
   depth: number
+  onOpenViewer: (filePath: string) => void
 }
 
-function TreeNodes({ nodes, itemKey, firstEmbeddedImage, depth }: TreeNodesProps) {
+function TreeNodes({ nodes, itemKey, firstEmbeddedImage, depth, onOpenViewer }: TreeNodesProps) {
   return (
     <>
       {nodes.map((node, idx) =>
@@ -315,6 +330,7 @@ function TreeNodes({ nodes, itemKey, firstEmbeddedImage, depth }: TreeNodesProps
             firstEmbeddedImage={firstEmbeddedImage}
             depth={depth}
             defaultExpanded={depth === 0}
+            onOpenViewer={onOpenViewer}
           />
         ) : (
           <div
@@ -327,6 +343,7 @@ function TreeNodes({ nodes, itemKey, firstEmbeddedImage, depth }: TreeNodesProps
               firstEmbeddedImage={firstEmbeddedImage}
               depth={depth}
               isLast={idx === nodes.length - 1}
+              onOpenViewer={onOpenViewer}
             />
           </div>
         ),
@@ -352,6 +369,9 @@ export function DownloadsSection({ itemKey, files, images = [] }: DownloadsSecti
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [includeHistory, setIncludeHistory] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Viewer state: {filePath, ext} of the currently-open file, or null
+  const [viewerFile, setViewerFile] = useState<{ filePath: string; ext: string } | null>(null)
 
   const stopPoll = useCallback(() => {
     if (pollRef.current !== null) {
@@ -419,6 +439,14 @@ export function DownloadsSection({ itemKey, files, images = [] }: DownloadsSecti
     }
   }, [bundleId, zipStatus, itemKey])
 
+  /** Open the 3D viewer for a given file path. Extracts the extension. */
+  const handleOpenViewer = useCallback((filePath: string) => {
+    const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase()
+    setViewerFile({ filePath, ext })
+  }, [])
+
+  const handleCloseViewer = useCallback(() => setViewerFile(null), [])
+
   const zipLabel: Record<ZipPollStatus, string> = {
     idle:     'Download all as ZIP',
     queued:   'Queued…',
@@ -434,6 +462,17 @@ export function DownloadsSection({ itemKey, files, images = [] }: DownloadsSecti
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Lazy-loaded 3D viewer modal — only mounted when a file is selected */}
+      {viewerFile && (
+        <Suspense fallback={null}>
+          <LazyModelViewer
+            fileUrl={`/api/items/${itemKey}/files/${viewerFile.filePath}`}
+            ext={viewerFile.ext}
+            onClose={handleCloseViewer}
+          />
+        </Suspense>
+      )}
+
       {/* File tree */}
       {files.length === 0 ? (
         <p style={{ fontSize: 12, color: 'var(--aurora-muted)', fontStyle: 'italic', margin: 0 }}>
@@ -453,6 +492,7 @@ export function DownloadsSection({ itemKey, files, images = [] }: DownloadsSecti
             itemKey={itemKey}
             firstEmbeddedImage={firstEmbeddedImage}
             depth={0}
+            onOpenViewer={handleOpenViewer}
           />
         </div>
       )}

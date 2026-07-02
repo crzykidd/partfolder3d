@@ -27,11 +27,17 @@ prefix appears only on git tags and GitHub releases.
   file's path. Folders expand/collapse with chevron controls; top-level folders
   default to expanded. Per-file row shows: role badge · file size · Download
   link. Image files show a small inline thumbnail.
-- **"View in 3D" button (stub)** — any file with `preview_3d=true` (`.stl`,
-  `.obj`, `.3mf` under the size cap) shows a "View in 3D" button in its file
-  row. The button is a placeholder for the browser viewer arriving in Phase D;
-  it is disabled with an explanatory tooltip so Phase D can slot in without
-  restructuring.
+- **In-browser 3D viewer** — clicking "View in 3D" on any `.stl`, `.obj`, or
+  `.3mf` file (those with `preview_3d=true`) opens an interactive modal canvas
+  powered by three.js + `@react-three/fiber`. Supports rotate/zoom/pan via
+  OrbitControls; auto-fits the camera to the model bounding box on load; applies
+  a two-light setup with a neutral material; background matches the active
+  light/dark theme. Shows a loading-progress overlay while the mesh is fetching
+  and a graceful error state if the file cannot be parsed. The viewer is
+  lazy-loaded (`React.lazy` + Suspense) so three.js ships in its own async
+  chunk and never inflates the initial page bundle. Over-cap files (where
+  `preview_3d=false`) continue to show only the static thumbnail; no button is
+  offered. ESC key or clicking outside the card closes the viewer.
 - **3MF collapsible detail panel** — each `.3mf` file with a completed
   analysis shows a "Details" toggle in the file tree. The collapsed summary
   shows: Sliced/Unsliced badge · total print time · total filament weight ·

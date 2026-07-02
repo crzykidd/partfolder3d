@@ -47,6 +47,48 @@ slim + migration), **B** backend (ZIP extraction), **C** frontend (file tree + 3
 **D** frontend (browser viewer). Dispatched sequentially — B/C/D branch off A's committed state to
 avoid migration/config/worker-registry conflicts.
 
+### Phase D implementation details (2026-07-01)
+
+- **`@react-three/fiber@8.18.0` (not 9.x) — React 18 constraint.** fiber 9.x
+  requires React `>=19 <19.3`. This project uses React `^18.3.1`. Pinned to fiber
+  8.18.0 (latest 8.x, peer requires `>=18 <19`) + drei 9.121.5 (peer `^18` +
+  `@react-three/fiber ^8`) + three 0.177.0 + @types/three 0.177.0 (three 0.177.x
+  ships no bundled `.d.ts` files; @types/three provides the declarations including
+  `examples/jsm/loaders`).
+- **Code-split via `React.lazy` at module scope in `DownloadsPanel.tsx`.**
+  `const LazyModelViewer = React.lazy(() => import('@/components/viewer/ModelViewer'))`
+  placed at module scope (not inside a component) so Vite sees the dynamic import
+  at build time and splits `ModelViewer.tsx` and all its transitive deps (three,
+  fiber, drei) into `ModelViewer-*.js`. Confirmed: entry chunk `index-*.js`
+  (≈800 kB) does not include three.js; lazy chunk `ModelViewer-*.js` (≈902 kB)
+  contains three.js + fiber + drei.
+- **Viewer state lives in `DownloadsSection`, not in `FileRow`.** Holding
+  `viewerFile` at the panel level means only one viewer modal is ever open;
+  passing `onOpenViewer` down through `TreeNodes` → `FolderNode` → `FileRow` is
+  shallow (2 levels) and avoids the complexity of a global modal registry.
+- **No per-geometry `dispose()` on the lazy-cached STL/OBJ/3MF resources.**
+  `useLoader` in r3f caches loaded resources by URL. Calling `geometry.dispose()`
+  in a cleanup effect would corrupt the cache for subsequent opens. The material
+  (created via `useMemo` and not cached by r3f) IS explicitly disposed on unmount.
+  WebGL GPU memory is freed by the `Canvas` renderer's `gl.dispose()` call (r3f
+  triggers this when the Canvas unmounts). JS heap is GC'd. For this modal-based
+  viewer this is acceptable.
+- **`ThreeMFLoader` cast via `unknown`.** The `ThreeMFLoader` from
+  `three/examples/jsm/loaders/3MFLoader.js` returns `THREE.Group` but r3f's
+  `useLoader` generic uses `new () => THREE.Loader<T>` which ThreeMFLoader's
+  declared type doesn't exactly satisfy. Cast `ThreeMFLoader as unknown as
+  new () => THREE.Loader<THREE.Group>` to satisfy TypeScript without a `@ts-ignore`.
+- **Background via `SceneBackground` component (not Canvas `style`).** Setting
+  `style.background` on the `<Canvas>` div has no effect on the WebGL clear colour.
+  Instead, a `SceneBackground` component uses `useThree()` to access `scene` and
+  sets `scene.background = new THREE.Color(...)`, restoring the prior value on
+  unmount. Theme detection uses `window.matchMedia('(prefers-color-scheme: dark)')`.
+- **`ViewIn3DButton.onView` simplified to `() => void`.** Phase C declared
+  `onView?: (filePath: string, fileId: number) => void`. Phase D simplifies to
+  `onView?: () => void` since the button no longer needs to know its own path —
+  `FileRow` closes over `file.path` and passes a bound handler. The `filePath` and
+  `fileId` props (unused in Phase C's onclick) are removed from the interface.
+
 ### Phase C implementation details (2026-07-01)
 
 - **Embedded thumbnail matching is best-effort in Phase C** — the backend stores
