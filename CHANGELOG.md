@@ -20,6 +20,8 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-07-02
+
 ### Added
 
 - **Configurable `PUID`/`PGID` runtime user** — backend, worker, and frontend
