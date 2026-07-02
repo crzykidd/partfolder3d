@@ -1,6 +1,9 @@
 # PartFolder 3D backend dependencies
 # Python 3.12
 
+# vtk-osmesa (headless VTK render backend) is published on Kitware's wheel index.
+--extra-index-url https://wheels.vtk.org
+
 # Web framework
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
@@ -33,15 +36,17 @@ PyYAML==6.0.2
 
 # Rendering (Phase 4 / render-rework-A)
 # trimesh: parse STL/OBJ/PLY/3MF mesh geometry.
-# vtk: offscreen CPU render via Mesa software rasterizer bundled in the VTK wheel.
-#      VTK is the only render backend; pyrender/PyOpenGL/EGL/OSMesa are no longer used.
+# vtk-osmesa: the OSMesa-built VTK wheel — true offscreen rendering with NO X server
+#      (default render window is vtkOSOpenGLRenderWindow). The stock PyPI `vtk` wheel only
+#      ships vtkXOpenGLRenderWindow and cannot render headless; requires libosmesa6 (see
+#      Dockerfile). VTK is the only render backend; pyrender/PyOpenGL/EGL are unused.
 # lxml: XML parsing for 3MF sidecar files (slice_info.config, model_settings.config,
 #       3dmodel.model color extraction) and trimesh's 3MF geometry loader.
 # Pillow: image I/O helper. numpy: mesh math.
 trimesh==4.5.3
 lxml==6.1.1
 Pillow==11.1.0
-vtk==9.3.1
+vtk-osmesa==9.3.1
 numpy>=1.24.0,<3.0
 
 # Import wizard / URL scraping (Phase 5)

@@ -2,6 +2,34 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-02 — Render backend fix: `vtk-osmesa` wheel (the "VTK bundles Mesa" assumption was wrong)
+
+Testing render-rework-A against a freshly built `:dev` image exposed a shipping-blocker: **no
+render backend worked**. `get_backend()` returned `none`, so STL/OBJ thumbnails silently didn't
+generate. Two compounding mistakes in Phase A's stack-slim:
+
+1. The Dockerfile dropped `libxrender1`, but the **stock PyPI `vtk` wheel links libXrender** — so
+   `import vtk` failed with `libXrender.so.1: cannot open shared object file` (ironically, Phase A's
+   own *deleted* comment warned of exactly this).
+2. Even with libXrender restored, the stock `vtk` wheel ships **only `vtkXOpenGLRenderWindow`** (no
+   `vtkOSOpenGLRenderWindow`/`vtkEGLRenderWindow`) — it renders through X11/GLX and **cannot render
+   headless**. Offscreen render aborted with `bad X server connection. DISPLAY=` (the SIGABRT the
+   old Phase-4 note predicted). "VTK bundles its own Mesa software rasterizer, no libs needed" was
+   simply false for the PyPI wheel.
+
+Verified two working fixes empirically in containers built from the same image:
+- **Xvfb + stock `vtk`** — works, but needs a virtual X server (xvfb + xauth + libgl1 + libxrender1)
+  running alongside the worker.
+- **`vtk-osmesa` wheel + `libosmesa6`** — true offscreen (default window becomes
+  `vtkOSOpenGLRenderWindow`), **no X server**, identical PNG output. Chosen: it keeps the VTK-only
+  single-backend architecture, needs no runtime X server, and is a two-file change.
+
+**Fix:** `backend/requirements.txt` → `vtk-osmesa==9.3.1` (+ `--extra-index-url
+https://wheels.vtk.org`, Kitware's wheel index); `Dockerfile` → add `libosmesa6`. No code change —
+`render_mesh._try_vtk()` now passes because offscreen works. Lesson: render-backend viability is
+**not** locally verifiable without a built image + headless probe; always run `get_backend()` + a
+real render inside the actual image before trusting a stack change.
+
 ## 2026-07-01 — Asset-detail / 3D-preview rework: read-don't-render, browser viewer, ZIP extraction
 
 The server-side mesh renderer (pyrender EGL→OSMesa→VTK fallback chain) was overloading the

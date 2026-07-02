@@ -26,11 +26,14 @@ ENV OMP_NUM_THREADS=2 \
 FROM base AS deps
 
 # System libraries for headless rendering (render-rework-A: VTK-only stack).
-# VTK bundles its own Mesa software rasterizer, so no EGL/OSMesa/libgbm needed.
-# libgl1: required by the VTK wheel's Mesa fallback path.
-# libglib2.0-0 + libfreetype6: transitive deps of VTK / Pillow.
-# All are CPU-only — no GPU drivers installed.
+# The `vtk-osmesa` wheel does true offscreen rendering via OSMesa — no X server needed —
+# but it links against the system OSMesa runtime, so libosmesa6 is REQUIRED (without it
+# `import vtk`/render falls back to "no backend"). The stock PyPI `vtk` wheel is NOT used:
+# it only ships vtkXOpenGLRenderWindow and cannot render on a headless host.
+# libgl1: pulled in by the Mesa/OSMesa stack. libglib2.0-0 + libfreetype6: VTK / Pillow deps.
+# All CPU-only — no GPU drivers installed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        libosmesa6 \
         libgl1 \
         libglib2.0-0 \
         libfreetype6 \
