@@ -49,12 +49,24 @@ The mounted volume/host path must be owned by (or writable to) PUID:PGID — see
     done
     log "database is reachable."
 
-    # --- 3. Migrate (env.py bounds lock/statement time → a blocked migration ERRORS, not hangs) ---
-    log "applying database migrations (alembic upgrade head)..."
-    if alembic upgrade head; then
+    # --- 3. Migrate. PYTHONUNBUFFERED streams alembic's per-migration output live
+    #        (otherwise it block-buffers and a hang shows NOTHING). `timeout` is a
+    #        hard backstop so this step can never hang forever — it fails with a
+    #        clear message naming the last migration. env.py also bounds lock/
+    #        statement time so a lock-blocked migration errors on its own in ~30s. ---
+    export PYTHONUNBUFFERED=1
+    mig_timeout="${MIGRATION_TIMEOUT:-600}"
+    log "current database revision (before upgrade):"
+    timeout 30 alembic current || log "  (could not read current revision within 30s — see above)"
+    log "applying database migrations (alembic upgrade head, hard timeout ${mig_timeout}s)..."
+    if timeout "$mig_timeout" alembic upgrade head; then
         log "migrations up to date."
     else
         rc=$?
+        if [ "$rc" = "124" ]; then
+            fatal "migrations TIMED OUT after ${mig_timeout}s — a migration is stuck (most likely blocked \
+on a database lock, or a very slow statement). The last 'Running upgrade …' line above names the culprit."
+        fi
         fatal "'alembic upgrade head' failed with exit code ${rc} — see the alembic output above."
     fi
 fi
