@@ -74,7 +74,9 @@ def _worker_db_setup() -> None:
     if not _XDIST_WORKER:
         return  # serial run: assume DB already has migrations applied
 
+    import shutil
     import subprocess
+    import sys
 
     from sqlalchemy import text
 
@@ -94,12 +96,18 @@ def _worker_db_setup() -> None:
 
     asyncio.run(_create_db())
 
-    # Run alembic migrations using the venv binary (not the programmatic API).
-    # The backend/alembic/ directory has __init__.py, so it shadows the installed
-    # alembic package on sys.path when importing directly.  The CLI binary bypasses
-    # that naming conflict.  DATABASE_URL is already set in os.environ (per-worker).
+    # Run alembic migrations via the CLI binary (not the programmatic API): the
+    # backend/alembic/ dir has __init__.py and shadows the installed alembic package
+    # when imported with cwd=backend_dir on sys.path.  Resolve the binary next to the
+    # interpreter RUNNING the tests so it works both for a local .venv AND on CI
+    # (system / hostedtool Python, where no backend/.venv exists); fall back to PATH.
     backend_dir = str(Path(__file__).parent.parent)
-    alembic_bin = str(Path(backend_dir) / ".venv" / "bin" / "alembic")
+    _alembic_candidate = Path(sys.executable).with_name("alembic")
+    alembic_bin = (
+        str(_alembic_candidate)
+        if _alembic_candidate.exists()
+        else (shutil.which("alembic") or "alembic")
+    )
     result = subprocess.run(
         [alembic_bin, "upgrade", "head"],
         cwd=backend_dir,
