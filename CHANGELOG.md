@@ -20,6 +20,17 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Added
+
+- **Folder browser for library mount-path setup** — the Add Library form now
+  includes a Browse button that opens a modal filesystem navigator. Operators
+  can drill into the container filesystem (starting from the configured
+  `FS_BROWSE_ROOTS`, default `/library`) and click "Select this folder" to fill
+  the Mount path field instead of typing it. Manual text entry is preserved as
+  a fallback. The backend endpoint (`GET /api/admin/fs/browse`) is admin-only
+  and rejects any path that resolves outside the allowlist (prevents traversal
+  to `/`, `/etc`, `/proc`, or arbitrary absolute paths). (Closes #8)
+
 ### Fixed
 
 - **Disabled libraries no longer appear as import destinations** — soft-deleted

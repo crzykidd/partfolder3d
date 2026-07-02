@@ -10,7 +10,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { HardDrive, Plus, Trash2, AlertCircle } from 'lucide-react'
+import { HardDrive, Plus, Trash2, AlertCircle, FolderOpen, ChevronRight, ArrowLeft, Check, X } from 'lucide-react'
 
 import * as api from '@/lib/api'
 
@@ -68,6 +68,221 @@ const BTN_GHOST_STYLE: React.CSSProperties = {
 }
 
 // ---------------------------------------------------------------------------
+// Folder browser modal (issue #8)
+// ---------------------------------------------------------------------------
+
+interface FolderBrowserProps {
+  onSelect: (path: string) => void
+  onClose: () => void
+}
+
+function FolderBrowser({ onSelect, onClose }: FolderBrowserProps) {
+  const [browsePath, setBrowsePath] = useState<string | undefined>(undefined)
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['fs-browse', browsePath ?? '__roots__'],
+    queryFn: () => api.fsBrowse(browsePath),
+    retry: false,
+  })
+
+  const browseTo = (path: string) => setBrowsePath(path)
+  const goUp = () => {
+    if (data?.parent) setBrowsePath(data.parent)
+    else setBrowsePath(undefined)
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Browse for mount path"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'rgba(0,0,0,0.55)',
+        backdropFilter: 'blur(4px)',
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div
+        style={{
+          ...CARD_STYLE,
+          width: 460,
+          maxWidth: '95vw',
+          maxHeight: '80vh',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '14px 16px',
+            borderBottom: '1px solid var(--aurora-divider)',
+            flexShrink: 0,
+          }}
+        >
+          <FolderOpen size={16} style={{ color: 'var(--aurora-accent)', flexShrink: 0 }} />
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--aurora-text)', flex: 1 }}>
+            Browse for mount path
+          </span>
+          <button
+            onClick={onClose}
+            title="Close"
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--aurora-muted)',
+              padding: 4,
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Current path breadcrumb */}
+        <div
+          style={{
+            padding: '8px 16px',
+            fontSize: 11,
+            color: 'var(--aurora-muted)',
+            borderBottom: '1px solid var(--aurora-divider)',
+            fontFamily: 'monospace',
+            background: 'var(--aurora-glass)',
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          {browsePath != null && (
+            <button
+              onClick={goUp}
+              title="Go up"
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--aurora-accent)',
+                padding: 0,
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
+              <ArrowLeft size={13} />
+            </button>
+          )}
+          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {browsePath ?? 'Allowed roots'}
+          </span>
+        </div>
+
+        {/* Entry list */}
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {isLoading && (
+            <div style={{ padding: '24px 16px', textAlign: 'center', fontSize: 12, color: 'var(--aurora-muted)' }}>
+              Loading…
+            </div>
+          )}
+          {error && (
+            <div style={{ padding: '16px', display: 'flex', gap: 8, alignItems: 'center' }}>
+              <AlertCircle size={14} style={{ color: '#EF4444', flexShrink: 0 }} />
+              <span style={{ fontSize: 12, color: '#EF4444' }}>
+                {error instanceof api.ApiError ? error.message : 'Failed to list directory.'}
+              </span>
+            </div>
+          )}
+          {!isLoading && !error && data && (
+            <>
+              {data.entries.length === 0 && (
+                <div style={{ padding: '24px 16px', textAlign: 'center', fontSize: 12, color: 'var(--aurora-muted)' }}>
+                  No subdirectories here.
+                </div>
+              )}
+              {data.entries.map((entry) => (
+                <button
+                  key={entry.abs_path}
+                  onClick={() => browseTo(entry.abs_path)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    width: '100%',
+                    background: 'none',
+                    border: 'none',
+                    borderBottom: '1px solid var(--aurora-divider)',
+                    padding: '10px 16px',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    color: 'var(--aurora-text)',
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)'
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'none'
+                  }}
+                >
+                  <FolderOpen size={14} style={{ color: 'var(--aurora-accent)', flexShrink: 0 }} />
+                  <span style={{ flex: 1, fontSize: 13, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {entry.name}
+                  </span>
+                  <ChevronRight size={13} style={{ color: 'var(--aurora-muted)', flexShrink: 0 }} />
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+
+        {/* Footer: select current path */}
+        <div
+          style={{
+            padding: '12px 16px',
+            borderTop: '1px solid var(--aurora-divider)',
+            display: 'flex',
+            gap: 8,
+            justifyContent: 'flex-end',
+            flexShrink: 0,
+          }}
+        >
+          <button
+            onClick={onClose}
+            style={{ ...BTN_GHOST_STYLE }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => {
+              if (browsePath) { onSelect(browsePath); onClose() }
+            }}
+            disabled={!browsePath}
+            style={{
+              ...BTN_PRIMARY_STYLE,
+              opacity: browsePath ? 1 : 0.5,
+              cursor: browsePath ? 'pointer' : 'default',
+            }}
+          >
+            <Check size={13} />
+            Select this folder
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Add Library form
 // ---------------------------------------------------------------------------
 
@@ -79,6 +294,7 @@ function AddLibraryForm({ onSuccess }: AddLibraryFormProps) {
   const [name, setName] = useState('')
   const [mountPath, setMountPath] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [showBrowser, setShowBrowser] = useState(false)
 
   const mutation = useMutation({
     mutationFn: () => api.createLibrary({ name: name.trim(), mount_path: mountPath.trim() }),
@@ -96,76 +312,100 @@ function AddLibraryForm({ onSuccess }: AddLibraryFormProps) {
   const canSubmit = name.trim().length > 0 && mountPath.trim().length > 0 && !mutation.isPending
 
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (canSubmit) mutation.mutate()
-      }}
-      style={{ display: 'flex', flexDirection: 'column', gap: 14 }}
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-          Library name
-        </label>
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Main Library"
-          style={INPUT_STYLE}
-          onFocus={(e) => {
-            e.currentTarget.style.borderColor = 'var(--aurora-accent)'
-            e.currentTarget.style.boxShadow = '0 0 0 3px var(--aurora-pill)'
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.borderColor = 'var(--aurora-input-border)'
-            e.currentTarget.style.boxShadow = 'none'
-          }}
+    <>
+      {showBrowser && (
+        <FolderBrowser
+          onSelect={(path) => setMountPath(path)}
+          onClose={() => setShowBrowser(false)}
         />
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-          Mount path
-        </label>
-        <input
-          type="text"
-          value={mountPath}
-          onChange={(e) => setMountPath(e.target.value)}
-          placeholder="/library"
-          style={INPUT_STYLE}
-          onFocus={(e) => {
-            e.currentTarget.style.borderColor = 'var(--aurora-accent)'
-            e.currentTarget.style.boxShadow = '0 0 0 3px var(--aurora-pill)'
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.borderColor = 'var(--aurora-input-border)'
-            e.currentTarget.style.boxShadow = 'none'
-          }}
-        />
-        <p style={{ fontSize: 11, color: 'var(--aurora-muted)', margin: 0 }}>
-          Absolute path inside the container, mounted from your host — e.g.{' '}
-          <code style={{ background: 'var(--aurora-glass)', borderRadius: 4, padding: '1px 5px', fontSize: 11 }}>/library/main</code>
-        </p>
-      </div>
-
-      {error && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, padding: '8px 12px' }}>
-          <AlertCircle size={14} style={{ color: '#EF4444', flexShrink: 0 }} />
-          <span style={{ fontSize: 12, color: '#EF4444' }}>{error}</span>
-        </div>
       )}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (canSubmit) mutation.mutate()
+        }}
+        style={{ display: 'flex', flexDirection: 'column', gap: 14 }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            Library name
+          </label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Main Library"
+            style={INPUT_STYLE}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = 'var(--aurora-accent)'
+              e.currentTarget.style.boxShadow = '0 0 0 3px var(--aurora-pill)'
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = 'var(--aurora-input-border)'
+              e.currentTarget.style.boxShadow = 'none'
+            }}
+          />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            Mount path
+          </label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              type="text"
+              value={mountPath}
+              onChange={(e) => setMountPath(e.target.value)}
+              placeholder="/library"
+              style={{ ...INPUT_STYLE, flex: 1 }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = 'var(--aurora-accent)'
+                e.currentTarget.style.boxShadow = '0 0 0 3px var(--aurora-pill)'
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = 'var(--aurora-input-border)'
+                e.currentTarget.style.boxShadow = 'none'
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowBrowser(true)}
+              title="Browse container filesystem"
+              style={{
+                ...BTN_GHOST_STYLE,
+                flexShrink: 0,
+                color: 'var(--aurora-text-dim)',
+              }}
+            >
+              <FolderOpen size={14} />
+              Browse
+            </button>
+          </div>
+          <p style={{ fontSize: 11, color: 'var(--aurora-muted)', margin: 0 }}>
+            Absolute path inside the container, mounted from your host — e.g.{' '}
+            <code style={{ background: 'var(--aurora-glass)', borderRadius: 4, padding: '1px 5px', fontSize: 11 }}>/library/main</code>
+            {' '}— or use Browse to pick from the allowed roots.
+          </p>
+        </div>
 
-      <div>
-        <button
-          type="submit"
-          disabled={!canSubmit}
-          style={{ ...BTN_PRIMARY_STYLE, opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? 'pointer' : 'default' }}
-        >
-          <Plus size={14} />
-          {mutation.isPending ? 'Adding…' : 'Add library'}
-        </button>
-      </div>
-    </form>
+        {error && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, padding: '8px 12px' }}>
+            <AlertCircle size={14} style={{ color: '#EF4444', flexShrink: 0 }} />
+            <span style={{ fontSize: 12, color: '#EF4444' }}>{error}</span>
+          </div>
+        )}
+
+        <div>
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            style={{ ...BTN_PRIMARY_STYLE, opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? 'pointer' : 'default' }}
+          >
+            <Plus size={14} />
+            {mutation.isPending ? 'Adding…' : 'Add library'}
+          </button>
+        </div>
+      </form>
+    </>
   )
 }
 

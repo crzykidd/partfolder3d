@@ -105,6 +105,7 @@ from .routers import (  # noqa: E402  # noqa: E402
     creators,
     downloads,
     export,
+    fs_browse,
     import_sessions,
     invites,
     issues,
@@ -163,6 +164,8 @@ app.include_router(site_capabilities.router)
 app.include_router(tag_admin.router)
 # Phase 18 — AgentQL fallback scraper
 app.include_router(agentql.router)
+# Issue #8 — Admin filesystem browser
+app.include_router(fs_browse.router)
 
 
 # ---------------------------------------------------------------------------

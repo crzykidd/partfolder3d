@@ -27,3 +27,23 @@ export const createLibrary = (body: LibraryCreate): Promise<LibraryOut> =>
 
 export const disableLibrary = (id: number): Promise<void> =>
   apiFetch<void>(`/api/libraries/${id}`, { method: 'DELETE' })
+
+// ---------------------------------------------------------------------------
+// Issue #8 — Admin filesystem browser
+// ---------------------------------------------------------------------------
+
+export interface FsBrowseEntry {
+  name: string
+  abs_path: string
+}
+
+export interface FsBrowseResult {
+  path: string | null
+  parent: string | null
+  entries: FsBrowseEntry[]
+}
+
+export const fsBrowse = (path?: string): Promise<FsBrowseResult> => {
+  const params = path ? `?path=${encodeURIComponent(path)}` : ''
+  return apiFetch<FsBrowseResult>(`/api/admin/fs/browse${params}`)
+}
