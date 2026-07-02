@@ -22,6 +22,15 @@ prefix appears only on git tags and GitHub releases.
 
 ### Fixed
 
+- **Disabled libraries no longer appear as import destinations** — soft-deleted
+  (`enabled = false`) libraries were still offered in the Add Asset modal (both
+  Upload and From-URL tabs), letting users target a library they had just
+  "deleted." The destination pickers now filter to enabled libraries only; if all
+  libraries are disabled a clear message is shown. The admin Libraries page is
+  unaffected and continues to list all libraries. The backend already rejected
+  disabled-library sessions at create time; the frontend now prevents the
+  selection in the first place. (Fixes #9)
+
 - **Corrected the settings location text on the version/landing page** — the
   info card said "Admin → Settings" but that nav item does not exist; library
   paths and configuration live under **Admin → Content**. The text now links
