@@ -321,14 +321,17 @@ export default function ModelViewer({ fileUrl, ext, onClose }: ModelViewerProps)
         {/* Canvas — only rendered when no error */}
         {!loadError && (
           <Canvas
-            camera={{ position: [0, 0, 5], fov: 45 }}
+            camera={{ position: [0, 0, 5], fov: 45, near: 0.01, far: 100000 }}
             gl={{ antialias: true }}
             style={{ width: '100%', height: '100%' }}
           >
             <SceneBackground isDark={isDark} />
             <Lights />
-            <OrbitControls makeDefault enableDamping dampingFactor={0.05} />
-            <Bounds fit clip observe margin={1.2}>
+            {/* No maxDistance cap; near/far are wide (above) so dollying out never
+                clips the model. `clip` intentionally omitted — it tightens the frustum
+                to the object and made zoom-out clip the mesh. */}
+            <OrbitControls makeDefault enableDamping dampingFactor={0.05} minDistance={0.01} />
+            <Bounds fit observe margin={1.2}>
               <LoaderErrorBoundary onError={setLoadError}>
                 <Suspense fallback={<LoadingOverlay />}>
                   <ModelScene fileUrl={fileUrl} ext={normExt} />
