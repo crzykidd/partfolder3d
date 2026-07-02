@@ -23,7 +23,6 @@ import {
   DataTable,
   TableRow,
   Td,
-  EmptyState,
 } from '@/components/ui'
 
 // ---------------------------------------------------------------------------

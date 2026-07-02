@@ -19,7 +19,7 @@
  * Styling: Aurora aesthetic (B3b restyle — visual pass, all behavior preserved).
  */
 
-import React, { useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as api from '@/lib/api'
 import {

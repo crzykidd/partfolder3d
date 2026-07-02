@@ -5,7 +5,6 @@
  * Graceful dash if endpoint errors.
  */
 
-import React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { LayoutGrid } from 'lucide-react'

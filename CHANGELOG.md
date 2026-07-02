@@ -28,6 +28,16 @@ prefix appears only on git tags and GitHub releases.
   on every push to `dev`/`main` and on release events, with the same tag scheme
   (`dev`, `sha-<short>`, `latest`, semver) applied to each.
 
+### Fixed
+
+- **Frontend production build (`npm run build`) now succeeds** — removed ~20 unused
+  imports/variables flagged by `noUnusedLocals` under the strict project-reference
+  tsconfig, and fixed 4 real type errors (`SideNavShell` functional-updater mismatch,
+  `CatalogPage` `useMutation` generic types, `AiUsagePage` Lucide icon as `ReactNode`).
+- **CI and release typecheck gates corrected** — both `ci.yml`/`dev-checks.yml` and
+  `/release-prep` now run `npm run build` (`tsc -b`) instead of `npx tsc --noEmit`
+  (root tsconfig, which skips strict project-reference settings and misses these errors).
+
 ### Changed
 
 - **nginx config baked into the `partfolder3d-nginx` image** — the production

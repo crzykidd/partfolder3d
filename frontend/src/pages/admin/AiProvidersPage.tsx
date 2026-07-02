@@ -17,7 +17,7 @@
  * Styling: Aurora aesthetic (B3b restyle — visual pass, all behavior preserved).
  */
 
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus } from 'lucide-react'
 import * as api from '@/lib/api'

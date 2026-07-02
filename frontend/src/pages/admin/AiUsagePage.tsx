@@ -259,7 +259,7 @@ export function AiUsagePage() {
 
       {data && !hasAnyUsage && (
         <EmptyState
-          icon={Activity}
+          icon={<Activity size={32} />}
           title="No AI usage yet"
           description="AI usage will appear here once tag suggestions, description cleanup, or summarization have been used."
         />

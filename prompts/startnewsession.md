@@ -87,9 +87,11 @@ FIXED — merges are clean now; no open release gate)
 > **Verify discipline (unchanged):** backend = `ruff check backend/` (pinned 0.8.4 +
 > `backend/pyproject.toml` config — unpinned/no-config gives false UP042/F841) + ephemeral-PG
 > pytest (`alembic upgrade head` first, now at migration **0021**, 21 revisions; suite = **582**);
-> frontend = tsc + vitest (**279 passing** after the render rework) + **`npx vite build`** (real
-> gate; tsc/vitest miss babel/esbuild parse errors). **Worker has NO hot-reload** (restart for
-> worker/task/scraper edits); backend uses uvicorn --reload.
+> frontend = **`npm run build`** (`tsc -b && vite build`) + vitest (**280 passing**). Use **`npm run
+> build`**, NOT `npx tsc --noEmit` — the latter uses the root `tsconfig.json` which has
+> no `noUnusedLocals`/`noUnusedParameters` and misses the strict project-reference errors
+> that the prod build enforces. **Worker has NO hot-reload** (restart for worker/task/scraper
+> edits); backend uses uvicorn --reload.
 >
 > **⚠️ Render-backend gotcha (2026-07-02):** headless rendering uses the **`vtk-osmesa`** wheel
 > (Kitware index `https://wheels.vtk.org`) + `libosmesa6` — NOT the stock PyPI `vtk` wheel, which is

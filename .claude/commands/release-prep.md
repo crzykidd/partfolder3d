@@ -28,8 +28,11 @@ Run in order; stop on first failure:
 # 1. Backend lint
 ruff check backend/
 
-# 2. Frontend type-check
-cd frontend && npx tsc --noEmit
+# 2. Frontend build (tsc -b + vite build). MUST be `npm run build`, NOT
+#    `npx tsc --noEmit`: the latter uses the root tsconfig.json (references-only)
+#    and skips the project-reference strict settings (noUnusedLocals, full type
+#    checks) that the prod image build enforces — it misses real build errors.
+cd frontend && npm run build
 
 # 3. Frontend tests
 cd frontend && npx vitest run

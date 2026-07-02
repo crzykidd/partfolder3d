@@ -2,6 +2,33 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-02 — Frontend typecheck gate is `npm run build`, not `npx tsc --noEmit`
+
+**Problem:** The frontend production image (`frontend/Dockerfile --target prod`) runs
+`npm run build` (`tsc -b && vite build`). The `tsc -b` mode compiles project references
+(`tsconfig.app.json` / `tsconfig.node.json`), which set `noUnusedLocals: true` and
+`noUnusedParameters: true`. The root `tsconfig.json` is a references-only file with none
+of those strict settings. `npx tsc --noEmit` always reads the root tsconfig, so it
+silently passes with zero errors even when the real prod build has ~24 errors. CI and
+`/release-prep` were both using `npx tsc --noEmit`, meaning the frontend prod image had
+never successfully built.
+
+**Fix:** Changed the `frontend` job step in `ci.yml` and `dev-checks.yml` from
+`npx tsc --noEmit` to `npm run build`. Updated `/release-prep` to use `npm run build`
+as the frontend validation gate. The correct rule: **always use `npm run build` to
+validate the frontend; never `npx tsc --noEmit`**.
+
+**Type fixes required:** 24 errors were present — ~20 TS6133 unused-import/variable
+removals (automatic JSX runtime makes bare `import React` unnecessary in all non-class
+files that don't reference `React.*`), plus 4 real type errors:
+- `SideNavShell.tsx`: `useLocalStorage` setter only accepts `T`, not a functional
+  updater — fixed by using the already-captured `collapsedGroups` state directly.
+- `CatalogPage.tsx`: `favMutation` needed explicit generics
+  `useMutation<FavoriteOut | void, Error, ...>` because `favoriteItem` returns
+  `Promise<FavoriteOut>` and `unfavoriteItem` returns `Promise<void>`.
+- `AiUsagePage.tsx`: `icon={Activity}` passed a Lucide component constructor where
+  `ReactNode` was expected — fixed to `icon={<Activity size={32} />}`.
+
 ## 2026-07-02 — Baked nginx image: dedicated Dockerfile, `/img/` alias, release-note callout rule
 
 **Problem (why a dedicated nginx image):** `publish.yml` originally built only the backend

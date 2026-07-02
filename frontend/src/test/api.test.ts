@@ -106,9 +106,7 @@ describe('CSRF header injection', () => {
   })
 
   it('does NOT add X-CSRF-Token when cookie is absent', async () => {
-    // No cookie set
-    const { listApiKeys } = await import('@/lib/api')
-    // List is GET, but let's test a mutation without cookie
+    // No cookie set; test a mutation without cookie
     const { createApiKey } = await import('@/lib/api')
     await createApiKey('test-label')
     expect(capturedMethod).toBe('POST')

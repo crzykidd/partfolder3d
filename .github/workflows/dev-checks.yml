@@ -43,8 +43,8 @@ jobs:
       - name: Install frontend deps
         run: npm ci
         working-directory: frontend
-      - name: Type-check frontend (tsc --noEmit)
-        run: npx tsc --noEmit
+      - name: Build frontend (tsc -b + vite build)
+        run: npm run build
         working-directory: frontend
       - name: Run vitest
         run: npm test
