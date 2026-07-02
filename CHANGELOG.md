@@ -20,6 +20,16 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Native `<select>` dropdowns no longer render a white option list in dark mode**
+  (fixes #6, #10) — the signup Timezone picker and the Add Asset Library selector
+  showed a white popup because the aurora input background is semi-transparent
+  (`rgba(255,255,255,0.06)`), which over a native option popup's own light base is
+  effectively white, and `color-scheme: dark` alone doesn't reliably darken option
+  lists (notably Chrome on Windows). Options now get an explicit opaque dark surface
+  + light text in dark mode.
+
 ### Added
 
 - **Folder browser for library mount-path setup** — the Add Library form now
