@@ -57,6 +57,34 @@ export interface ObjectAnalysis {
   dims_mm: [number, number, number] | null
 }
 
+// ---------------------------------------------------------------------------
+// render-rework-A — 3MF sliced metadata types
+// ---------------------------------------------------------------------------
+
+/** One filament slot from 3MF slicer metadata (slice_info.config). */
+export interface FilamentEntry {
+  /** 1-indexed filament slot number. */
+  slot: number
+  /** Filament type, e.g. "PLA", "PETG". */
+  type: string | null
+  /** Hex color string, e.g. "#FF0000". */
+  color_hex: string | null
+  /** Filament used in grams. */
+  used_g: number | null
+  /** Filament used in meters. */
+  used_m: number | null
+}
+
+/** One plate entry from 3MF slicer metadata (slice_info.config). */
+export interface PlateEntry {
+  /** 1-indexed plate number. */
+  index: number
+  /** Estimated print time in seconds. */
+  print_time_s: number | null
+  /** Total filament weight for this plate in grams. */
+  weight_g: number | null
+}
+
 export interface FileObjectAnalysis {
   /** ISO datetime when this file was last analyzed. */
   analyzed_at: string
@@ -73,6 +101,24 @@ export interface FileObjectAnalysis {
   total_colors: number
   /** Sum of est_grams across all objects. */
   total_est_grams: number
+
+  // render-rework-A: sliced-3MF extra fields (absent for STL/OBJ and unsliced 3MF)
+  /** 'sliced' when numbers come from slicer; 'volume' for trimesh estimate. */
+  est_method?: 'volume' | 'sliced' | string
+  /** True when the 3MF file was sliced (Bambu/Orca) and slicer data was read. */
+  sliced?: boolean
+  /** Slicer name/version string, e.g. "BambuStudio 01.09.00.57". */
+  slicer?: string | null
+  /** Printer model string from project_settings.config. */
+  printer_model?: string | null
+  /** Total print time in seconds (sum across all plates). */
+  print_time_s?: number | null
+  /** Total plate count. */
+  plate_count?: number
+  /** Per-filament slot details. */
+  filament?: FilamentEntry[]
+  /** Per-plate breakdown. */
+  plates?: PlateEntry[]
 }
 
 export interface FileOut {
@@ -83,6 +129,8 @@ export interface FileOut {
   sha256: string | null
   /** Phase 16: per-object analysis; null until worker has run. */
   object_analysis: FileObjectAnalysis | null
+  /** render-rework-A: true when the file can be previewed in the browser 3D viewer. */
+  preview_3d: boolean
 }
 
 export interface ImageOut {

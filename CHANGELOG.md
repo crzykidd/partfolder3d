@@ -22,6 +22,33 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **File-tree browser** — the flat file list in the "Files & Downloads" section
+  is replaced with a collapsible folder hierarchy built client-side from each
+  file's path. Folders expand/collapse with chevron controls; top-level folders
+  default to expanded. Per-file row shows: role badge · file size · Download
+  link. Image files show a small inline thumbnail.
+- **"View in 3D" button (stub)** — any file with `preview_3d=true` (`.stl`,
+  `.obj`, `.3mf` under the size cap) shows a "View in 3D" button in its file
+  row. The button is a placeholder for the browser viewer arriving in Phase D;
+  it is disabled with an explanatory tooltip so Phase D can slot in without
+  restructuring.
+- **3MF collapsible detail panel** — each `.3mf` file with a completed
+  analysis shows a "Details" toggle in the file tree. The collapsed summary
+  shows: Sliced/Unsliced badge · total print time · total filament weight ·
+  plate count · filament count · embedded slicer thumbnail. Expanded view
+  shows per-filament rows (color swatch · type · grams · meters), per-plate
+  breakdown (index · time · weight), and the per-object/filament-slot list.
+  Sliced data is clearly labelled "Real slicer data"; unsliced shows a
+  volume-estimate warning.
+- **"Slicer" badge on embedded thumbnails** — images with `source=embedded`
+  (extracted from `.3mf` files by Phase A) now appear in the image carousel
+  with a green "Slicer" badge, consistent with the "Rendered" badge for
+  server-rendered images. The thumbnail strip also shows a small "S" indicator.
+- **STL/OBJ Object Breakdown is now collapsible per-file** — the "Object
+  Breakdown" section uses the same expand/collapse pattern as the 3MF panel,
+  with each analyzed file starting collapsed. When all model files are sliced
+  3MFs the section shows a note directing users to the inline panels above.
+
 - **ZIP auto-extraction** — uploaded or imported ZIP files are automatically
   extracted into the item directory when the import is committed. Internal folder
   structure is preserved; a lone top-level wrapper folder is stripped; filenames

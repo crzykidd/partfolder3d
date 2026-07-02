@@ -47,6 +47,35 @@ slim + migration), **B** backend (ZIP extraction), **C** frontend (file tree + 3
 **D** frontend (browser viewer). Dispatched sequentially — B/C/D branch off A's committed state to
 avoid migration/config/worker-registry conflicts.
 
+### Phase C implementation details (2026-07-01)
+
+- **Embedded thumbnail matching is best-effort in Phase C** — the backend stores
+  embedded 3MF thumbnails as `Image` rows with `source=embedded`, but there is no
+  `file_id` FK linking an image to its source 3MF file. Phase C shows the first
+  `source=embedded` image from `item.images` as the thumbnail in all 3MF collapsed
+  panels. When an item has multiple 3MF files with distinct thumbnails this will show
+  the wrong thumbnail for all but the first. Deferred to Phase D (or a future schema
+  addition of `file_id` on `Image`) to do per-file correlation.
+- **3MF Detail toggle is a separate button, not integrated into the folder expand.**
+  The file row has a "Details" button that independently opens the inline ThreeMfPanel.
+  Opening Details auto-passes `defaultExpanded=true` to the panel so no second click
+  is needed. This keeps the Download and View-in-3D affordances always visible without
+  requiring the user to expand the 3MF analysis first.
+- **STL/OBJ ObjectBreakdown section now filters out sliced 3MF files** — it only
+  shows files with `est_method !== 'sliced'`. When every model file is a sliced 3MF
+  the section renders an explanatory redirect note. This avoids duplicating data between
+  the inline 3MF panels (in the file tree) and the Object Breakdown section.
+- **"View in 3D" button is a disabled stub** — Phase C renders the button for every
+  file with `preview_3d=true`, but it is always disabled (opacity 0.45, cursor
+  not-allowed, tooltip "coming in the next update"). The `ViewIn3DButton` component
+  accepts an optional `onView` prop; Phase D passes the real viewer handler there
+  without restructuring the file row.
+- **Top-level folder nodes default to expanded; deeper nodes default collapsed** —
+  `FolderNode` receives `defaultExpanded` from its parent. `TreeNodes` at `depth=0`
+  passes `defaultExpanded={true}`; at `depth>0` it passes nothing (defaults false).
+  This heuristic keeps short item directories fully visible while preventing deep
+  hierarchies from overwhelming the panel.
+
 ### Phase B implementation details (2026-07-01)
 
 - **Cap failures are pre-scan only** — file-count, total-uncompressed-size, and zip-bomb ratio

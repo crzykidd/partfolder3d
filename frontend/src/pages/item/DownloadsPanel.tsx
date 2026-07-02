@@ -1,22 +1,352 @@
+/**
+ * DownloadsPanel — file-tree browser + ZIP download for a catalog item.
+ *
+ * Renders a recursive folder hierarchy built client-side from `FileOut.path`.
+ * Type-aware affordances per file row:
+ *  - image → small inline thumbnail
+ *  - preview_3d === true → "View in 3D" stub button (Phase D wires the viewer)
+ *  - .3mf → collapsible ThreeMfPanel below the file row
+ *
+ * The "Download all as ZIP" section (with include-print-history toggle and
+ * 2-second poll) is kept unchanged below the tree.
+ */
+
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { Download } from 'lucide-react'
+import { ChevronDown, ChevronRight, Download, Box } from 'lucide-react'
 
 import * as api from '@/lib/api'
 import { mapBundleStatus, shouldContinuePolling, type ZipPollStatus } from '@/lib/catalog-utils'
-
+import { buildFileTree, is3mf, isImagePath, type FileTreeNode, type FileTreeFolder } from '@/lib/file-tree'
+import { ThreeMfPanel } from './ThreeMfPanel'
 import { AURORA_BTN_GHOST, AURORA_BTN_PRIMARY, formatBytes } from './styles'
 
 // ---------------------------------------------------------------------------
-// Downloads section
+// Role badge
+// ---------------------------------------------------------------------------
+
+const ROLE_BADGE_COLORS: Record<string, { bg: string; color: string }> = {
+  model:   { bg: 'rgba(15,164,171,0.12)', color: '#0FA4AB' },
+  image:   { bg: 'rgba(139,92,246,0.12)', color: '#A78BFA' },
+  project: { bg: 'rgba(245,158,11,0.12)', color: '#D97706' },
+  support: { bg: 'rgba(99,102,241,0.12)', color: '#818CF8' },
+  history: { bg: 'rgba(16,185,129,0.10)', color: '#10B981' },
+}
+
+function RoleBadge({ role }: { role: string }) {
+  const c = ROLE_BADGE_COLORS[role] ?? { bg: 'var(--aurora-glass)', color: 'var(--aurora-muted)' }
+  return (
+    <span
+      style={{
+        fontSize: 9,
+        fontWeight: 700,
+        padding: '1px 6px',
+        borderRadius: 20,
+        background: c.bg,
+        color: c.color,
+        border: `1px solid ${c.color}33`,
+        flexShrink: 0,
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+      }}
+    >
+      {role}
+    </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// View-in-3D stub (Phase D will slot in the real viewer)
+// ---------------------------------------------------------------------------
+
+/**
+ * "View in 3D" button — stub placeholder for Phase D.
+ * Disabled with a tooltip explaining that the viewer is coming soon.
+ * Phase D replaces the onClick with the real viewer open handler.
+ *
+ * @param onView - Optional callback; when provided the button becomes active.
+ *   Phase D passes the real handler here. Phase C leaves it undefined.
+ */
+function ViewIn3DButton({ onView }: { onView?: (filePath: string, fileId: number) => void; filePath?: string; fileId?: number }) {
+  const isStub = onView == null
+  return (
+    <button
+      disabled={isStub}
+      title={isStub ? 'In-browser 3D viewer coming in the next update' : 'Open in 3D viewer'}
+      onClick={isStub ? undefined : () => {/* Phase D wires this */}}
+      style={{
+        ...AURORA_BTN_GHOST,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 5,
+        opacity: isStub ? 0.45 : 1,
+        cursor: isStub ? 'not-allowed' : 'pointer',
+        fontSize: 11,
+        padding: '4px 10px',
+      }}
+    >
+      <Box size={11} />
+      View in 3D
+    </button>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// File row — one leaf node in the tree
+// ---------------------------------------------------------------------------
+
+interface FileRowProps {
+  itemKey: string
+  file: api.FileOut
+  /** First embedded image for the item — shown as 3MF panel thumbnail. */
+  firstEmbeddedImage: api.ImageOut | null
+  depth: number
+  isLast: boolean
+}
+
+function FileRow({ itemKey, file, firstEmbeddedImage, depth }: FileRowProps) {
+  const [threeMfOpen, setThreeMfOpen] = useState(false)
+  const basename = file.path.split('/').pop() ?? file.path
+  const isImg = isImagePath(file.path)
+  const is3mfFile = is3mf(file.path)
+  const hasAnalysis = file.object_analysis != null
+
+  return (
+    <div>
+      {/* File row */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '8px 12px',
+          paddingLeft: 12 + depth * 20,
+          transition: 'background 0.1s',
+        }}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--aurora-glass-hover, rgba(255,255,255,0.04))' }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = '' }}
+      >
+        {/* Inline thumbnail for image files */}
+        {isImg && (
+          <img
+            src={`/api/items/${itemKey}/files/${file.path}`}
+            alt={basename}
+            style={{
+              width: 32,
+              height: 32,
+              objectFit: 'cover',
+              borderRadius: 5,
+              border: '1px solid var(--aurora-glass-border)',
+              flexShrink: 0,
+            }}
+            loading="lazy"
+          />
+        )}
+
+        {/* Filename + meta */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 500,
+              fontFamily: 'monospace',
+              color: 'var(--aurora-text)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+            title={file.path}
+          >
+            {basename}
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <RoleBadge role={file.role} />
+            <span style={{ fontSize: 10, color: 'var(--aurora-muted)' }}>{formatBytes(file.size)}</span>
+          </div>
+        </div>
+
+        {/* Action buttons */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
+          {/* View in 3D stub — Phase D replaces the stub with a real handler */}
+          {file.preview_3d && (
+            <ViewIn3DButton />
+          )}
+
+          {/* 3MF expand toggle */}
+          {is3mfFile && hasAnalysis && (
+            <button
+              onClick={() => setThreeMfOpen((v) => !v)}
+              aria-expanded={threeMfOpen}
+              title={threeMfOpen ? 'Collapse 3MF details' : 'Show 3MF details'}
+              style={{
+                ...AURORA_BTN_GHOST,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                fontSize: 11,
+                padding: '4px 10px',
+              }}
+            >
+              {threeMfOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+              Details
+            </button>
+          )}
+
+          {/* Download link */}
+          <a
+            href={api.fileDownloadUrl(itemKey, file.path)}
+            download
+            style={{
+              ...AURORA_BTN_GHOST,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              textDecoration: 'none',
+              fontSize: 11,
+              padding: '4px 10px',
+            }}
+          >
+            <Download size={11} />
+            Download
+          </a>
+        </div>
+      </div>
+
+      {/* 3MF collapsible panel — inline below the file row */}
+      {is3mfFile && hasAnalysis && threeMfOpen && (
+        <div style={{ padding: '0 12px 10px', paddingLeft: 12 + depth * 20 }}>
+          <ThreeMfPanel
+            fileName={basename}
+            analysis={file.object_analysis!}
+            embeddedThumbnail={firstEmbeddedImage}
+            itemKey={itemKey}
+            defaultExpanded
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Folder node — collapsible folder with children
+// ---------------------------------------------------------------------------
+
+interface FolderNodeProps {
+  folder: FileTreeFolder
+  itemKey: string
+  firstEmbeddedImage: api.ImageOut | null
+  depth: number
+  defaultExpanded?: boolean
+}
+
+function FolderNode({ folder, itemKey, firstEmbeddedImage, depth, defaultExpanded = true }: FolderNodeProps) {
+  const [open, setOpen] = useState(defaultExpanded)
+
+  return (
+    <div>
+      {/* Folder header row */}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 7,
+          width: '100%',
+          padding: '7px 12px',
+          paddingLeft: 12 + depth * 20,
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          textAlign: 'left',
+          color: 'var(--aurora-text-dim)',
+          transition: 'background 0.1s',
+        }}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover, rgba(255,255,255,0.04))' }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '' }}
+      >
+        <span style={{ color: 'var(--aurora-muted)' }}>
+          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        </span>
+        <span style={{ fontSize: 12, fontWeight: 600, fontFamily: 'monospace' }}>
+          {folder.name}/
+        </span>
+        <span style={{ fontSize: 10, color: 'var(--aurora-muted)', marginLeft: 2 }}>
+          {folder.children.length} item{folder.children.length !== 1 ? 's' : ''}
+        </span>
+      </button>
+
+      {/* Children */}
+      {open && (
+        <div style={{ borderLeft: '1px solid var(--aurora-divider)', marginLeft: 12 + depth * 20 + 6 }}>
+          <TreeNodes
+            nodes={folder.children}
+            itemKey={itemKey}
+            firstEmbeddedImage={firstEmbeddedImage}
+            depth={depth + 1}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TreeNodes — renders a list of FileTreeNode[]
+// ---------------------------------------------------------------------------
+
+interface TreeNodesProps {
+  nodes: FileTreeNode[]
+  itemKey: string
+  firstEmbeddedImage: api.ImageOut | null
+  depth: number
+}
+
+function TreeNodes({ nodes, itemKey, firstEmbeddedImage, depth }: TreeNodesProps) {
+  return (
+    <>
+      {nodes.map((node, idx) =>
+        node.type === 'folder' ? (
+          <FolderNode
+            key={node.name}
+            folder={node}
+            itemKey={itemKey}
+            firstEmbeddedImage={firstEmbeddedImage}
+            depth={depth}
+            defaultExpanded={depth === 0}
+          />
+        ) : (
+          <div
+            key={node.file.id}
+            style={{ borderTop: idx > 0 ? '1px solid var(--aurora-divider)' : 'none' }}
+          >
+            <FileRow
+              itemKey={itemKey}
+              file={node.file}
+              firstEmbeddedImage={firstEmbeddedImage}
+              depth={depth}
+              isLast={idx === nodes.length - 1}
+            />
+          </div>
+        ),
+      )}
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Downloads section (public API)
 // ---------------------------------------------------------------------------
 
 export interface DownloadsSectionProps {
   itemKey: string
   files: api.FileOut[]
+  /** Full image list — used to find embedded thumbnails for 3MF panels. */
+  images?: api.ImageOut[]
 }
 
-export function DownloadsSection({ itemKey, files }: DownloadsSectionProps) {
+export function DownloadsSection({ itemKey, files, images = [] }: DownloadsSectionProps) {
   const [bundleId, setBundleId] = useState<string | null>(null)
   const [zipStatus, setZipStatus] = useState<ZipPollStatus>('idle')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -90,17 +420,21 @@ export function DownloadsSection({ itemKey, files }: DownloadsSectionProps) {
   }, [bundleId, zipStatus, itemKey])
 
   const zipLabel: Record<ZipPollStatus, string> = {
-    idle: 'Download all as ZIP',
-    queued: 'Queued…',
+    idle:     'Download all as ZIP',
+    queued:   'Queued…',
     building: 'Building ZIP…',
-    ready: 'Download ZIP',
-    failed: 'ZIP failed — retry?',
-    expired: 'ZIP expired — retry?',
+    ready:    'Download ZIP',
+    failed:   'ZIP failed — retry?',
+    expired:  'ZIP expired — retry?',
   }
+
+  // Build tree and find first embedded thumbnail (best-effort per Phase C)
+  const tree = buildFileTree(files)
+  const firstEmbeddedImage = images.find((img) => img.source === 'embedded') ?? null
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* Individual files */}
+      {/* File tree */}
       {files.length === 0 ? (
         <p style={{ fontSize: 12, color: 'var(--aurora-muted)', fontStyle: 'italic', margin: 0 }}>
           No files catalogued yet.
@@ -114,45 +448,12 @@ export function DownloadsSection({ itemKey, files }: DownloadsSectionProps) {
             overflow: 'hidden',
           }}
         >
-          {files.map((file, idx) => (
-            <div
-              key={file.id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '10px 14px',
-                borderTop: idx > 0 ? '1px solid var(--aurora-divider)' : 'none',
-                transition: 'background 0.1s',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--aurora-glass-hover)' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <span style={{ fontSize: 12, fontWeight: 500, fontFamily: 'monospace', color: 'var(--aurora-text)' }}>
-                  {file.path}
-                </span>
-                <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>
-                  {file.role} · {formatBytes(file.size)}
-                </span>
-              </div>
-              <a
-                href={api.fileDownloadUrl(itemKey, file.path)}
-                download
-                style={{
-                  ...AURORA_BTN_GHOST,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  textDecoration: 'none',
-                  flexShrink: 0,
-                }}
-              >
-                <Download size={12} />
-                Download
-              </a>
-            </div>
-          ))}
+          <TreeNodes
+            nodes={tree}
+            itemKey={itemKey}
+            firstEmbeddedImage={firstEmbeddedImage}
+            depth={0}
+          />
         </div>
       )}
 
