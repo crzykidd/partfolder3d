@@ -22,6 +22,12 @@ prefix appears only on git tags and GitHub releases.
 
 ### Fixed
 
+- **Corrected the settings location text on the version/landing page** — the
+  info card said "Admin → Settings" but that nav item does not exist; library
+  paths and configuration live under **Admin → Content**. The text now links
+  directly to `/admin/content/libraries` using React Router `<Link>` so it
+  cannot silently drift out of sync again. (Fixes #7)
+
 - **Images and renders now display in production** (nginx no longer 404s
   `/api/…/*.png`) — the baked nginx config's static-asset regex
   (`location ~* \.(png|jpg|js|…)$`) matched *any* URL ending in an image

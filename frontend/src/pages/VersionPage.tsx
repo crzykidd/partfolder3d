@@ -7,6 +7,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { Info, Server } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 import { AdminPage, PageHeader, Card, SectionHeader } from '@/components/ui'
 
@@ -106,7 +107,12 @@ export function VersionPage() {
           <Info size={15} style={{ color: 'var(--aurora-accent)', flexShrink: 0, marginTop: 1 }} />
           <p style={{ margin: 0, fontSize: 13, color: 'var(--aurora-text-dim)', lineHeight: 1.6 }}>
             Configuration, library paths, and system settings are managed in{' '}
-            <strong>Admin → Settings</strong>. For help or to report issues, see the
+            <Link
+              to="/admin/content/libraries"
+              style={{ color: 'var(--aurora-accent)', textDecoration: 'none', fontWeight: 600 }}
+            >
+              Admin → Content
+            </Link>. For help or to report issues, see the
             project repository.
           </p>
         </div>
