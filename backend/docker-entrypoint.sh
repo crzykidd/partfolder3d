@@ -17,11 +17,23 @@
 #   MIGRATION_STATEMENT_TIMEOUT_MS (300000) max runtime for a single migration statement
 set -e
 
+# Stream all Python output (app, worker, alembic) in real time — never buffer,
+# so a hang or failure always shows output instead of going dark.
+export PYTHONUNBUFFERED=1
+
 log() { echo "[entrypoint] $*"; }
 fatal() { echo "[entrypoint] FATAL: $*" >&2; exit 1; }
 
+# --- Startup banner: version + environment so a user's log paste is, on its own,
+#     enough to report a bug. Nothing sensitive — the DB password is redacted. ---
+app_version="$(python -c 'from app.version import __version__; print(__version__)' 2>/dev/null || echo unknown)"
+db_target="$(printf '%s' "${DATABASE_URL:-<unset>}" | sed -E 's#(://[^:/@]+):[^@]*@#\1:***@#')"
+log "PartFolder 3D v${app_version} starting — uid=$(id -u) gid=$(id -g), RUN_MIGRATIONS=${RUN_MIGRATIONS:-false}"
+log "DATABASE_URL=${db_target}"
+log "DATA_DIR=${DATA_DIR:-/data}"
+
 if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
-    log "starting migration bootstrap as uid=$(id -u) gid=$(id -g)"
+    log "this is the migration service — running DB bootstrap before the app starts"
 
     # --- 1. Data-dir writability (catches PUID/PGID + volume-ownership problems) ---
     DATA_DIR="${DATA_DIR:-/data}"
@@ -54,7 +66,6 @@ The mounted volume/host path must be owned by (or writable to) PUID:PGID — see
     #        hard backstop so this step can never hang forever — it fails with a
     #        clear message naming the last migration. env.py also bounds lock/
     #        statement time so a lock-blocked migration errors on its own in ~30s. ---
-    export PYTHONUNBUFFERED=1
     mig_timeout="${MIGRATION_TIMEOUT:-600}"
     log "current database revision (before upgrade):"
     timeout 30 alembic current || log "  (could not read current revision within 30s — see above)"

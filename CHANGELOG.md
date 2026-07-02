@@ -30,10 +30,14 @@ prefix appears only on git tags and GitHub releases.
   writable and prints a clear FATAL on a permissions problem, (2) waits for the
   database with a bounded timeout and logs the **actual** connection error
   (`ConnectionRefusedError`, `InvalidPasswordError`, …) on each attempt, and (3)
-  runs migrations with a `lock_timeout`/`statement_timeout` so a blocked migration
-  errors with a clear message instead of hanging forever. Tunable via
-  `DB_WAIT_TIMEOUT`, `DB_CONNECT_TIMEOUT`, `MIGRATION_LOCK_TIMEOUT_MS`,
-  `MIGRATION_STATEMENT_TIMEOUT_MS`.
+  runs migrations with a `lock_timeout`/`statement_timeout` **and** a hard
+  `MIGRATION_TIMEOUT` (default 600s) so a blocked migration errors with a clear
+  message naming the culprit instead of hanging forever. It also logs a startup
+  banner — app **version**, uid/gid, the current DB revision before upgrading, and
+  the `DATABASE_URL` **with the password redacted** — plus streams alembic's
+  per-migration output live (`PYTHONUNBUFFERED`), so a user's log paste alone is
+  enough to report an issue. Tunable via `DB_WAIT_TIMEOUT`, `DB_CONNECT_TIMEOUT`,
+  `MIGRATION_LOCK_TIMEOUT_MS`, `MIGRATION_STATEMENT_TIMEOUT_MS`, `MIGRATION_TIMEOUT`.
 
 ## [0.2.3] — 2026-07-02
 
