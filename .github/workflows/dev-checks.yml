@@ -1,17 +1,19 @@
 name: Dev checks
 
-# Fast, per-push feedback on the dev branch. These are NON-required checks with
-# their own "Dev checks / *" contexts, deliberately distinct from the required
-# "CI / *" contexts (ci.yml) so they can never collide and re-create the stuck
-# "Expected — Waiting" state. The heavy parallel Test, image build, and CodeQL
-# run only on the dev→main PR (ci.yml / codeql.yml), so dev pushes stay cheap.
+# Fast, per-push feedback on the dev branch — NON-required checks. GitHub Actions
+# binds branch-protection required checks by the BARE job name (e.g. "Lint",
+# "Test"), NOT "workflow / job". main's required contexts are the bare ci.yml job
+# names, so every job here is suffixed "(dev)" to guarantee a distinct check-run
+# name that can never satisfy (or shadow) a required context. The heavy parallel
+# Test, image build, and CodeQL run only on the dev→main PR (ci.yml / codeql.yml),
+# so dev pushes stay cheap.
 on:
   push:
     branches: [dev]
 
 jobs:
   lint:
-    name: Lint
+    name: Lint (dev)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -28,7 +30,7 @@ jobs:
           ruff check backend/
 
   frontend:
-    name: Frontend
+    name: Frontend (dev)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -49,7 +51,7 @@ jobs:
         working-directory: frontend
 
   config-validate:
-    name: Config validation
+    name: Config validation (dev)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -85,7 +87,7 @@ jobs:
           EOF
 
   compose-validate:
-    name: Compose validation
+    name: Compose validation (dev)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -95,7 +97,7 @@ jobs:
         run: docker compose -f docker-compose.dev.yml config --quiet
 
   migration-check:
-    name: Migration check
+    name: Migration check (dev)
     runs-on: ubuntu-latest
     services:
       postgres:
