@@ -302,8 +302,8 @@ transfer, and resilience against database loss.
 
 | Container  | Role |
 |------------|------|
-| `nginx`    | Single external entry point / reverse proxy; serves frontend, proxies `/api`, streams downloads. |
-| `frontend` | Build artifact (served by nginx) — React + TypeScript + Vite + Tailwind + shadcn/ui. |
+| `nginx`    | Single external entry point / reverse proxy; serves the built UI **read-only from the shared `frontend_dist` volume**, proxies `/api`, streams downloads. |
+| `frontend` | **One-time-run** container (`restart: "no"`) — copies the built React/TypeScript/Vite UI into the shared `frontend_dist` volume, then **exits 0** (expected). nginx waits for it, then serves those files. |
 | `backend`  | FastAPI app — REST API, auth, OpenAPI docs. |
 | `worker`   | Background jobs — scans, imports, thumbnail rendering, AI tagging, scraping, backups, sync. |
 | `redis`    | Job queue + scheduling broker. |
@@ -433,6 +433,21 @@ What happens on first `docker compose up -d`:
 - **nginx config is baked into the `partfolder3d-nginx` image** — the reverse proxy config
   (`client_max_body_size 1024m`, `/api/` proxy, SPA fallback, `/img/` logos) ships inside
   the image so no host config files are needed. The baked default is the supported path.
+- **The `frontend` container runs once and exits — this is normal.** It copies the built UI
+  into the shared `frontend_dist` volume and exits `0` (`restart: "no"`); nginx waits for it
+  (`depends_on: service_completed_successfully`), then serves those files. A `frontend`
+  showing `Exited (0)` in `docker compose ps` is expected, not a failure.
+
+> [!IMPORTANT]
+> **`frontend` + `nginx` share the `frontend_dist` volume, and it must be writable by your
+> `PUID`/`PGID`.** The `frontend` container **writes** the built UI into `frontend_dist` as
+> your configured `PUID:PGID`; `nginx` then **serves it read-only** from the same volume. Run
+> the app services (`backend`, `worker`, `frontend`) with the **same `PUID`/`PGID`** so
+> ownership of that shared volume stays consistent. On a fresh install this just works. If you
+> **reuse an old volume or change `PUID`/`PGID`**, the frontend can fail to write it and exit
+> with `FATAL: '/dist' … is not writable by uid=… gid=…` (which blocks nginx). Fix it by
+> recreating the volumes — `docker compose down -v` (⚠️ also wipes db/redis/`./data`) — or
+> `chown` the `frontend_dist` volume to your `PUID:PGID`.
 
 > [!TIP]
 > **Custom nginx config** — if you need to adjust the nginx config (e.g. to add TLS
