@@ -20,6 +20,8 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-01
+
 ### Added
 
 - **Per-file 3MF thumbnails** — each `.3mf` file now carries its own thumbnail

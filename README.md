@@ -11,7 +11,7 @@
 </div>
 
 > [!WARNING]
-> **Early alpha (v0.1.1) — under active development.** This is an early release: expect rough
+> **Early alpha (v0.2.0) — under active development.** This is an early release: expect rough
 > edges, and **breaking changes can land between releases** (database schema, config, or API).
 > It's usable and published — pull the images and follow [Getting started](#getting-started) — but
 > **pin a specific version, back up your data, and read the release notes before upgrading.**
@@ -19,7 +19,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.1.1-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.2.0-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![Stage](https://img.shields.io/badge/stage-alpha-orange)
 ![Code](https://img.shields.io/badge/code-yes-brightgreen)
@@ -31,6 +31,18 @@
 ---
 
 ## What's New
+
+### v0.2.0 (2026-07-01)
+
+Asset-detail and 3D overhaul. **3MF files are now read, not rendered** — the slicer's
+embedded thumbnail and real slice data (print time, filament grams/meters, colors, plate
+and object counts) are extracted directly, and each `.3mf` shows its own thumbnail.
+**Uploaded/imported ZIPs auto-extract** into the item with folder structure preserved (lone
+wrapper folder stripped, collisions renamed, zip-slip/zip-bomb guarded). The Files &
+Downloads list is now a **collapsible folder tree**, and clicking a model opens an
+**interactive in-browser 3D viewer** (STL/OBJ/3MF, lazy-loaded so it never bloats the initial
+page). Server rendering is bounded to STL/OBJ/PLY and now runs on a headless `vtk-osmesa`
+backend (no X server). See [CHANGELOG.md](CHANGELOG.md) for the full details.
 
 ### v0.1.1 (2026-07-01)
 
@@ -74,7 +86,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.1.1 alpha) — see the
+> The full feature set below is **built and released** (v0.2.0 alpha) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -338,7 +350,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is at the **alpha** stage (v0.1.1).
+Honest snapshot — this project is at the **alpha** stage (v0.2.0).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -477,6 +489,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — alpha (v0.1.1) · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — alpha (v0.2.0) · built by <code>crzykidd</code></sub>
 
 </div>
