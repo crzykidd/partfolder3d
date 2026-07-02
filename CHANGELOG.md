@@ -22,6 +22,14 @@ prefix appears only on git tags and GitHub releases.
 
 ### Fixed
 
+- **Frontend "publish" container now logs a version banner and fails loudly** —
+  previously it ran a bare `cp … && echo` and exited silently, so a failed asset
+  copy (most often the `frontend_dist` volume not being writable by the
+  configured `PUID`/`PGID`) blocked nginx with no explanation. It now logs
+  `PartFolder 3D frontend vX.Y.Z — uid=… gid=…`, verifies the destination is
+  writable (clear FATAL + remediation if not), reports how many files it
+  published, and states that exit 0 is expected.
+
 - **`ALLOWED_ORIGINS` no longer crashes the app when set as a comma-separated
   string** — `.env.example` documents the comma form
   (`ALLOWED_ORIGINS=https://a,https://b`), but pydantic-settings JSON-decodes
