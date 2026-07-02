@@ -22,6 +22,16 @@ prefix appears only on git tags and GitHub releases.
 
 ### Fixed
 
+- **Images and renders now display in production** (nginx no longer 404s
+  `/api/…/*.png`) — the baked nginx config's static-asset regex
+  (`location ~* \.(png|jpg|js|…)$`) matched *any* URL ending in an image
+  extension, including proxied item images like
+  `/api/items/<key>/files/renders/<sha>.png` and baked logos under `/img/`. Because
+  regex locations are evaluated before plain prefixes, those requests were served
+  from nginx's frontend root (where they don't exist) and returned 404 instead of
+  being proxied to the backend — so thumbnails/renders never rendered. The `/api/`
+  and `/img/` locations now use `^~` to take precedence over the regex.
+
 - **Frontend "publish" container now logs a version banner and fails loudly** —
   previously it ran a bare `cp … && echo` and exited silently, so a failed asset
   copy (most often the `frontend_dist` volume not being writable by the
