@@ -22,6 +22,17 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **ZIP auto-extraction** — uploaded or imported ZIP files are automatically
+  extracted into the item directory when the import is committed. Internal folder
+  structure is preserved; a lone top-level wrapper folder is stripped; filenames
+  that collide with existing files are renamed (`cover (1).png`, …). Zip-slip
+  paths, `__MACOSX/`, `.DS_Store`, `Thumbs.db`, and `desktop.ini` entries are
+  discarded. Nested archives (`.zip` inside `.zip`) are extracted as plain files
+  (no recursion). Size/count caps (`ZIP_MAX_UNCOMPRESSED_MB` default 2048,
+  `ZIP_MAX_FILES` default 10 000) and a zip-bomb ratio guard prevent runaway
+  extractions. The original `.zip` is discarded after a successful extraction
+  (it is reconstructable via the existing ZIP-bundle download). Extracted files
+  flow through the normal inventory → analyze → render pipeline.
 - **3MF embedded thumbnail extraction** — the analysis worker now reads the
   slicer-embedded thumbnail from `.3mf` files (`Metadata/plate_1.png` preferred)
   and creates a tracked `Image` row (`source=embedded`). Embedded thumbnails appear

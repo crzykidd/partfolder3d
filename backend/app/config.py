@@ -94,5 +94,12 @@ class Settings(BaseSettings):
     # Days after which a failed/cancelled/superseded job row is hard-deleted.
     JOB_RETENTION_FAILED_DAYS: int = 30
 
+    # ---- ZIP auto-extraction (Phase B / render-rework-B) ----
+    # Maximum total uncompressed size (MB) of a single ZIP archive.
+    # Archives exceeding this cap are rejected with a clear error.
+    ZIP_MAX_UNCOMPRESSED_MB: int = 2048
+    # Maximum number of files in a single ZIP archive.
+    ZIP_MAX_FILES: int = 10_000
+
 
 settings = Settings()

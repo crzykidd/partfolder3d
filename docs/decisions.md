@@ -47,6 +47,27 @@ slim + migration), **B** backend (ZIP extraction), **C** frontend (file tree + 3
 **D** frontend (browser viewer). Dispatched sequentially — B/C/D branch off A's committed state to
 avoid migration/config/worker-registry conflicts.
 
+### Phase B implementation details (2026-07-01)
+
+- **Cap failures are pre-scan only** — file-count, total-uncompressed-size, and zip-bomb ratio
+  caps are all computable from the ZIP central directory (no decompression needed). All cap checks
+  happen before any bytes are written to the item directory, so `ArchiveError` from a cap failure
+  leaves `dest_dir` completely untouched.
+- **Temp dir for in-flight safety** — extraction writes to a sibling temp dir then moves files
+  to `dest_dir` one-by-one. The `finally` block rmtrees the temp dir so a mid-extraction crash
+  or per-file I/O error can never leave half-written files in the item directory. Per-entry
+  errors are recorded in `ExtractResult.errors` (non-fatal) — extraction of other entries
+  continues.
+- **Inventory resync via focused diff** — after extraction the task calls `inventory_item()`
+  then diffs against current File rows (delete rows whose path is gone from disk, add rows for
+  newly found paths). The full `reconcile_one_item()` engine is intentionally not used here:
+  it generates Issues/ChangeLogs which are inappropriate for an automated extraction event.
+- **`_FileRole` import is inline in sessions.py** — `FileRole` was already imported inline in
+  section 6b of `commit_import_session`. Section 14 (the new enqueue step) follows the same
+  inline-import pattern (`# noqa: PLC0415`) to keep the outer function dependency surface narrow.
+- **No new DB migration** — Phase B is purely logic (new task, new helper, new config keys).
+  No schema changes needed.
+
 ### Phase A implementation details (2026-07-01)
 
 - **`threemf.py` is GL-free and trimesh-free** — uses only `zipfile` + `lxml` + `json`. No

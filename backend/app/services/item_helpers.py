@@ -216,3 +216,25 @@ async def _enqueue_analyze(item_id: int) -> None:
         log.debug("_enqueue_analyze: analyze_item enqueued for item %s", item_id)
     except Exception:
         log.exception("_enqueue_analyze: failed to enqueue analysis for item %s", item_id)
+
+
+async def _enqueue_extract_archives(item_id: int) -> None:
+    """Fire-and-forget: enqueue extract_archives for an item that contains ZIPs.
+
+    Phase B (render-rework-B): called on import-session commit when the item
+    contains at least one role=zip file.  Never blocks item creation.
+    """
+    try:
+        from arq import create_pool  # noqa: PLC0415
+        from arq.connections import RedisSettings  # noqa: PLC0415
+
+        redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
+        await redis.enqueue_job("extract_archives", item_id)
+        await redis.aclose()
+        log.debug(
+            "_enqueue_extract_archives: extract_archives enqueued for item %s", item_id
+        )
+    except Exception:
+        log.exception(
+            "_enqueue_extract_archives: failed to enqueue for item %s", item_id
+        )
