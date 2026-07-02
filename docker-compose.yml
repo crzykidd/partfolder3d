@@ -60,6 +60,7 @@ services:
   # one-shot container that would show as "exited" in docker ps / Portainer).
   backend:
     image: ghcr.io/crzykidd/partfolder3d:latest   # pin a version: :0.1.1
+    user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped
     env_file:
       - path: .env
@@ -95,6 +96,7 @@ services:
   # ── arq background worker ──
   worker:
     image: ghcr.io/crzykidd/partfolder3d:latest   # pin a version: :0.1.1
+    user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped
     command: ["python", "worker.py"]
     env_file:
@@ -132,6 +134,7 @@ services:
   # ── Frontend static build (populates frontend_dist for nginx to serve) ──
   frontend:
     image: ghcr.io/crzykidd/partfolder3d-frontend:latest   # pin a version: :0.1.1
+    user: "${PUID:-1000}:${PGID:-1000}"
     volumes:
       - frontend_dist:/dist
     restart: "no"          # runs once to copy assets into the volume; nginx depends on completion

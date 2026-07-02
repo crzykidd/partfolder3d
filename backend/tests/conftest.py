@@ -1,18 +1,25 @@
-"""Test fixtures for Phase 1 identity tests.
+"""Test fixtures for PartFolder 3D backend tests.
 
 Database strategy:
   - Uses the ephemeral Postgres container (or whatever DATABASE_URL points to).
   - Each test gets a fresh connection with NullPool (no connection reuse across
     event loops) and a transaction that is rolled back on completion (fast isolation).
   - The migration must already be applied (upgrade head) before running tests.
+  - Under pytest-xdist (PYTEST_XDIST_WORKER set), each worker gets its own
+    per-worker database (e.g. partfolder3d_gw0) that is created and migrated at
+    worker-session start.  DATABASE_URL is rewritten at the top of this file —
+    before any app module is imported — so both the fixture engine and the app's
+    own SessionLocal (app.db) resolve to the same per-worker database.
 
 Crypto strategy:
   - Tests point DATA_DIR at a temp dir so the key file doesn't pollute /data.
   - The Fernet cache is reset between tests to pick up the temp key.
 """
 
+import asyncio
 import os
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -21,10 +28,97 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
+# ---------------------------------------------------------------------------
+# Per-worker DATABASE_URL override — MUST run before any app.* import.
+#
+# When PYTEST_XDIST_WORKER is set (e.g. "gw0", "gw1"), rewrite DATABASE_URL
+# to point at a per-worker database so workers never share a single DB and
+# never contend on each other's transactions.
+#
+# When the env var is absent (serial run / -n 0), leave DATABASE_URL untouched
+# so the existing behaviour (single DB, rollback isolation) is preserved exactly.
+# ---------------------------------------------------------------------------
+_XDIST_WORKER = os.environ.get("PYTEST_XDIST_WORKER", "")
+if _XDIST_WORKER:
+    _base_url = os.environ.get(
+        "DATABASE_URL",
+        "postgresql+asyncpg://partfolder3d:testpass@localhost:5433/partfolder3d",
+    )
+    _base_db_name = _base_url.rsplit("/", 1)[-1]
+    _worker_db_name = f"{_base_db_name}_{_XDIST_WORKER}"
+    _worker_db_url = _base_url.rsplit("/", 1)[0] + "/" + _worker_db_name
+    os.environ["DATABASE_URL"] = _worker_db_url
+
+# Now it is safe to capture TEST_DB_URL — it resolves to the per-worker URL
+# when running under xdist, or the base URL when running serially.
 TEST_DB_URL = os.environ.get(
     "DATABASE_URL",
     "postgresql+asyncpg://partfolder3d:testpass@localhost:5433/partfolder3d",
 )
+
+
+# ---------------------------------------------------------------------------
+# Per-worker DB setup (session-scoped, xdist only)
+# ---------------------------------------------------------------------------
+@pytest.fixture(scope="session", autouse=True)
+def _worker_db_setup() -> None:
+    """Create and migrate the per-worker Postgres DB when running under xdist.
+
+    No-op in serial runs (PYTEST_XDIST_WORKER is unset).  Each xdist worker
+    calls this once at session start: it drops any stale DB from a previous run,
+    creates a fresh one, then runs `alembic upgrade head` against it.
+
+    Uses asyncio.run() (safe here because no event loop is running at session
+    fixture setup time — per-test loops are created later by pytest-asyncio).
+    """
+    if not _XDIST_WORKER:
+        return  # serial run: assume DB already has migrations applied
+
+    import shutil
+    import subprocess
+    import sys
+
+    from sqlalchemy import text
+
+    worker_db_url: str = os.environ["DATABASE_URL"]
+    worker_db_name = worker_db_url.rsplit("/", 1)[-1]
+    # Maintenance URL: connect to the "postgres" system DB (always exists)
+    maint_url = worker_db_url.rsplit("/", 1)[0] + "/postgres"
+
+    async def _create_db() -> None:
+        engine = create_async_engine(
+            maint_url, poolclass=NullPool, isolation_level="AUTOCOMMIT"
+        )
+        async with engine.connect() as conn:
+            await conn.execute(text(f'DROP DATABASE IF EXISTS "{worker_db_name}"'))
+            await conn.execute(text(f'CREATE DATABASE "{worker_db_name}"'))
+        await engine.dispose()
+
+    asyncio.run(_create_db())
+
+    # Run alembic migrations via the CLI binary (not the programmatic API): the
+    # backend/alembic/ dir has __init__.py and shadows the installed alembic package
+    # when imported with cwd=backend_dir on sys.path.  Resolve the binary next to the
+    # interpreter RUNNING the tests so it works both for a local .venv AND on CI
+    # (system / hostedtool Python, where no backend/.venv exists); fall back to PATH.
+    backend_dir = str(Path(__file__).parent.parent)
+    _alembic_candidate = Path(sys.executable).with_name("alembic")
+    alembic_bin = (
+        str(_alembic_candidate)
+        if _alembic_candidate.exists()
+        else (shutil.which("alembic") or "alembic")
+    )
+    result = subprocess.run(
+        [alembic_bin, "upgrade", "head"],
+        cwd=backend_dir,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"alembic upgrade head failed for worker {_XDIST_WORKER}:\n"
+            f"STDOUT: {result.stdout}\nSTDERR: {result.stderr}"
+        )
 
 
 # ---------------------------------------------------------------------------

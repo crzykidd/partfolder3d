@@ -12,6 +12,9 @@ RUN npm run build
 # ---- prod: export the dist/ for consumption by nginx ----
 # When used in docker-compose, cmd copies dist to the shared named volume.
 FROM builder AS prod
+# 0777 on /dist so any UID (set via compose user: PUID:PGID) can write the
+# named volume — Docker copies this mode when initialising a new named volume.
+RUN mkdir -p /dist && chmod 0777 /dist
 # Default CMD: copy built assets to the /dist volume mount and exit cleanly.
 CMD ["/bin/sh", "-c", "cp -rp /app/dist/. /dist/ && echo 'Frontend dist ready'"]
 

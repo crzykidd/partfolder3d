@@ -160,6 +160,10 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
+        # POSTGRES_USER creates a superuser account so workers can CREATE DATABASE.
+        # Each xdist worker creates its own partfolder3d_gwN database, drops stale
+        # state from previous runs, and runs alembic upgrade head independently.
+        # The base partfolder3d DB is still migrated as a fallback for serial runs.
         image: postgres:16-alpine
         env:
           POSTGRES_DB: partfolder3d
@@ -181,13 +185,13 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: Install backend deps
         run: pip install -r backend/requirements.txt
-      - name: Apply migrations (tests require schema at head)
+      - name: Apply migrations to base DB (serial-run fallback)
         env:
           DATABASE_URL: postgresql+asyncpg://partfolder3d:ci_test_password@localhost:5432/partfolder3d
           DATA_DIR: /tmp/pytest-data
         run: cd backend && alembic upgrade head
-      - name: Run pytest
+      - name: Run pytest (parallel)
         env:
           DATABASE_URL: postgresql+asyncpg://partfolder3d:ci_test_password@localhost:5432/partfolder3d
           DATA_DIR: /tmp/pytest-data
-        run: cd backend && pytest
+        run: cd backend && pytest -n auto

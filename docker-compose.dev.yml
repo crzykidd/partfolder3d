@@ -56,6 +56,8 @@ services:
       context: .
       dockerfile: Dockerfile
     image: ghcr.io/crzykidd/partfolder3d:dev
+    # user: "${PUID:-1000}:${PGID:-1000}"  # disabled in dev: bind-mounts are host-owned; only
+    #   safe if PUID matches your host UID (run `id -u` to check). Enable in .env if needed.
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     restart: unless-stopped
     env_file:
@@ -95,6 +97,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: ghcr.io/crzykidd/partfolder3d:dev
+    # user: "${PUID:-1000}:${PGID:-1000}"  # disabled in dev: same bind-mount caveat as backend
     command: ["python", "worker.py"]
     restart: unless-stopped
     env_file:
@@ -131,6 +134,8 @@ services:
       context: frontend
       dockerfile: Dockerfile
       target: dev
+    # user: "${PUID:-1000}:${PGID:-1000}"  # disabled in dev: node_modules anonymous volume is
+    #   root-owned (installed during image build); a non-root UID can't read it.
     ports:
       - "5173:5173"             # expose Vite directly (optional, for debugger access)
     volumes:
