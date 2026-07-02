@@ -37,7 +37,7 @@ import { AdminPage, PageHeader, Badge, Card } from '@/components/ui'
 // Types
 // ---------------------------------------------------------------------------
 
-type StatusKey = 'libraries' | 'pathPrefixes' | 'aiProviders'
+type StatusKey = 'libraries' | 'pathPrefixes' | 'aiProviders' | 'itemsTotal' | 'backups'
 
 interface StepDef {
   icon: React.ReactNode
@@ -83,6 +83,7 @@ const STEPS: StepDef[] = [
       'Start an import session to drag-and-drop upload files or paste a source URL. You can also drop a folder into the inbox for bulk import.',
     to: '/imports',
     cta: 'Go to imports',
+    statusKey: 'itemsTotal',
   },
   {
     icon: <Zap size={20} />,
@@ -111,6 +112,7 @@ const STEPS: StepDef[] = [
     to: '/admin/data/backups',
     cta: 'Configure backups',
     adminOnly: true,
+    statusKey: 'backups',
   },
   {
     icon: <Share2 size={20} />,
@@ -259,6 +261,23 @@ export function QuickStartPage() {
     enabled: isAdmin,
   })
 
+  // Items total — universal (works for non-admins). done = ≥1 item exists.
+  const itemsTotalQ = useQuery({
+    queryKey: ['quick-start', 'items-total'],
+    queryFn: () => api.listItems({ per_page: 1 }),
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  // Backups list — admin only. done = ≥1 backup record exists.
+  const backupsQ = useQuery({
+    queryKey: ['quick-start', 'backups'],
+    queryFn: api.listBackups,
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+    enabled: isAdmin,
+  })
+
   // Resolve live status per key (undefined = no data yet or error → omit badge).
   // pathPrefixes: "configured" = at least one library has at least one prefix set.
   const pathPrefixesConfigured = pathPrefixesQ.isSuccess
@@ -273,6 +292,10 @@ export function QuickStartPage() {
     pathPrefixes: pathPrefixesConfigured,
     aiProviders:
       aiProvidersQ.isSuccess ? aiProvidersQ.data.length > 0 : undefined,
+    itemsTotal:
+      itemsTotalQ.isSuccess ? itemsTotalQ.data.total > 0 : undefined,
+    backups:
+      backupsQ.isSuccess ? backupsQ.data.length > 0 : undefined,
   }
 
   const visibleSteps = STEPS.filter((s) => !s.adminOnly || isAdmin)

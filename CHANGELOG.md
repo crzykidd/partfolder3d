@@ -45,6 +45,14 @@ prefix appears only on git tags and GitHub releases.
 - **Sidebar over-highlighting** — a nav item is now highlighted only for its own route:
   selecting "API Keys" (`/settings/api-keys`) no longer also highlights the parent
   "Settings" (`/settings`). Section items still highlight across their sub-tabs.
+- **Quick Start "Import" and "Backups" steps never showed a Done badge** — added live
+  status detection for both: the Import step flags done when `total > 0` items exist
+  (universal, works for non-admin users); the Backups step flags done when at least one
+  backup record exists (`GET /api/admin/backups`, admin-only). Both follow the existing
+  best-effort pattern (badge hidden while loading or on error).
+- **Import wizard showed library ID instead of name** — the Summary step now resolves
+  `library_id` to the library name via `listLibraries()` (shared `['libraries']` cache
+  key), falling back to `ID <n>` while loading and `'—'` when no library is set.
 
 ---
 
