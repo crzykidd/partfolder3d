@@ -5,7 +5,6 @@
  * Graceful empty state if no favorites.
  */
 
-import React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { Heart } from 'lucide-react'

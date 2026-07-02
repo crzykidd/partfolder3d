@@ -2,6 +2,7 @@ name: Build and publish Docker images
 
 # Phase 0 (2026-06-27): removed the "Check for Dockerfile" bootstrap guard —
 # the Dockerfile now exists. The build runs normally on all trigger events.
+# Phase 11 (2026-07-02): expanded to a 3-image matrix — backend, frontend, nginx.
 
 on:
   push:
@@ -15,8 +16,28 @@ permissions:
 
 jobs:
   build-push:
-    name: Build and push
+    name: Build and push ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # Backend + worker — root Dockerfile, context is repo root.
+          - name: backend
+            image: ghcr.io/crzykidd/partfolder3d
+            context: .
+
+          # Frontend static build — frontend/Dockerfile prod target.
+          - name: frontend
+            image: ghcr.io/crzykidd/partfolder3d-frontend
+            context: ./frontend
+            target: prod
+
+          # nginx reverse proxy — nginx/Dockerfile bakes config + logo images.
+          - name: nginx
+            image: ghcr.io/crzykidd/partfolder3d-nginx
+            context: .
+            dockerfile: nginx/Dockerfile
+
     steps:
       - uses: actions/checkout@v5
 
@@ -31,7 +52,7 @@ jobs:
       - uses: docker/metadata-action@v6
         id: meta
         with:
-          images: ghcr.io/crzykidd/partfolder3d
+          images: ${{ matrix.image }}
           tags: |
             type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
             type=sha,prefix=sha-,format=short,enable=${{ github.event_name == 'push' }}
@@ -41,9 +62,11 @@ jobs:
 
       - uses: docker/build-push-action@v7
         with:
-          context: .
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

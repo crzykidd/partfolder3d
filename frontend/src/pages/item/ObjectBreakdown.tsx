@@ -7,7 +7,7 @@
  * this component covers STL/OBJ (est_method='volume') breakdown.
  */
 
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 
 import * as api from '@/lib/api'

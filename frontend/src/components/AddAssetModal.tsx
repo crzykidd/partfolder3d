@@ -88,20 +88,6 @@ function onAuroraBlur(e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>)
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const MODEL_EXTS = new Set([
-  '.stl', '.3mf', '.obj', '.ply', '.step', '.stp', '.gcode',
-  '.jpg', '.jpeg', '.png', '.webp', '.gif',
-])
-
-function isValidFile(file: File): boolean {
-  const name = file.name.toLowerCase()
-  return MODEL_EXTS.has(`.${name.split('.').pop() ?? ''}`)
-}
-
-// ---------------------------------------------------------------------------
 // Tab: Upload Files
 // ---------------------------------------------------------------------------
 

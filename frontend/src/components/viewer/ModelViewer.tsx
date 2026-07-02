@@ -14,7 +14,7 @@
  * auth headers needed.
  */
 
-import React, {
+import {
   Component,
   type ReactNode,
   Suspense,

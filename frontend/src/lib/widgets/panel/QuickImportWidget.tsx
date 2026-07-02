@@ -5,7 +5,7 @@
  * This is the default panel widget for all roles.
  */
 
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { PlusCircle, Upload, Link } from 'lucide-react'
 
 import { AddAssetModal } from '@/components/AddAssetModal'

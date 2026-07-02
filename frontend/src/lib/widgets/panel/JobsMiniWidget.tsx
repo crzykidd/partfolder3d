@@ -5,7 +5,6 @@
  * Graceful empty state if no running jobs.
  */
 
-import React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { Cpu, CheckCircle, XCircle, Loader } from 'lucide-react'

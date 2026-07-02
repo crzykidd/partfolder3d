@@ -11,7 +11,7 @@
 </div>
 
 > [!WARNING]
-> **Early alpha (v0.2.2) — under active development.** This is an early release: expect rough
+> **Early alpha (v0.2.3) — under active development.** This is an early release: expect rough
 > edges, and **breaking changes can land between releases** (database schema, config, or API).
 > It's usable and published — pull the images and follow [Getting started](#getting-started) — but
 > **pin a specific version, back up your data, and read the release notes before upgrading.**
@@ -19,7 +19,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.2.2-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.2.3-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![Stage](https://img.shields.io/badge/stage-alpha-orange)
 ![Code](https://img.shields.io/badge/code-yes-brightgreen)
@@ -31,6 +31,17 @@
 ---
 
 ## What's New
+
+### v0.2.3 (2026-07-02)
+
+Production-deploy hardening. The **frontend and nginx images are now published**
+(`ghcr.io/crzykidd/partfolder3d-frontend` + `-nginx`), and the **nginx config is baked into
+its image** — so a production host runs with just `docker-compose.yml` + `.env`, no host
+config files. The nginx config can still be overridden via an optional bind-mount. Also fixes
+the frontend production build (it now compiles under the strict project-reference typecheck)
+and corrects the CI + release build gates to use `npm run build`. **⚠️ If you run a custom
+nginx config, reconcile it against this release's `nginx/nginx.conf` before upgrading.**
+See [CHANGELOG.md](CHANGELOG.md) for the full details.
 
 ### v0.2.2 (2026-07-02)
 
@@ -94,7 +105,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.2.2 alpha) — see the
+> The full feature set below is **built and released** (v0.2.3 alpha) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -358,7 +369,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is at the **alpha** stage (v0.2.2).
+Honest snapshot — this project is at the **alpha** stage (v0.2.3).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -412,13 +423,24 @@ docker compose up -d
 
 What happens on first `docker compose up -d`:
 
-- Images are pulled from `ghcr.io/crzykidd/partfolder3d(-frontend):latest`.
+- Images are pulled from `ghcr.io/crzykidd/partfolder3d(-frontend|-nginx):latest`.
   To pin a specific release, edit the image tags in `docker-compose.yml` (e.g. `:0.1.1`).
 - **Migrations run automatically** — the backend entrypoint runs `alembic upgrade head`
   before uvicorn starts (`RUN_MIGRATIONS=true`); the worker waits for the backend to be
   healthy. No manual migration step, no extra container.
 - **Data lives in named volumes** (`db_data`, `redis_data`) and the `./data/` bind-mount
   for thumbnails, backups, and config. Library files stay on your host wherever you mount them.
+- **nginx config is baked into the `partfolder3d-nginx` image** — the reverse proxy config
+  (`client_max_body_size 1024m`, `/api/` proxy, SPA fallback, `/img/` logos) ships inside
+  the image so no host config files are needed. The baked default is the supported path.
+
+> [!TIP]
+> **Custom nginx config** — if you need to adjust the nginx config (e.g. to add TLS
+> termination, change upload limits, or tune proxy timeouts), uncomment the bind-mount
+> line in the `nginx:` section of `docker-compose.yml` and supply your own
+> `./nginx/nginx.conf`. Watch release notes for **"⚠️ nginx config changed"** callouts
+> before upgrading — the callout means the baked default changed and you should reconcile
+> your custom copy.
 
 **First-run wizard** — open **http://localhost:8973** and follow the prompts:
 
@@ -497,6 +519,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — alpha (v0.2.2) · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — alpha (v0.2.3) · built by <code>crzykidd</code></sub>
 
 </div>

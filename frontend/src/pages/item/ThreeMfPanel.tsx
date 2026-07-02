@@ -79,9 +79,6 @@ export function ThreeMfPanel({
   // Collapsed summary values
   const totalG = analysis.total_est_grams ?? 0
   const printTimeS = analysis.print_time_s ?? null
-  const objectCount = isSliced
-    ? (analysis.plate_count != null && analysis.plate_count > 0 ? analysis.plate_count : analysis.total_objects)
-    : analysis.total_objects
   const plateCount = analysis.plate_count ?? 0
 
   // Badge colours

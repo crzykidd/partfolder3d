@@ -14,7 +14,7 @@
  * the user menu calls setLayout('top') and the shell swaps.
  */
 
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -23,7 +23,6 @@ import {
   Moon,
   LogOut,
   ExternalLink,
-  PanelLeft,
   PanelTop,
 } from 'lucide-react'
 
@@ -224,8 +223,10 @@ export function SideNavShell() {
   const reviewBadge = pendingReviews?.total
 
   const toggleGroup = (id: string) => {
-    setCollapsedGroups((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    setCollapsedGroups(
+      collapsedGroups.includes(id)
+        ? collapsedGroups.filter((x) => x !== id)
+        : [...collapsedGroups, id],
     )
   }
 

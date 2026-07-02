@@ -864,8 +864,8 @@ export function CatalogPage() {
 
   // --- Favorite mutation ---
   const [favoritingKey, setFavoritingKey] = useState<string | null>(null)
-  const favMutation = useMutation({
-    mutationFn: ({ key, favorited }: { key: string; favorited: boolean }) =>
+  const favMutation = useMutation<api.FavoriteOut | void, Error, { key: string; favorited: boolean }>({
+    mutationFn: ({ key, favorited }) =>
       favorited ? api.unfavoriteItem(key) : api.favoriteItem(key),
     onMutate: ({ key }) => setFavoritingKey(key),
     onSettled: (_data, _err, { key }) => {
