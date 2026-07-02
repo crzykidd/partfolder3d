@@ -22,6 +22,43 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **3MF embedded thumbnail extraction** — the analysis worker now reads the
+  slicer-embedded thumbnail from `.3mf` files (`Metadata/plate_1.png` preferred)
+  and creates a tracked `Image` row (`source=embedded`). Embedded thumbnails appear
+  in the item image carousel and are used as the default image when no scraped or
+  uploaded image exists.
+- **3MF sliced metadata** — when a `.3mf` was sliced by Bambu Studio / OrcaSlicer,
+  `analyze_item` reads `slice_info.config` (per-plate print time, filament grams/meters)
+  and `project_settings.config` (filament colours, printer model) instead of the
+  volume estimate. `est_method` is set to `"sliced"` in `object_analysis`, signalling
+  that numbers come from the slicer (not a rough volume estimate).
+- **`preview_3d` flag on `FileOut`** — `GET /api/items/{key}` now includes
+  `preview_3d: bool` for each file. True when the file extension is `.stl`, `.obj`,
+  or `.3mf` and the file size is ≤ `BROWSER_PREVIEW_MAX_MB` (default 50 MB).
+  Used by Phase C/D frontend to decide whether to show the in-browser 3D viewer.
+- **New config settings** — `RENDER_MAX_FILE_MB` (default 50), `RENDER_MAX_TRIANGLES`
+  (default 1 000 000), `BROWSER_PREVIEW_MAX_MB` (default 50) in `config.py`.
+
+### Changed
+
+- **Server rendering bounded to STL/OBJ/PLY only** — `.3mf` files are never rendered
+  server-side; embedded slicer thumbnails are used instead. STL/OBJ/PLY files over
+  `RENDER_MAX_FILE_MB` or `RENDER_MAX_TRIANGLES` are skipped silently (no render, no
+  error, no Image row).
+- **Thumbnail priority chain enforced** — renders are only set as the default image when
+  no scraped, uploaded, or embedded image exists. Previously renders could displace
+  higher-priority images in the default slot.
+- **Render stack collapsed to VTK-only** — `pyrender`, `PyOpenGL`, and the EGL/OSMesa
+  detection/code paths removed. VTK's bundled Mesa software rasterizer is the sole render
+  backend. `libegl1`, `libgbm1`, `libosmesa6`, `libxrender1`, and `libxi6` removed from
+  the Dockerfile (no longer needed).
+- **Embedded thumbnails excluded from sidecar** — like renders, embedded 3MF thumbnails
+  are regenerated deterministically on scan and are not written to `sidecar.yaml`.
+- **`ImageSource.embedded` added** — migration 0021 adds the new enum value to
+  PostgreSQL via `ALTER TYPE … ADD VALUE` (outside the transaction, as required by PG).
+
+### Fixed
+
 - **README production-install guide** — `## Getting started` now documents the
   primary production path (pull published images, configure `.env` + library mounts,
   `docker compose up -d`) and prominently links the in-app **Quick Start** guide at

@@ -38,11 +38,11 @@ class Settings(BaseSettings):
     # ---- Debug ----
     DEBUG: bool = False
 
-    # ---- Rendering (Phase 4) ----
+    # ---- Rendering (Phase 4 / render-rework-A) ----
     # Square resolution for mesh thumbnail PNGs (pixels per side).
     RENDER_RESOLUTION: int = 512
-    # Rendering backend: "auto" tries EGL → OSMesa → VTK in order.
-    # Override with "egl", "osmesa", or "vtk" to force a specific backend.
+    # Rendering backend: "auto" probes VTK offscreen (the only supported backend).
+    # Override with "vtk" to make the choice explicit.
     RENDER_BACKEND: str = "auto"
     # Wall-clock kill timeout (seconds) for a single file's render subprocess.
     # The child process is SIGTERM'd (then SIGKILL'd) after this many seconds.
@@ -52,12 +52,21 @@ class Settings(BaseSettings):
     # multi-core hosts; 2 is safe for a shared server.
     RENDER_CPU_THREADS: int = 2
     # Background-render mode — controls when items are auto-rendered:
-    #   "all"       → render every mesh item (default).
+    #   "all"       → render every eligible mesh item (default).
     #   "no_images" → only render items that have no images (render as a
     #                 fallback thumbnail; skip items that already have images).
     #   "off"       → never auto-render.
     # Unknown values fall back to "all" behaviour.
     RENDER_MODE: str = "all"
+    # Max file size (MB) for server-side STL/OBJ/PLY rendering.
+    # Files over this cap are skipped silently (no render, no error).
+    RENDER_MAX_FILE_MB: int = 50
+    # Max triangle count for server-side rendering.
+    # Meshes with more triangles are skipped silently after loading.
+    RENDER_MAX_TRIANGLES: int = 1_000_000
+    # Max file size (MB) for the in-browser 3D preview flag (preview_3d on FileOut).
+    # Files over this size get preview_3d=False; the browser viewer is not offered.
+    BROWSER_PREVIEW_MAX_MB: int = 50
 
     # ---- Import / Inbox (Phase 5) ----
     # Directory the inbox scanner watches for incoming asset folders.

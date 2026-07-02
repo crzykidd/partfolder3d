@@ -41,7 +41,7 @@ from fastapi import (
 from fastapi import (
     File as FastAPIFile,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -125,8 +125,21 @@ class FileOut(BaseModel):
     sha256: str | None
     # Phase 16: per-object mesh analysis (null until worker runs)
     object_analysis: Any | None = None
+    # render-rework-A: true when the file can be previewed in the browser 3D viewer.
+    # Gated by extension (.stl/.obj/.3mf) and file size ≤ BROWSER_PREVIEW_MAX_MB.
+    preview_3d: bool = False
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def _compute_preview_3d(self) -> FileOut:
+        from app.config import settings  # noqa: PLC0415
+
+        _PREVIEW_EXTS = frozenset({".stl", ".obj", ".3mf"})
+        ext = Path(self.path).suffix.lower()
+        max_bytes = settings.BROWSER_PREVIEW_MAX_MB * 1024 * 1024
+        self.preview_3d = ext in _PREVIEW_EXTS and self.size <= max_bytes
+        return self
 
 
 class ImageOut(BaseModel):

@@ -124,12 +124,14 @@ async def _build_sidecar_data(
         select(Image).where(Image.item_id == item.id).order_by(Image.order)
     )
     images_list = img_result.scalars().all()
-    # Renders are derived/regenerable — exclude them from the sidecar so it
-    # stays portable (no item-server-specific render paths).
+    # Renders and embedded thumbnails are derived/regenerable — exclude them
+    # from the sidecar so it stays portable (renders are regenerated from mesh;
+    # embedded thumbnails are regenerated from the portable 3MF on scan).
+    _SIDECAR_EXCLUDED = {ImageSource.render, ImageSource.embedded}
     sidecar_images = [
         SidecarImage(path=img.path, source=img.source.value, order=img.order)
         for img in images_list
-        if img.source != ImageSource.render
+        if img.source not in _SIDECAR_EXCLUDED
     ]
     default_img = next((img.path for img in images_list if img.is_default), None)
 
@@ -153,7 +155,7 @@ async def _write_item_sidecar(db: AsyncSession, item: Item) -> None:
     write_sidecar(item_dir, data, item.title, item.key)
 
 
-async def _enqueue_render(item_id: int) -> None:
+async def _enqueue_render(item_id: int, model_extensions: list[str] | None = None) -> None:
     """Fire-and-forget: enqueue a render_item arq task for an item.
 
     Failure to enqueue (e.g. Redis not available) is logged but does NOT
@@ -162,13 +164,30 @@ async def _enqueue_render(item_id: int) -> None:
     The "off" short-circuit here reads the env/config setting only (not the DB
     render.mode setting).  render_item is the single authoritative gate: it reads
     the DB setting first and enforces all render modes before creating a Job row.
-    Opening a DB session here purely for an optimisation short-circuit adds
-    complexity with minimal benefit — the authoritative check in render_item is
-    correct regardless.
+
+    Args:
+        item_id:          DB id of the item.
+        model_extensions: Optional list of model file extensions for the item
+                          (e.g. ['.3mf', '.stl']).  When all extensions are .3mf,
+                          rendering is skipped entirely — 3MF files use embedded
+                          slicer thumbnails extracted by the analyze task instead.
+                          Pass None to always enqueue (the render task will skip
+                          .3mf files individually).
     """
     if settings.RENDER_MODE == "off":
         log.debug("_enqueue_render: RENDER_MODE=off — not enqueuing render for item %s", item_id)
         return
+
+    # Skip enqueueing if all model files are .3mf (no renderable geometry)
+    if model_extensions is not None:
+        renderable = [e for e in model_extensions if e.lower() not in (".3mf",)]
+        if not renderable and model_extensions:
+            log.debug(
+                "_enqueue_render: all model files are .3mf — skipping render for item %s",
+                item_id,
+            )
+            return
+
     try:
         from arq import create_pool  # noqa: PLC0415
         from arq.connections import RedisSettings  # noqa: PLC0415

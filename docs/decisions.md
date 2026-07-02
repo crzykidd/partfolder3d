@@ -2,6 +2,77 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-01 — Asset-detail / 3D-preview rework: read-don't-render, browser viewer, ZIP extraction
+
+The server-side mesh renderer (pyrender EGL→OSMesa→VTK fallback chain) was overloading the
+worker — sliced 3MF files are huge (multi-plate, multi-object, often 2–3 per item) and CPU
+software-rasterizing them per item was the main cost. Reworking the whole asset-detail /
+file-preview experience around a **"read, don't render whenever the file already carries the
+answer"** principle. Locked decisions:
+
+- **Never server-render 3MF.** Sliced 3MF already embeds a slicer thumbnail
+  (`Metadata/plate_1.png` / `thumbnail.png`) and real metadata (`slice_info.config` →
+  grams/meters/print-time per filament; `project_settings.config` → filament hex colors, types,
+  printer/slicer). We extract that (`zipfile` + lxml/JSON, no GL) instead of rendering. Real slice
+  numbers flip `est_method` `"volume"`→`"sliced"`; unsliced 3MF falls back to today's volume
+  estimate.
+- **Server render becomes a bounded fallback for raw STL/OBJ only** — used only when the item has
+  no higher-priority image and the mesh is under a size/triangle cap (over cap → skip, not an
+  error). **Thumbnail priority chain:** user-default > curated (scraped/uploaded) > embedded 3MF
+  thumbnail > STL/OBJ render > placeholder icon.
+- **Render stack collapsed to VTK-only.** VTK bundles Mesa and runs headless with no GL system
+  libs; drops `pyrender`, `PyOpenGL`, OSMesa/EGL code paths and the `libegl1`/`libgbm1`/`libosmesa6`
+  apt packages. Kept: `trimesh` (STL/OBJ metadata + mesh load), subprocess isolation, timeout,
+  SHA-cache, crash recovery. (Image-build + render smoke test is a CI/Docker follow-up — not
+  locally verifiable, consistent with prior render work.)
+- **In-browser viewer** via `@react-three/fiber` + `drei` (three.js STL/OBJ/3MF loaders), **lazy
+  loaded / code-split** so it stays out of the catalog bundle. Loads the raw file from the existing
+  `/api/items/{key}/files/{path}` endpoint — no server conversion. Gated by a configurable
+  ~50 MB cap (`preview_3d` flag on `FileOut`); over cap → static thumbnail only.
+- **ZIP uploads are auto-extracted** into the item dir preserving internal folders — **strip a lone
+  top-level wrapper folder**, **rename on collision** (`cover (1).png`), reject zip-slip, skip
+  `__MACOSX`/`.DS_Store`/`Thumbs.db`, enforce uncompressed-size/file-count caps, don't recurse into
+  nested archives. Original `.zip` **discarded** after success (whole-item ZIP is reconstructable
+  via `build_zip_bundle`). Extracted files flow through the normal inventory→analyze→render path.
+- **UI:** flat `DownloadsPanel` becomes a **folder tree** (built client-side from the `path` field,
+  no API change). 3MF detail is a **collapsible per-file element** — collapsed summary shows totals
+  (sliced badge · print time · filament g · objects · plates · thumb); expanded shows filament rows
+  (color swatch · type · g · m), per-plate breakdown, per-object list.
+- **New `ImageSource.embedded`** for extracted 3MF thumbnails (migration 0021, PG `ALTER TYPE ADD
+  VALUE` — must run outside the alembic transaction). Embedded thumbnails are **excluded from the
+  sidecar** (like renders) — regenerated deterministically from the portable 3MF on scan.
+
+Sequenced as four handoff prompts: **A** backend (read-don't-render foundation + 3MF read + stack
+slim + migration), **B** backend (ZIP extraction), **C** frontend (file tree + 3MF collapsible),
+**D** frontend (browser viewer). Dispatched sequentially — B/C/D branch off A's committed state to
+avoid migration/config/worker-registry conflicts.
+
+### Phase A implementation details (2026-07-01)
+
+- **`threemf.py` is GL-free and trimesh-free** — uses only `zipfile` + `lxml` + `json`. No
+  geometry loading: thumbnails are raw PNG/JPG bytes, slice metadata comes from Bambu/Orca XML/JSON
+  config files. Unsliced 3MF still falls through to the existing trimesh `_analyze_3mf()` for
+  the volume estimate.
+- **`RenderCapSkip` is not an error** — a new exception class signals "file is over cap, skip
+  silently" vs `RenderError` which marks the Job failed. Propagated through the subprocess
+  boundary via a `__CAP_SKIP__:` prefix in the err-file, checked before `RenderError` in
+  `run_render_subprocess`. Callers add to `skipped[]` not `errors[]`.
+- **Size cap checked in parent, triangle cap in subprocess** — file size is a single `stat()` call
+  in `render_item` (no trimesh load); triangle count requires loading the mesh, so it's checked
+  inside `render_mesh_file()` after `_load_as_trimesh()` returns. This avoids a double-load in
+  the parent while still giving a clean skip signal.
+- **Thumbnail SHA is of the raw PNG bytes, not the 3MF file** — so the same slicer thumbnail
+  re-used across 3MF revisions stays a cache-hit even when the geometry changes. Stored in
+  `thumbs/embedded/<thumb_sha>.png` inside the item dir.
+- **`model_validator(mode='after')` computes `preview_3d`** in `FileOut` from `path` and `size`
+  fields already populated from the ORM. Avoids building `FileOut` objects manually and
+  keeps the schema self-contained. Settings read lazily inside the validator.
+- **Embedded images excluded from sidecar alongside renders** — `_build_sidecar_data` now
+  excludes both `ImageSource.render` and `ImageSource.embedded` via a `_SIDECAR_EXCLUDED` set.
+- **`_enqueue_render` accepts optional `model_extensions`** — callers who know the file types
+  (post-inventory) can pass `model_extensions=['.3mf']` to skip the Redis enqueue entirely for
+  3MF-only items. Callers that don't know pass `None` and `render_item` handles the per-file skip.
+
 ## 2026-07-01 — CodeQL triage on the first release PR (v0.1.1): 12 fixed, 24 dismissed
 
 The first-ever CodeQL run (release PR #1) raised 36 alerts (1 critical, 20 high, 15 medium) —
