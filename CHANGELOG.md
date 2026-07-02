@@ -40,6 +40,12 @@ prefix appears only on git tags and GitHub releases.
 - **`docker-compose.dev.yml` remains the build-from-source dev stack** — no changes;
   it continues to build all images locally with hot reload for contributors.
 
+### Fixed
+
+- **Sidebar over-highlighting** — a nav item is now highlighted only for its own route:
+  selecting "API Keys" (`/settings/api-keys`) no longer also highlights the parent
+  "Settings" (`/settings`). Section items still highlight across their sub-tabs.
+
 ---
 
 ## [0.1.1] — 2026-07-01

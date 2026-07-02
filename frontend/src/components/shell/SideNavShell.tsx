@@ -138,7 +138,10 @@ function SideNavItem({ item, collapsed, onAction, pendingBadge }: NavItemProps) 
   return (
     <NavLink
       to={item.path}
-      end={item.path === '/catalog'}
+      // Exact-match the item's own path so a parent link (e.g. /settings) doesn't also
+      // highlight for a child route (/settings/api-keys). Section items highlight across
+      // their sub-tabs via `sectionActive` (item.match), handled in the style callback below.
+      end
       title={collapsed ? item.label : undefined}
       style={({ isActive }) => {
         const active = isActive || sectionActive
