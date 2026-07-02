@@ -20,7 +20,7 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
-## [0.2.1] — 2026-07-02
+## [0.2.2] — 2026-07-02
 
 ### Added
 
@@ -37,6 +37,10 @@ prefix appears only on git tags and GitHub releases.
 - CI backend test suite now runs in parallel via `pytest-xdist -n auto` with
   per-worker Postgres databases; each xdist worker creates and migrates its own
   isolated DB at session start, eliminating shared-DB contention.
+- CI now gates the `dev`→`main` PR on the `pull_request` event so the required
+  status checks clear on their own (no more manual merge bypass); per-push `dev`
+  feedback moved to a separate, non-required `Dev checks` workflow (fast jobs
+  only, no heavy Test) so dev pushes stay cheap.
 
 ## [0.2.0] — 2026-07-01
 
