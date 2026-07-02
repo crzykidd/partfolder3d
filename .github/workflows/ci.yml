@@ -5,18 +5,16 @@ name: CI
 # Jobs enforce for real from this commit onward.
 
 on:
-  # PR gate. A PR's *required* status checks only clear when reported by a
-  # pull_request-triggered run — push-triggered runs show as "… (push)" but never
-  # satisfy the required slot, which is why every dev→main release PR got stuck at
-  # "Expected — Waiting for status to be reported" and needed a manual bypass.
-  # So the full gate (incl. the ~6-min parallel Test) runs here on the PR, plus a
-  # post-merge run on main. Running these same jobs on push:[dev] too would create
-  # duplicate same-named contexts and re-introduce the stuck state — so per-push
-  # dev feedback lives in the separate, non-required dev-checks.yml (distinct
-  # "Dev checks / *" contexts) instead.
+  # PR gate — pull_request ONLY (single trigger, on purpose). The required
+  # branch-protection checks are the bare contexts "CI / Lint", "CI / Test", …
+  # GitHub only binds those to a check run when the workflow has ONE trigger; add
+  # a second event (e.g. push:[main]) and it disambiguates the run as
+  # "CI / Test (pull_request)", which no longer matches the bare required context
+  # and leaves it stuck at "Expected — Waiting for status to be reported" (the
+  # forced-bypass symptom). So CI runs only on the dev→main PR. Post-merge image
+  # publishing is handled by publish.yml; fast per-push dev feedback lives in the
+  # separate, non-required dev-checks.yml ("Dev checks / *" contexts).
   pull_request:
-    branches: [main]
-  push:
     branches: [main]
 
 jobs:
