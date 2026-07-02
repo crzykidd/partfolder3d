@@ -20,6 +20,13 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-07-02
+
+> ⚠️ **nginx config changed** — if you are running a custom nginx config
+> (the `./nginx/nginx.conf` bind-mount in `docker-compose.yml`), compare your
+> copy against the updated `nginx/nginx.conf` in this release and reconcile any
+> differences before upgrading.
+
 ### Added
 
 - **Published `partfolder3d-frontend` and `partfolder3d-nginx` images** — the
