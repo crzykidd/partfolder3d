@@ -20,6 +20,21 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Backend startup now logs and fails loudly instead of hanging silently** — the
+  container entrypoint previously printed only "applying database migrations…" and
+  then went dark on any problem, so a bad DB host/credentials, an unwritable data
+  volume (PUID/PGID mismatch), or a lock-blocked migration all looked identical: a
+  stuck service with no logs. The entrypoint now (1) verifies the data dir is
+  writable and prints a clear FATAL on a permissions problem, (2) waits for the
+  database with a bounded timeout and logs the **actual** connection error
+  (`ConnectionRefusedError`, `InvalidPasswordError`, …) on each attempt, and (3)
+  runs migrations with a `lock_timeout`/`statement_timeout` so a blocked migration
+  errors with a clear message instead of hanging forever. Tunable via
+  `DB_WAIT_TIMEOUT`, `DB_CONNECT_TIMEOUT`, `MIGRATION_LOCK_TIMEOUT_MS`,
+  `MIGRATION_STATEMENT_TIMEOUT_MS`.
+
 ## [0.2.3] — 2026-07-02
 
 > ⚠️ **nginx config changed** — if you are running a custom nginx config
