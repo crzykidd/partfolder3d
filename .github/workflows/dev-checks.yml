@@ -1,23 +1,13 @@
-name: CI
+name: Dev checks
 
-# Phase 0 (2026-06-27): bootstrap existence-guards removed now that backend/,
-# frontend/, docker-compose.yml, Dockerfile, and alembic are all present.
-# Jobs enforce for real from this commit onward.
-
+# Fast, per-push feedback on the dev branch. These are NON-required checks with
+# their own "Dev checks / *" contexts, deliberately distinct from the required
+# "CI / *" contexts (ci.yml) so they can never collide and re-create the stuck
+# "Expected — Waiting" state. The heavy parallel Test, image build, and CodeQL
+# run only on the dev→main PR (ci.yml / codeql.yml), so dev pushes stay cheap.
 on:
-  # PR gate. A PR's *required* status checks only clear when reported by a
-  # pull_request-triggered run — push-triggered runs show as "… (push)" but never
-  # satisfy the required slot, which is why every dev→main release PR got stuck at
-  # "Expected — Waiting for status to be reported" and needed a manual bypass.
-  # So the full gate (incl. the ~6-min parallel Test) runs here on the PR, plus a
-  # post-merge run on main. Running these same jobs on push:[dev] too would create
-  # duplicate same-named contexts and re-introduce the stuck state — so per-push
-  # dev feedback lives in the separate, non-required dev-checks.yml (distinct
-  # "Dev checks / *" contexts) instead.
-  pull_request:
-    branches: [main]
   push:
-    branches: [main]
+    branches: [dev]
 
 jobs:
   lint:
@@ -94,6 +84,16 @@ jobs:
               print('No config files present yet')
           EOF
 
+  compose-validate:
+    name: Compose validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate production compose
+        run: docker compose config --quiet
+      - name: Validate dev compose
+        run: docker compose -f docker-compose.dev.yml config --quiet
+
   migration-check:
     name: Migration check
     runs-on: ubuntu-latest
@@ -132,72 +132,3 @@ jobs:
         run: |
           cd backend && alembic current 2>&1 | grep -q '(head)' || \
             { echo 'ERROR: database is not at alembic head'; exit 1; }
-
-  compose-validate:
-    name: Compose validation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - name: Validate production compose
-        run: docker compose config --quiet
-      - name: Validate dev compose
-        run: docker compose -f docker-compose.dev.yml config --quiet
-
-  image-build:
-    name: Image build
-    runs-on: ubuntu-latest
-    # The job always runs so the required "CI / Image build" check reports a
-    # conclusion on push events too (a job skipped via job-level `if:` leaves the
-    # required context unsatisfied → PRs stuck "blocked"). The actual build stays
-    # PR-only so push events never build an image.
-    steps:
-      - uses: actions/checkout@v5
-      - uses: docker/setup-buildx-action@v4
-        if: github.event_name == 'pull_request'
-      - name: Build Docker image (no push)
-        if: github.event_name == 'pull_request'
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: false
-
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        # POSTGRES_USER creates a superuser account so workers can CREATE DATABASE.
-        # Each xdist worker creates its own partfolder3d_gwN database, drops stale
-        # state from previous runs, and runs alembic upgrade head independently.
-        # The base partfolder3d DB is still migrated as a fallback for serial runs.
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: partfolder3d
-          POSTGRES_USER: partfolder3d
-          POSTGRES_PASSWORD: ci_test_password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U partfolder3d -d partfolder3d"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-          cache: "pip"
-          cache-dependency-path: backend/requirements.txt
-      - name: Install backend deps
-        run: pip install -r backend/requirements.txt
-      - name: Apply migrations to base DB (serial-run fallback)
-        env:
-          DATABASE_URL: postgresql+asyncpg://partfolder3d:ci_test_password@localhost:5432/partfolder3d
-          DATA_DIR: /tmp/pytest-data
-        run: cd backend && alembic upgrade head
-      - name: Run pytest (parallel)
-        env:
-          DATABASE_URL: postgresql+asyncpg://partfolder3d:ci_test_password@localhost:5432/partfolder3d
-          DATA_DIR: /tmp/pytest-data
-        run: cd backend && pytest -n auto
