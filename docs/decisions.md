@@ -2,6 +2,34 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-02 — Fixed the perpetual release-PR bypass: required checks bind by BARE job name
+
+Every `dev`→`main` release PR (v0.1.0 through v0.2.1) had to be merged with "bypass rules"
+because the required CI checks sat forever at **"Expected — Waiting for status to be reported,"**
+even though the checks ran and passed. Long misdiagnosed as CodeQL, push-vs-pull_request, or the
+review rule. **Actual root cause:** `main` branch protection listed the required contexts as
+**`CI / Lint`, `CI / Test`, …** (workflow-prefixed), but **GitHub Actions binds required status
+checks by the bare check-run/job name** (`Lint`, `Test`, …), not `workflow / job`. The prefixed
+contexts matched no check → the required slots never bound → permanent block → bypass.
+
+**Fix (instant, verified — PR #4 went `mergeStateStatus: CLEAN` and merged with a normal button):**
+set `main`'s `required_status_checks.contexts` to the **bare job names**:
+`["Lint","Config validation","Migration check","Compose validation","Image build","Test"]`
+(via `gh api -X PATCH …/branches/main/protection/required_status_checks`). No workflow change was
+actually required for this — the earlier `ci.yml` edits (push→pull_request, then single-trigger)
+were red herrings for the binding, though pull_request-only is kept because it's the correct PR-gate
+shape (post-merge `main` builds are handled by `publish.yml`; `ci.yml` no longer runs on `main`).
+
+**Consequences / guardrails:**
+- **Job names are now load-bearing.** The six `ci.yml` job names ARE the required-check contexts —
+  renaming a job silently breaks the gate (back to "Expected — Waiting"). Keep them stable/unique.
+- `dev-checks.yml` (non-required per-push dev feedback) shares four job names with `ci.yml`
+  (`Lint`, `Config validation`, …). With bare-name matching that risked a required slot binding to
+  the dev-feedback run, so every `dev-checks.yml` job was **suffixed "(dev)"** to keep its check-run
+  name distinct.
+- Lesson: when a required check is stuck "Expected — Waiting" while the same-named check passes, the
+  contexts are mis-registered — set them to the exact bare check-run names, not `workflow / job`.
+
 ## 2026-07-02 — PUID/PGID runtime user: /data chmod 0777, dev-compose left commented
 
 **Problem:** The backend/worker write to `/data` (named volume in prod) and to library

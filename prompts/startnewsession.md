@@ -8,36 +8,36 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-07-02 (render/asset-detail rework landed on `dev` — 5 commits, verified against
-a rebuilt image; now 9 commits unreleased on `dev`; no release gate currently open)
+**Last updated:** 2026-07-02 (v0.2.2 released on `main`; the perpetual release-PR "bypass" problem is
+FIXED — merges are clean now; no open release gate)
 
-> ## CURRENT STATE (2026-07-02) — render rework done on `dev`; v0.1.1 still latest on `main`
-> **Render / asset-detail rework is complete and verified on `dev`** (5 commits, `247dfa6`→`5797b0c`).
-> A four-phase "read-don't-render" feature + a render-backend fix. Full design + rationale in
-> `docs/decisions.md` (2026-07-02 and 2026-07-01 entries). What landed:
-> - **A `247dfa6`** — 3MF is now READ, not rendered: extracts the embedded slicer thumbnail
->   (`ImageSource.embedded`, migration **0021**) + real slice metadata (`slice_info.config` /
->   `project_settings.config` → grams/meters/print-time/filament colors, `est_method="sliced"`).
->   Server render bounded to STL/OBJ/PLY under size/triangle caps; 3MF never rendered. Thumbnail
->   priority chain (user > curated > embedded > render). `FileOut.preview_3d` flag.
-> - **B `974b443`** — uploaded/imported ZIPs auto-extract into the item dir (structure preserved,
->   lone wrapper stripped, junk skipped, collision-renamed, zip-slip/bomb guarded, original discarded).
-> - **C `778f4d0`** — flat downloads list → **folder tree**; 3MF detail is a **collapsible per-file
->   panel** (totals collapsed; filament/plate/object breakdown expanded).
-> - **D `a58a393`** — in-browser **three.js viewer** (STL/OBJ/3MF), lazy-loaded/code-split
->   (`@react-three/fiber` 8.x + drei), size-capped ~50MB, wired to a "View in 3D" button.
-> - **fix `5797b0c`** — render backend: the stock PyPI `vtk` wheel CANNOT render headless (X11-only;
->   `get_backend()` returned `none`). Switched to the **`vtk-osmesa` wheel** (Kitware index) +
->   `libosmesa6`. Verified against a rebuilt image: `get_backend()=="vtk"`, STL/OBJ/PLY all render.
+> ## CURRENT STATE (2026-07-02) — v0.2.2 released; CI gate finally merges clean
+> **Latest release: `v0.2.2`** on `main` (tag at merge `f826710`). Release history since v0.1.1:
+> - **v0.2.0** — the "read-don't-render" asset-detail rework: 3MF READ not rendered (embedded slicer
+>   thumbnail `ImageSource.embedded` + real slice metadata, migration **0021**), bounded STL/OBJ/PLY
+>   render on the **`vtk-osmesa`** wheel (+`libosmesa6`; stock PyPI `vtk` is X11-only and can't render
+>   headless — see decisions), ZIP auto-extraction, file-tree UI + collapsible 3MF panel, in-browser
+>   three.js viewer, per-file 3MF thumbnails. `networkx` is now an explicit backend dep.
+> - **v0.2.1** — PREPPED BUT NEVER TAGGED (merged to `main`, no release). Rolled forward into v0.2.2.
+> - **v0.2.2** — PUID/PGID runtime user (NFS), **pytest-xdist** parallel CI (~3.7x local / ~6min CI),
+>   alembic-path fix for xdist-in-CI, and the CI-workflow/branch-protection fixes below.
 >
-> **Verified against the rebuilt `:dev` image** (docker exec probes): migration 0021 live + `embedded`
-> enum, 3MF reader (sliced metadata + thumbnail), ZIP extractor (wrapper/junk/collision), and the
-> VTK-OSMesa render (STL/OBJ/PLY → valid PNGs, no X server). Backend 560/582 pytest green on
-> ephemeral PG; frontend tsc + vitest + vite build clean with three.js code-split confirmed.
-> **Only unverified bit:** actually clicking "View in 3D" in the running UI (needs a real browser).
+> ### 🔑 The release-bypass problem is FIXED (2026-07-02) — see `docs/decisions.md`
+> Every release PR (v0.1.0–v0.2.1) needed a manual "bypass rules" merge because the required CI checks
+> sat at **"Expected — Waiting for status to be reported."** Root cause: `main` branch protection
+> required **`CI / Lint`, `CI / Test`, …** (workflow-prefixed), but **GitHub Actions binds required
+> checks by the BARE job name** (`Lint`, `Test`, …). Fixed by setting `required_status_checks.contexts`
+> to the bare names → PR #4 went `CLEAN` and merged with a normal button. **Load-bearing now:** the
+> `ci.yml` job names ARE the required contexts — don't rename them. CI workflow shape:
+> - **`ci.yml`** — `pull_request: [main]` ONLY. The required gate (Lint/Frontend/Config validation/
+>   Migration check/Compose validation/Image build/Test). Bare job names = required contexts.
+> - **`dev-checks.yml`** — `push: [dev]`. Fast non-required feedback; jobs suffixed **"(dev)"** so they
+>   can't shadow the required bare-name contexts. No heavy Test.
+> - **`publish.yml`** — builds/pushes `:latest` on `push:main` and `:<semver>`/`:<major>` on release.
+> - **`codeql.yml`** — `pull_request` + `push:main` (green, not a required gate).
 >
-> **`dev` is now 9 commits ahead of `main`** (the 4 prior polish commits + these 5). All captured in
-> `CHANGELOG.md [Unreleased]`; ship with the next release.
+> **`dev` is a few commits ahead of `main`** (the `(dev)`-suffix workflow tidy + these doc updates) —
+> no release gate open; fold into the next release whenever.
 >
 > ---
 >
