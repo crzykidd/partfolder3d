@@ -42,9 +42,13 @@ PyYAML==6.0.2
 #      Dockerfile). VTK is the only render backend; pyrender/PyOpenGL/EGL are unused.
 # lxml: XML parsing for 3MF sidecar files (slice_info.config, model_settings.config,
 #       3dmodel.model color extraction) and trimesh's 3MF geometry loader.
+# networkx: REQUIRED by trimesh for scene-graph ops (multi-body load/split used in
+#       analysis). Previously pulled in transitively by pyrender; must be explicit now
+#       that pyrender is gone, else analyze_item crashes with "No module named 'networkx'".
 # Pillow: image I/O helper. numpy: mesh math.
 trimesh==4.5.3
 lxml==6.1.1
+networkx==3.6.1
 Pillow==11.1.0
 vtk-osmesa==9.3.1
 numpy>=1.24.0,<3.0
