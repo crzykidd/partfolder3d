@@ -14,7 +14,8 @@
 import React, { useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 
-import type { FileObjectAnalysis, FilamentEntry, PlateEntry, ImageOut } from '@/lib/api/items'
+import type { FileObjectAnalysis, FilamentEntry, PlateEntry } from '@/lib/api/items'
+import { fileDownloadUrl } from '@/lib/api'
 
 // ---------------------------------------------------------------------------
 // Small shared helpers
@@ -57,12 +58,6 @@ export interface ThreeMfPanelProps {
   fileName: string
   /** The file's object_analysis — must be non-null for this component to render. */
   analysis: FileObjectAnalysis
-  /**
-   * An embedded thumbnail image (source='embedded') to show in the collapsed
-   * header, if one is available for this item. Phase C uses a best-effort
-   * match (first embedded image); Phase D may refine per-file matching.
-   */
-  embeddedThumbnail: ImageOut | null
   /** The item key, used to build the thumbnail image URL. */
   itemKey: string
   /** Whether the panel starts expanded. Defaults to false (collapsed). */
@@ -72,7 +67,6 @@ export interface ThreeMfPanelProps {
 export function ThreeMfPanel({
   fileName,
   analysis,
-  embeddedThumbnail,
   itemKey,
   defaultExpanded = false,
 }: ThreeMfPanelProps) {
@@ -142,10 +136,10 @@ export function ThreeMfPanel({
           {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </span>
 
-        {/* Thumbnail (small, best-effort) */}
-        {embeddedThumbnail && (
+        {/* Per-file embedded thumbnail from analysis.thumbnail_path */}
+        {analysis.thumbnail_path && (
           <img
-            src={`/api/items/${itemKey}/files/${embeddedThumbnail.path}`}
+            src={fileDownloadUrl(itemKey, analysis.thumbnail_path)}
             alt="3MF thumbnail"
             style={{
               width: 36,

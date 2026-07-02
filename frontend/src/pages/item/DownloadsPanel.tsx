@@ -108,15 +108,13 @@ function ViewIn3DButton({ onView }: { onView?: () => void }) {
 interface FileRowProps {
   itemKey: string
   file: api.FileOut
-  /** First embedded image for the item — shown as 3MF panel thumbnail. */
-  firstEmbeddedImage: api.ImageOut | null
   depth: number
   isLast: boolean
   /** Opens the viewer for the given file path. Undefined when viewer is unavailable. */
   onOpenViewer: (filePath: string) => void
 }
 
-function FileRow({ itemKey, file, firstEmbeddedImage, depth, onOpenViewer }: FileRowProps) {
+function FileRow({ itemKey, file, depth, onOpenViewer }: FileRowProps) {
   const [threeMfOpen, setThreeMfOpen] = useState(false)
   const basename = file.path.split('/').pop() ?? file.path
   const isImg = isImagePath(file.path)
@@ -230,7 +228,6 @@ function FileRow({ itemKey, file, firstEmbeddedImage, depth, onOpenViewer }: Fil
           <ThreeMfPanel
             fileName={basename}
             analysis={file.object_analysis!}
-            embeddedThumbnail={firstEmbeddedImage}
             itemKey={itemKey}
             defaultExpanded
           />
@@ -247,13 +244,12 @@ function FileRow({ itemKey, file, firstEmbeddedImage, depth, onOpenViewer }: Fil
 interface FolderNodeProps {
   folder: FileTreeFolder
   itemKey: string
-  firstEmbeddedImage: api.ImageOut | null
   depth: number
   defaultExpanded?: boolean
   onOpenViewer: (filePath: string) => void
 }
 
-function FolderNode({ folder, itemKey, firstEmbeddedImage, depth, defaultExpanded = true, onOpenViewer }: FolderNodeProps) {
+function FolderNode({ folder, itemKey, depth, defaultExpanded = true, onOpenViewer }: FolderNodeProps) {
   const [open, setOpen] = useState(defaultExpanded)
 
   return (
@@ -296,7 +292,6 @@ function FolderNode({ folder, itemKey, firstEmbeddedImage, depth, defaultExpande
           <TreeNodes
             nodes={folder.children}
             itemKey={itemKey}
-            firstEmbeddedImage={firstEmbeddedImage}
             depth={depth + 1}
             onOpenViewer={onOpenViewer}
           />
@@ -313,12 +308,11 @@ function FolderNode({ folder, itemKey, firstEmbeddedImage, depth, defaultExpande
 interface TreeNodesProps {
   nodes: FileTreeNode[]
   itemKey: string
-  firstEmbeddedImage: api.ImageOut | null
   depth: number
   onOpenViewer: (filePath: string) => void
 }
 
-function TreeNodes({ nodes, itemKey, firstEmbeddedImage, depth, onOpenViewer }: TreeNodesProps) {
+function TreeNodes({ nodes, itemKey, depth, onOpenViewer }: TreeNodesProps) {
   return (
     <>
       {nodes.map((node, idx) =>
@@ -327,7 +321,6 @@ function TreeNodes({ nodes, itemKey, firstEmbeddedImage, depth, onOpenViewer }: 
             key={node.name}
             folder={node}
             itemKey={itemKey}
-            firstEmbeddedImage={firstEmbeddedImage}
             depth={depth}
             defaultExpanded={depth === 0}
             onOpenViewer={onOpenViewer}
@@ -340,7 +333,6 @@ function TreeNodes({ nodes, itemKey, firstEmbeddedImage, depth, onOpenViewer }: 
             <FileRow
               itemKey={itemKey}
               file={node.file}
-              firstEmbeddedImage={firstEmbeddedImage}
               depth={depth}
               isLast={idx === nodes.length - 1}
               onOpenViewer={onOpenViewer}
@@ -359,11 +351,9 @@ function TreeNodes({ nodes, itemKey, firstEmbeddedImage, depth, onOpenViewer }: 
 export interface DownloadsSectionProps {
   itemKey: string
   files: api.FileOut[]
-  /** Full image list — used to find embedded thumbnails for 3MF panels. */
-  images?: api.ImageOut[]
 }
 
-export function DownloadsSection({ itemKey, files, images = [] }: DownloadsSectionProps) {
+export function DownloadsSection({ itemKey, files }: DownloadsSectionProps) {
   const [bundleId, setBundleId] = useState<string | null>(null)
   const [zipStatus, setZipStatus] = useState<ZipPollStatus>('idle')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -456,9 +446,8 @@ export function DownloadsSection({ itemKey, files, images = [] }: DownloadsSecti
     expired:  'ZIP expired — retry?',
   }
 
-  // Build tree and find first embedded thumbnail (best-effort per Phase C)
+  // Build file tree; 3MF panels read their thumbnail from analysis.thumbnail_path
   const tree = buildFileTree(files)
-  const firstEmbeddedImage = images.find((img) => img.source === 'embedded') ?? null
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -490,7 +479,6 @@ export function DownloadsSection({ itemKey, files, images = [] }: DownloadsSecti
           <TreeNodes
             nodes={tree}
             itemKey={itemKey}
-            firstEmbeddedImage={firstEmbeddedImage}
             depth={0}
             onOpenViewer={handleOpenViewer}
           />

@@ -264,7 +264,7 @@ export function ItemPage() {
 
       {/* Downloads — file tree with type-aware affordances and inline 3MF panels */}
       <AuroraSection title="Files &amp; Downloads">
-        <DownloadsSection itemKey={item.key} files={item.files} images={item.images} />
+        <DownloadsSection itemKey={item.key} files={item.files} />
       </AuroraSection>
 
       {/* Object breakdown (Phase 16) — show when item has model files */}

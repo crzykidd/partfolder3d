@@ -2,6 +2,34 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-02 — Per-file 3MF thumbnail path stored in `object_analysis`
+
+**Problem:** `_reconcile_embedded_thumbnail` wrote the thumbnail to disk and
+created an item-level `Image` row but returned nothing. `analyze_item` had no
+per-file record of which thumbnail came from which `.3mf`, so the UI had to
+fall back to "first embedded image for the item" — wrong when there are two or
+more `.3mf` files.
+
+**Decision:** Have `_reconcile_embedded_thumbnail` return the item-relative path
+(`thumbs/embedded/<sha256>.png`) on success, `None` on disk write failure.
+`analyze_item` injects that path as `thumbnail_path` into the `object_analysis`
+dict before writing it to `File.object_analysis` (JSONB). No migration needed.
+
+**Alternatives rejected:**
+- Adding a `thumbnail_image_id` FK on `File` — requires a migration and adds
+  coupling between File and Image models; JSONB field is simpler and consistent
+  with the existing analysis result schema.
+- Storing the path as a separate `File` column — same migration cost, no gain.
+
+**Backfill:** Cached analyses missing `thumbnail_path` are updated in-place on
+the next `analyze_item` run (sha still matches → skip full analysis, but
+reconcile thumbnail and write `thumbnail_path` into the cached dict).
+
+**Frontend:** `ThreeMfPanel` reads `analysis.thumbnail_path` directly (via
+`fileDownloadUrl`) rather than receiving an `embeddedThumbnail: ImageOut` prop
+threaded from the parent. Removed the Phase-C "first embedded image" fallback
+(`firstEmbeddedImage`) from `DownloadsPanel` entirely.
+
 ## 2026-07-02 — Render backend fix: `vtk-osmesa` wheel (the "VTK bundles Mesa" assumption was wrong)
 
 Testing render-rework-A against a freshly built `:dev` image exposed a shipping-blocker: **no

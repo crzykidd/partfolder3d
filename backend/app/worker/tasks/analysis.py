@@ -15,7 +15,7 @@ async def _reconcile_embedded_thumbnail(
     item_dir: Path,
     thumb_bytes: bytes,
     _db: object | None = None,
-) -> None:
+) -> str | None:
     """Write the embedded thumbnail to disk and create/reconcile its Image row.
 
     Directory layout: <item_dir>/thumbs/embedded/<sha256>.png
@@ -24,6 +24,9 @@ async def _reconcile_embedded_thumbnail(
 
     Priority: embedded images are inserted AFTER scraped/uploaded images in
     order but BEFORE render images.
+
+    Returns the item-relative thumbnail path (e.g. "thumbs/embedded/<sha>.png")
+    on success, or None if the thumbnail could not be written to disk.
 
     Args:
         _db: Optional AsyncSession for tests; when None opens its own session.
@@ -48,7 +51,7 @@ async def _reconcile_embedded_thumbnail(
             log.warning(
                 "_reconcile_embedded_thumbnail: could not write %s: %s", thumb_path, exc
             )
-            return
+            return None
 
     async def _do_reconcile(db: object) -> None:  # type: ignore[type-arg]
         # Check if this exact path already has an Image row
@@ -120,6 +123,8 @@ async def _reconcile_embedded_thumbnail(
         async with SessionLocal() as db:
             await _do_reconcile(db)
             await db.commit()
+
+    return rel_path
 
 
 def _build_sliced_analysis(
@@ -275,21 +280,32 @@ async def analyze_item(ctx: dict, item_id: int) -> None:
             and current_sha
             and existing.get("source_hash") == current_sha
         ):
-            skipped += 1
             log.debug("analyze_item: item=%s %s cached (sha match)", item_id, f.path)
-            # Still try to reconcile embedded thumbnail even if analysis is cached
+            # Still try to reconcile embedded thumbnail even if analysis is cached.
+            # Also backfill thumbnail_path into the cached result when it is missing
+            # (e.g. files analysed before this feature was added).
             if suffix == ".3mf":
                 try:
                     info = read_3mf(file_path)
                     if info["thumbnail_bytes"]:
-                        await _reconcile_embedded_thumbnail(
+                        thumb_path = await _reconcile_embedded_thumbnail(
                             item_id, item_dir, info["thumbnail_bytes"]
                         )
+                        if thumb_path is not None and not existing.get("thumbnail_path"):
+                            updated = {**existing, "thumbnail_path": thumb_path}
+                            async with SessionLocal() as db:
+                                await db.execute(
+                                    sa.update(File)
+                                    .where(File.id == f.id)
+                                    .values(object_analysis=updated)
+                                )
+                                await db.commit()
                 except Exception as exc:
                     log.warning(
                         "analyze_item: embedded thumb reconcile failed for %s: %s",
                         f.path, exc,
                     )
+            skipped += 1
             continue
 
         try:
@@ -297,10 +313,12 @@ async def analyze_item(ctx: dict, item_id: int) -> None:
                 # 3MF: read slicer metadata + extract embedded thumbnail
                 info = read_3mf(file_path)
 
-                # Always attempt to reconcile the embedded thumbnail (best-effort)
+                # Always attempt to reconcile the embedded thumbnail (best-effort).
+                # Capture the returned path so it can be stored per-file.
+                thumb_path: str | None = None
                 if info["thumbnail_bytes"]:
                     try:
-                        await _reconcile_embedded_thumbnail(
+                        thumb_path = await _reconcile_embedded_thumbnail(
                             item_id, item_dir, info["thumbnail_bytes"]
                         )
                     except Exception as exc:
@@ -320,6 +338,10 @@ async def analyze_item(ctx: dict, item_id: int) -> None:
                         infill_pct=infill_pct,
                         source_hash=current_sha,
                     )
+
+                # Store per-file thumbnail path (None when no embedded thumbnail).
+                # Generic field: STL/OBJ renders can populate it in the future.
+                result["thumbnail_path"] = thumb_path
             else:
                 result = analyze_file(
                     file_path,

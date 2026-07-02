@@ -119,6 +119,14 @@ export interface FileObjectAnalysis {
   filament?: FilamentEntry[]
   /** Per-plate breakdown. */
   plates?: PlateEntry[]
+  /**
+   * Item-relative path of this file's own embedded thumbnail
+   * (e.g. "thumbs/embedded/<sha256>.png").
+   * Populated by the analysis worker for 3MF files that carry an embedded
+   * thumbnail.  Null/absent when no thumbnail was found or the extraction
+   * failed.  Generic: STL/OBJ renders may populate this in the future.
+   */
+  thumbnail_path?: string | null
 }
 
 export interface FileOut {

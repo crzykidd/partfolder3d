@@ -22,6 +22,19 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **Per-file 3MF thumbnails** — each `.3mf` file now carries its own thumbnail
+  path in `File.object_analysis.thumbnail_path` (item-relative, written by the
+  analysis worker). The 3MF collapsible panel displays the file's own embedded
+  thumbnail instead of the first embedded image for the whole item, fixing the
+  wrong-image bug when an item has two or more `.3mf` files. Existing cached
+  analyses are backfilled on the next analysis run. The field is generic
+  (`thumbnail_path`) so STL/OBJ server renders can populate it in the future.
+
+### Fixed
+
+- 3MF panels no longer share one thumbnail when an item has multiple `.3mf`
+  files — each panel now shows the thumbnail extracted from its own file.
+
 - **File-tree browser** — the flat file list in the "Files & Downloads" section
   is replaced with a collapsible folder hierarchy built client-side from each
   file's path. Folders expand/collapse with chevron controls; top-level folders

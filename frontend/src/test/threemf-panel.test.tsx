@@ -6,15 +6,24 @@
  *  - Collapsed state: shows filename, Sliced/Unsliced badge, summary stats
  *  - Expanded state (sliced): filament rows, plate breakdown, object list
  *  - Expanded state (unsliced): volume-estimate warning, objects list
- *  - Embedded thumbnail shown when provided
+ *  - Per-file embedded thumbnail shown when analysis.thumbnail_path is set
  */
 
 import React from 'react'
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 
 import { ThreeMfPanel, formatDuration } from '@/pages/item/ThreeMfPanel'
-import type { FileObjectAnalysis, ImageOut } from '@/lib/api/items'
+import type { FileObjectAnalysis } from '@/lib/api/items'
+
+// Mock the api module so fileDownloadUrl is deterministic in tests
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api')>()
+  return {
+    ...actual,
+    fileDownloadUrl: (key: string, path: string) => `/api/items/${key}/files/${path}`,
+  }
+})
 
 // ---------------------------------------------------------------------------
 // formatDuration
@@ -118,7 +127,6 @@ describe('ThreeMfPanel — collapsed (default)', () => {
       <ThreeMfPanel
         fileName="model.3mf"
         analysis={SLICED_ANALYSIS}
-        embeddedThumbnail={null}
         itemKey="testkey"
       />,
     )
@@ -130,7 +138,6 @@ describe('ThreeMfPanel — collapsed (default)', () => {
       <ThreeMfPanel
         fileName="model.3mf"
         analysis={SLICED_ANALYSIS}
-        embeddedThumbnail={null}
         itemKey="testkey"
       />,
     )
@@ -142,7 +149,6 @@ describe('ThreeMfPanel — collapsed (default)', () => {
       <ThreeMfPanel
         fileName="unsliced.3mf"
         analysis={UNSLICED_ANALYSIS}
-        embeddedThumbnail={null}
         itemKey="testkey"
       />,
     )
@@ -154,7 +160,6 @@ describe('ThreeMfPanel — collapsed (default)', () => {
       <ThreeMfPanel
         fileName="model.3mf"
         analysis={SLICED_ANALYSIS}
-        embeddedThumbnail={null}
         itemKey="testkey"
       />,
     )
@@ -166,7 +171,6 @@ describe('ThreeMfPanel — collapsed (default)', () => {
       <ThreeMfPanel
         fileName="model.3mf"
         analysis={SLICED_ANALYSIS}
-        embeddedThumbnail={null}
         itemKey="testkey"
       />,
     )
@@ -178,7 +182,6 @@ describe('ThreeMfPanel — collapsed (default)', () => {
       <ThreeMfPanel
         fileName="model.3mf"
         analysis={SLICED_ANALYSIS}
-        embeddedThumbnail={null}
         itemKey="testkey"
       />,
     )
@@ -187,25 +190,32 @@ describe('ThreeMfPanel — collapsed (default)', () => {
     expect(screen.queryByText('Plates')).not.toBeInTheDocument()
   })
 
-  it('shows embedded thumbnail when provided', () => {
-    const thumb: ImageOut = {
-      id: 1,
-      path: 'thumbs/embedded/abc.png',
-      source: 'embedded',
-      is_default: false,
-      order: 0,
+  it('shows per-file thumbnail when analysis.thumbnail_path is set', () => {
+    const analysisWithThumb: FileObjectAnalysis = {
+      ...SLICED_ANALYSIS,
+      thumbnail_path: 'thumbs/embedded/abc.png',
     }
     render(
       <ThreeMfPanel
         fileName="model.3mf"
-        analysis={SLICED_ANALYSIS}
-        embeddedThumbnail={thumb}
+        analysis={analysisWithThumb}
         itemKey="testkey"
       />,
     )
     const img = screen.getByAltText('3MF thumbnail') as HTMLImageElement
     expect(img).toBeInTheDocument()
     expect(img.src).toContain('thumbs/embedded/abc.png')
+  })
+
+  it('does not show thumbnail when analysis.thumbnail_path is absent', () => {
+    render(
+      <ThreeMfPanel
+        fileName="model.3mf"
+        analysis={SLICED_ANALYSIS}
+        itemKey="testkey"
+      />,
+    )
+    expect(screen.queryByAltText('3MF thumbnail')).not.toBeInTheDocument()
   })
 })
 
@@ -219,7 +229,6 @@ describe('ThreeMfPanel — expanded (sliced)', () => {
       <ThreeMfPanel
         fileName="model.3mf"
         analysis={SLICED_ANALYSIS}
-        embeddedThumbnail={null}
         itemKey="testkey"
         defaultExpanded
       />,
@@ -270,7 +279,6 @@ describe('ThreeMfPanel — expanded (unsliced)', () => {
       <ThreeMfPanel
         fileName="unsliced.3mf"
         analysis={UNSLICED_ANALYSIS}
-        embeddedThumbnail={null}
         itemKey="testkey"
         defaultExpanded
       />,
@@ -304,7 +312,6 @@ describe('ThreeMfPanel — expand/collapse toggle', () => {
       <ThreeMfPanel
         fileName="model.3mf"
         analysis={SLICED_ANALYSIS}
-        embeddedThumbnail={null}
         itemKey="testkey"
       />,
     )
@@ -323,7 +330,6 @@ describe('ThreeMfPanel — expand/collapse toggle', () => {
       <ThreeMfPanel
         fileName="model.3mf"
         analysis={SLICED_ANALYSIS}
-        embeddedThumbnail={null}
         itemKey="testkey"
         defaultExpanded
       />,
