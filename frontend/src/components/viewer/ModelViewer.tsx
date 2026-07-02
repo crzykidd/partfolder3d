@@ -331,13 +331,15 @@ export default function ModelViewer({ fileUrl, ext, onClose }: ModelViewerProps)
                 clips the model. `clip` intentionally omitted — it tightens the frustum
                 to the object and made zoom-out clip the mesh. */}
             <OrbitControls makeDefault enableDamping dampingFactor={0.05} minDistance={0.01} />
-            <Bounds fit observe margin={1.2}>
-              <LoaderErrorBoundary onError={setLoadError}>
-                <Suspense fallback={<LoadingOverlay />}>
+            {/* Suspense is OUTSIDE Bounds so `fit` runs against the loaded geometry, not the
+                loading placeholder — otherwise the default view opens zoomed all the way in. */}
+            <LoaderErrorBoundary onError={setLoadError}>
+              <Suspense fallback={<LoadingOverlay />}>
+                <Bounds fit observe margin={1.2}>
                   <ModelScene fileUrl={fileUrl} ext={normExt} />
-                </Suspense>
-              </LoaderErrorBoundary>
-            </Bounds>
+                </Bounds>
+              </Suspense>
+            </LoaderErrorBoundary>
           </Canvas>
         )}
       </div>
