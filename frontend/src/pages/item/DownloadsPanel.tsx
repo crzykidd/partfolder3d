@@ -384,7 +384,10 @@ function FolderNode({
   folder, itemKey, depth, defaultExpanded = true, onOpenViewer,
   isOwner, onDeleteFile, onRenameFile, isDeletingId, isRenamingId,
 }: FolderNodeProps) {
-  const [open, setOpen] = useState(defaultExpanded)
+  // The "images" folder duplicates the carousel above, so start it collapsed.
+  const [open, setOpen] = useState(
+    defaultExpanded && folder.name.toLowerCase() !== 'images',
+  )
 
   return (
     <div>

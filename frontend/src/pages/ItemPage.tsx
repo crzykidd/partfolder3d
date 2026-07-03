@@ -338,6 +338,7 @@ export function ItemPage() {
         title="Files &amp; Downloads"
         collapsible
         storageKey="partfolder3d-files-collapsed"
+        headerRight={`${item.files.length} file${item.files.length === 1 ? '' : 's'}`}
       >
         <DownloadsSection
           itemKey={item.key}

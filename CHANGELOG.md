@@ -30,7 +30,9 @@ prefix appears only on git tags and GitHub releases.
 - **Files & Downloads is collapsible + scrollable** — the section header now toggles the
   panel open/closed, and the collapsed state is remembered in the browser (localStorage) so
   it stays that way across item pages until you change it. The file list also scrolls
-  (capped height) so items with many files no longer run off the section.
+  (capped height) so items with many files no longer run off the section. The header shows
+  the **file count**, model files (**stl/obj/3mf/ply**) sort to the **top** of each folder,
+  and the **`images` folder starts collapsed** (its contents already show in the carousel).
 - **"Rescan disk" button on the item page** — the Files & Downloads panel now has a Rescan
   button (owner-only) that re-inventories the item's folder on disk and resyncs the sidecar
   via the reconcile engine, then refreshes the page. Per-item rescans always apply changes

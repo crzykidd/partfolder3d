@@ -19,6 +19,8 @@ interface AuroraSectionProps {
   storageKey?: string
   /** Collapsed state when nothing is stored yet. */
   defaultCollapsed?: boolean
+  /** Optional content shown right-aligned in the header (e.g. a count). */
+  headerRight?: React.ReactNode
 }
 
 export function AuroraSection({
@@ -27,6 +29,7 @@ export function AuroraSection({
   collapsible = false,
   storageKey,
   defaultCollapsed = false,
+  headerRight,
 }: AuroraSectionProps) {
   const [collapsed, setCollapsed] = useLocalStorage<boolean>(
     storageKey ?? `partfolder3d-section:${title}`,
@@ -36,7 +39,17 @@ export function AuroraSection({
   if (!collapsible) {
     return (
       <section style={{ ...AURORA_CARD, padding: '18px 20px' }}>
-        <div style={AURORA_SECTION_HEADER as React.CSSProperties}>{title}</div>
+        <div
+          style={{
+            ...(AURORA_SECTION_HEADER as React.CSSProperties),
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <span>{title}</span>
+          {headerRight != null && <span style={{ marginLeft: 'auto' }}>{headerRight}</span>}
+        </div>
         {children}
       </section>
     )
@@ -64,7 +77,10 @@ export function AuroraSection({
         }}
       >
         {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-        {title}
+        <span>{title}</span>
+        {headerRight != null && (
+          <span style={{ marginLeft: 'auto', fontWeight: 400 }}>{headerRight}</span>
+        )}
       </button>
       {!collapsed && children}
     </section>
