@@ -2,6 +2,23 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-03 — Merge fallout: duplicate `/{key}/jobs` endpoint (#18 vs object-breakdown)
+
+Two parallel worktree branches both built the item-jobs feature: **#18** added
+`GET /api/items/{key}/jobs` returning **active-only** jobs (`started_at`/`finished_at`, for
+the file-list "poll until done" refresh); the **object-breakdown** branch added its own
+returning **active + recent failed** with `progress`/`error` (for the analysis-status UI).
+The text merge did NOT conflict (they landed in different parts of the files) → the tree had
+**two `ItemJobOut` classes + two `list_item_jobs` endpoints** (backend) and **two
+`ItemJobSummary`/`listItemJobs`** + **two `['item-jobs']` queries** (frontend). ruff's
+`Lint (dev)` (F811) caught the backend dup; the frontend dup only surfaced on a fresh full
+build (worktree `tsc -b` incremental cache had hidden it). **Resolution:** one `ItemJobOut`
+with all fields (progress, error, started_at, finished_at); one endpoint (active + failed);
+one frontend query, with `activeJobs = itemJobs.filter(queued|running)` driving the
+file-refresh effect (a failed job must not keep it "active" forever). **Lesson:** when two
+branches touch the same new feature, a clean text-merge is NOT enough — grep for duplicate
+symbols/routes after merging, and always run a FRESH full build (not the worktree's cached one).
+
 ## 2026-07-03 — Catalog grid: responsive cols, compact/full mode, page-size selector
 
 - **Column count** = `floor((W + gap) / (minCard + gap))` (N cards + N−1 gaps in width W),

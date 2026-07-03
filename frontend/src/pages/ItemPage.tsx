@@ -46,14 +46,23 @@ export function ItemPage() {
     enabled: !!key,
   })
 
-  // Poll for analyze_item jobs so ObjectBreakdown can show running/queued/failed status.
-  // Poll every 3 s while the page is open; the endpoint returns only active + recent-failed.
+  // Single source of the item's jobs (active queued/running + recent failed) —
+  // drives BOTH the ObjectBreakdown status and the file-list auto-refresh.
+  // Poll every 3 s only while there's active work.
   const { data: itemJobs } = useQuery({
     queryKey: ['item-jobs', key],
     queryFn: () => api.listItemJobs(key!),
     enabled: !!key,
-    refetchInterval: 3000,
+    refetchInterval: (query) =>
+      query.state.data?.some((j) => j.status === 'queued' || j.status === 'running')
+        ? 3000
+        : false,
   })
+  // Active (in-progress) jobs only — a failed job must not keep this non-empty
+  // forever (that would break the "refresh when work finishes" effect below).
+  const activeJobs = itemJobs?.filter(
+    (j) => j.status === 'queued' || j.status === 'running',
+  )
 
   const setDefaultMutation = useMutation({
     mutationFn: (imageId: number) => api.setDefaultImage(key!, imageId),
@@ -128,17 +137,6 @@ export function ItemPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['item', key] })
       void queryClient.invalidateQueries({ queryKey: ['item-jobs', key] })
-    },
-  })
-
-  // Poll for active jobs on this item; auto-refresh file list when they clear.
-  const { data: activeJobs } = useQuery({
-    queryKey: ['item-jobs', key],
-    queryFn: () => api.listItemJobs(key!),
-    enabled: !!key && !!user,
-    refetchInterval: (query) => {
-      const jobs = query.state.data
-      return jobs && jobs.length > 0 ? 3000 : false
     },
   })
 

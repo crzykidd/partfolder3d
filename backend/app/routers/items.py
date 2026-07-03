@@ -226,6 +226,8 @@ class ItemJobOut(BaseModel):
     progress: int
     error: str | None
     created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
 
     model_config = {"from_attributes": False}
 
@@ -1074,6 +1076,8 @@ async def list_item_jobs(
             progress=j.progress,
             error=j.error,
             created_at=j.created_at,
+            started_at=j.started_at,
+            finished_at=j.finished_at,
         )
         for j in jobs
     ]
@@ -1287,17 +1291,6 @@ _ALLOWED_FILE_EXTENSIONS = frozenset({
 
 class RenameFileRequest(BaseModel):
     name: str  # new basename only — no path separators
-
-
-class ItemJobOut(BaseModel):
-    id: str
-    type: str
-    status: str
-    created_at: datetime
-    started_at: datetime | None
-    finished_at: datetime | None
-
-    model_config = {"from_attributes": False}
 
 
 @router.post(
@@ -1552,42 +1545,3 @@ async def rename_file(
     )
 
 
-@router.get("/{key}/jobs", response_model=list[ItemJobOut])
-async def list_item_jobs(
-    key: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    _user: Annotated[User, Depends(get_current_user)],
-) -> list[ItemJobOut]:
-    """Return active (queued/running) background jobs for an item.
-
-    Used by the item page to poll for in-progress extraction/render work so the
-    file list auto-refreshes when the job completes.  Requires authentication but
-    not admin — any signed-in user can see jobs for any item.
-    """
-    from ..models.job import Job  # noqa: PLC0415
-
-    result = await db.execute(select(Item).where(Item.key == key))
-    item = result.scalar_one_or_none()
-    if item is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found.")
-
-    jobs_result = await db.execute(
-        select(Job).where(
-            Job.item_id == item.id,
-            Job.status.in_(["queued", "running"]),
-            Job.archived_at.is_(None),
-        ).order_by(Job.created_at.desc())
-    )
-    jobs = list(jobs_result.scalars().all())
-
-    return [
-        ItemJobOut(
-            id=str(j.id),
-            type=j.type,
-            status=j.status,
-            created_at=j.created_at,
-            started_at=j.started_at,
-            finished_at=j.finished_at,
-        )
-        for j in jobs
-    ]
