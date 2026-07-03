@@ -2,6 +2,34 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-03 — #18/#19 file management: upload extension allowlist, rename-in-dir-only
+
+`upload_file` (`POST /api/items/{key}/files`) rejects extensions not in
+`_ALLOWED_FILE_EXTENSIONS`. The allowlist is explicit rather than a blocklist — unknown
+extensions from future formats won't silently pass through. Extensions match those already
+handled by `infer_role` / `inventory_item`.
+
+`rename_file` (`PATCH /api/items/{key}/files/{file_id}`) accepts a `name` (basename only)
+and keeps the file in its current directory. Cross-directory moves are not supported: the
+rename target is always `parent(current_path) / new_name`. The path traversal guard
+(`resolve().relative_to(item_dir.resolve())`) runs after deriving the target to catch any
+edge cases the `/../` check misses.
+
+Role is re-inferred on every rename via `infer_role(new_rel)` — if the extension changes
+(e.g. `.stl` → `.gcode`) the role column is updated to match.
+
+## 2026-07-03 — #18 extract_archives Job row: separate session, failure-safe
+
+`extract_archives` now creates a Job row at task start using its own `async with
+SessionLocal()` block (not the caller's) so that if the job creation itself fails the task
+still proceeds — the log warns but extraction continues. The `_finish` helper follows the
+same pattern: a fresh session that commits independently. This means Job lifecycle is
+best-effort: if the DB is unavailable during a task, the task result (files extracted) is
+still preserved.
+
+`arq_job_id` is set from `ctx.get("job_id")` — present when arq calls the task but `None`
+in tests / CLI invocations.
+
 ## 2026-07-03 — #15 render preference: caller-side gate vs. instance-side gate
 
 The `render` parameter (`"auto"` | `"off"`) is a **caller-side gate**: when `"off"`,

@@ -15,6 +15,9 @@ Behaviour
 - After extraction: re-inventory the item dir and synchronise File rows, then
   enqueue analyze_item + render_item so extracted STL/OBJ/3MF files flow
   through the normal metadata/thumbnail pipeline.
+
+Issue #18: a Job row is now created at task start so extraction is visible
+in the Jobs monitor.  The row is marked succeeded/failed when the task ends.
 """
 from __future__ import annotations
 
@@ -28,7 +31,7 @@ async def extract_archives(ctx: dict, item_id: int) -> None:
     """Worker task: extract all ZIP files for the given item.
 
     Args:
-        ctx:     arq worker context dict (unused but required by arq convention).
+        ctx:     arq worker context dict (contains job_id for Job row linking).
         item_id: DB id of the item to process.
     """
     import sqlalchemy as sa  # noqa: PLC0415
@@ -38,6 +41,41 @@ async def extract_archives(ctx: dict, item_id: int) -> None:
     from app.models.item import Item  # noqa: PLC0415
     from app.services.item_helpers import _enqueue_analyze, _enqueue_render  # noqa: PLC0415
     from app.storage.archive import ArchiveError, extract_zip  # noqa: PLC0415
+    from app.worker.job_tracker import create_job, finish_job  # noqa: PLC0415
+
+    # ------------------------------------------------------------------ #
+    # Create Job row so extraction is visible in the Jobs monitor          #
+    # ------------------------------------------------------------------ #
+    job_id = None
+    try:
+        async with SessionLocal() as db:
+            job_id = await create_job(
+                db,
+                "extract_archives",
+                payload={"item_id": item_id},
+                item_id=item_id,
+                arq_job_id=ctx.get("job_id"),
+            )
+            await db.commit()
+    except Exception:
+        log.exception(
+            "extract_archives: failed to create Job row for item %s — continuing without tracking",
+            item_id,
+        )
+
+    async def _finish(
+        succeeded: bool,
+        error: str | None = None,
+        log_text: str | None = None,
+    ) -> None:
+        if job_id is None:
+            return
+        try:
+            async with SessionLocal() as db:
+                await finish_job(db, job_id, succeeded=succeeded, error=error, log_text=log_text)
+                await db.commit()
+        except Exception:
+            log.exception("extract_archives: failed to finalize Job row %s", job_id)
 
     # ------------------------------------------------------------------ #
     # 1. Load item + zip files                                             #
@@ -47,6 +85,7 @@ async def extract_archives(ctx: dict, item_id: int) -> None:
         item = item_result.scalar_one_or_none()
         if item is None:
             log.warning("extract_archives: item %s not found — skipping", item_id)
+            await _finish(succeeded=False, error=f"Item {item_id} not found")
             return
 
         item_dir = Path(item.dir_path)
@@ -59,6 +98,7 @@ async def extract_archives(ctx: dict, item_id: int) -> None:
     zip_file_rows = [f for f in all_file_rows if f.role == FileRole.zip]
     if not zip_file_rows:
         log.debug("extract_archives: item %s has no zip files — nothing to do", item_id)
+        await _finish(succeeded=True, log_text="No zip files found.")
         return
 
     # Existing relative paths for collision detection (includes zip files themselves)
@@ -129,6 +169,7 @@ async def extract_archives(ctx: dict, item_id: int) -> None:
         log.info(
             "extract_archives: item=%s — no ZIPs extracted successfully", item_id
         )
+        await _finish(succeeded=False, error="No ZIPs extracted successfully")
         return
 
     # ------------------------------------------------------------------ #
@@ -145,6 +186,7 @@ async def extract_archives(ctx: dict, item_id: int) -> None:
             log.warning(
                 "extract_archives: item %s disappeared before rescan", item_id
             )
+            await _finish(succeeded=False, error="Item disappeared before rescan")
             return
 
         item_dir = Path(item.dir_path)
@@ -199,4 +241,9 @@ async def extract_archives(ctx: dict, item_id: int) -> None:
     await _enqueue_render(item_id)
     log.info(
         "extract_archives: item=%s enqueued analyze + render", item_id
+    )
+
+    await _finish(
+        succeeded=True,
+        log_text=f"Extraction complete — added={added} removed={removed}",
     )

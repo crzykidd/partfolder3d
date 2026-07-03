@@ -7,13 +7,16 @@
  *  - preview_3d === true → "View in 3D" button (Phase D wired; lazy-loads three.js)
  *  - .3mf → collapsible ThreeMfPanel below the file row
  *
+ * Owner affordances (isOwner=true): delete (Trash2 + confirm), rename (Pencil + inline
+ * edit), and an upload control below the tree.
+ *
  * The "Download all as ZIP" section (with include-print-history toggle and
  * 2-second poll) is kept unchanged below the tree.
  */
 
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, Download, Box } from 'lucide-react'
+import { ChevronDown, ChevronRight, Download, Box, Trash2, Pencil, Upload } from 'lucide-react'
 
 import * as api from '@/lib/api'
 import { mapBundleStatus, shouldContinuePolling, type ZipPollStatus } from '@/lib/catalog-utils'
@@ -23,7 +26,6 @@ import { AURORA_BTN_GHOST, AURORA_BTN_PRIMARY, formatBytes } from './styles'
 
 // ---------------------------------------------------------------------------
 // Lazy-load the 3D viewer so three.js stays out of the entry bundle.
-// Vite splits this into its own async chunk at the dynamic-import boundary.
 // ---------------------------------------------------------------------------
 
 const LazyModelViewer = React.lazy(
@@ -68,15 +70,6 @@ function RoleBadge({ role }: { role: string }) {
 // View-in-3D button
 // ---------------------------------------------------------------------------
 
-/**
- * "View in 3D" button.
- *
- * When `onView` is undefined (stub mode, Phase C) the button is disabled with
- * a tooltip.  Phase D passes the real handler which opens the lazy viewer.
- *
- * @param onView - No-arg callback that opens the viewer for this file.
- *   Undefined → disabled stub (Phase C behaviour preserved).
- */
 function ViewIn3DButton({ onView }: { onView?: () => void }) {
   const isStub = onView == null
   return (
@@ -110,16 +103,51 @@ interface FileRowProps {
   file: api.FileOut
   depth: number
   isLast: boolean
-  /** Opens the viewer for the given file path. Undefined when viewer is unavailable. */
   onOpenViewer: (filePath: string) => void
+  isOwner?: boolean
+  onDeleteFile?: (fileId: number) => void
+  onRenameFile?: (fileId: number, newName: string) => void
+  isDeletingId?: number | null
+  isRenamingId?: number | null
 }
 
-function FileRow({ itemKey, file, depth, onOpenViewer }: FileRowProps) {
+function FileRow({
+  itemKey, file, depth, onOpenViewer,
+  isOwner, onDeleteFile, onRenameFile, isDeletingId, isRenamingId,
+}: FileRowProps) {
   const [threeMfOpen, setThreeMfOpen] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
+  const renameInputRef = useRef<HTMLInputElement | null>(null)
+
   const basename = file.path.split('/').pop() ?? file.path
   const isImg = isImagePath(file.path)
   const is3mfFile = is3mf(file.path)
   const hasAnalysis = file.object_analysis != null
+
+  const isThisDeleting = isDeletingId === file.id
+  const isThisRenaming = isRenamingId === file.id
+
+  const startRename = () => {
+    setRenameValue(basename)
+    setRenaming(true)
+    // Focus the input on the next tick
+    setTimeout(() => renameInputRef.current?.select(), 0)
+  }
+
+  const submitRename = () => {
+    const trimmed = renameValue.trim()
+    if (trimmed && trimmed !== basename && onRenameFile) {
+      onRenameFile(file.id, trimmed)
+    }
+    setRenaming(false)
+  }
+
+  const cancelRename = () => {
+    setRenaming(false)
+    setRenameValue('')
+  }
 
   return (
     <div>
@@ -132,6 +160,7 @@ function FileRow({ itemKey, file, depth, onOpenViewer }: FileRowProps) {
           padding: '8px 12px',
           paddingLeft: 12 + depth * 20,
           transition: 'background 0.1s',
+          opacity: isThisDeleting ? 0.5 : 1,
         }}
         onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--aurora-glass-hover, rgba(255,255,255,0.04))' }}
         onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = '' }}
@@ -155,20 +184,45 @@ function FileRow({ itemKey, file, depth, onOpenViewer }: FileRowProps) {
 
         {/* Filename + meta */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
-          <span
-            style={{
-              fontSize: 12,
-              fontWeight: 500,
-              fontFamily: 'monospace',
-              color: 'var(--aurora-text)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-            title={file.path}
-          >
-            {basename}
-          </span>
+          {renaming ? (
+            <input
+              ref={renameInputRef}
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitRename()
+                if (e.key === 'Escape') cancelRename()
+              }}
+              onBlur={submitRename}
+              autoFocus
+              style={{
+                fontSize: 12,
+                fontFamily: 'monospace',
+                background: 'var(--aurora-input-bg, rgba(255,255,255,0.06))',
+                border: '1px solid var(--aurora-accent)',
+                borderRadius: 5,
+                color: 'var(--aurora-text)',
+                padding: '2px 6px',
+                outline: 'none',
+                width: '100%',
+              }}
+            />
+          ) : (
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 500,
+                fontFamily: 'monospace',
+                color: 'var(--aurora-text)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={file.path}
+            >
+              {isThisRenaming ? '…' : basename}
+            </span>
+          )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <RoleBadge role={file.role} />
             <span style={{ fontSize: 10, color: 'var(--aurora-muted)' }}>{formatBytes(file.size)}</span>
@@ -178,12 +232,12 @@ function FileRow({ itemKey, file, depth, onOpenViewer }: FileRowProps) {
         {/* Action buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
           {/* View in 3D — passes real handler when preview_3d is true */}
-          {file.preview_3d && (
+          {file.preview_3d && !renaming && (
             <ViewIn3DButton onView={() => onOpenViewer(file.path)} />
           )}
 
           {/* 3MF expand toggle */}
-          {is3mfFile && hasAnalysis && (
+          {is3mfFile && hasAnalysis && !renaming && (
             <button
               onClick={() => setThreeMfOpen((v) => !v)}
               aria-expanded={threeMfOpen}
@@ -203,22 +257,94 @@ function FileRow({ itemKey, file, depth, onOpenViewer }: FileRowProps) {
           )}
 
           {/* Download link */}
-          <a
-            href={api.fileDownloadUrl(itemKey, file.path)}
-            download
-            style={{
-              ...AURORA_BTN_GHOST,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              textDecoration: 'none',
-              fontSize: 11,
-              padding: '4px 10px',
-            }}
-          >
-            <Download size={11} />
-            Download
-          </a>
+          {!renaming && (
+            <a
+              href={api.fileDownloadUrl(itemKey, file.path)}
+              download
+              style={{
+                ...AURORA_BTN_GHOST,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                textDecoration: 'none',
+                fontSize: 11,
+                padding: '4px 10px',
+              }}
+            >
+              <Download size={11} />
+              Download
+            </a>
+          )}
+
+          {/* Owner: rename button */}
+          {isOwner && !renaming && !confirmDelete && (
+            <button
+              onClick={startRename}
+              title="Rename file"
+              disabled={isThisRenaming}
+              style={{
+                ...AURORA_BTN_GHOST,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                fontSize: 11,
+                padding: '4px 8px',
+                opacity: isThisRenaming ? 0.5 : 1,
+                cursor: isThisRenaming ? 'not-allowed' : 'pointer',
+              }}
+            >
+              <Pencil size={11} />
+            </button>
+          )}
+
+          {/* Owner: delete with confirm */}
+          {isOwner && !renaming && (
+            confirmDelete ? (
+              <>
+                <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>Delete?</span>
+                <button
+                  onClick={() => { onDeleteFile?.(file.id); setConfirmDelete(false) }}
+                  disabled={isThisDeleting}
+                  style={{
+                    ...AURORA_BTN_GHOST,
+                    fontSize: 11,
+                    padding: '4px 10px',
+                    color: 'var(--aurora-danger)',
+                    borderColor: 'var(--aurora-danger)',
+                    opacity: isThisDeleting ? 0.5 : 1,
+                    cursor: isThisDeleting ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {isThisDeleting ? '…' : 'Confirm'}
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  style={{ ...AURORA_BTN_GHOST, fontSize: 11, padding: '4px 8px', cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                title="Delete file"
+                disabled={isThisDeleting}
+                style={{
+                  ...AURORA_BTN_GHOST,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  fontSize: 11,
+                  padding: '4px 8px',
+                  color: 'var(--aurora-danger)',
+                  opacity: isThisDeleting ? 0.5 : 1,
+                  cursor: isThisDeleting ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <Trash2 size={11} />
+              </button>
+            )
+          )}
         </div>
       </div>
 
@@ -247,9 +373,17 @@ interface FolderNodeProps {
   depth: number
   defaultExpanded?: boolean
   onOpenViewer: (filePath: string) => void
+  isOwner?: boolean
+  onDeleteFile?: (fileId: number) => void
+  onRenameFile?: (fileId: number, newName: string) => void
+  isDeletingId?: number | null
+  isRenamingId?: number | null
 }
 
-function FolderNode({ folder, itemKey, depth, defaultExpanded = true, onOpenViewer }: FolderNodeProps) {
+function FolderNode({
+  folder, itemKey, depth, defaultExpanded = true, onOpenViewer,
+  isOwner, onDeleteFile, onRenameFile, isDeletingId, isRenamingId,
+}: FolderNodeProps) {
   const [open, setOpen] = useState(defaultExpanded)
 
   return (
@@ -294,6 +428,11 @@ function FolderNode({ folder, itemKey, depth, defaultExpanded = true, onOpenView
             itemKey={itemKey}
             depth={depth + 1}
             onOpenViewer={onOpenViewer}
+            isOwner={isOwner}
+            onDeleteFile={onDeleteFile}
+            onRenameFile={onRenameFile}
+            isDeletingId={isDeletingId}
+            isRenamingId={isRenamingId}
           />
         </div>
       )}
@@ -310,9 +449,17 @@ interface TreeNodesProps {
   itemKey: string
   depth: number
   onOpenViewer: (filePath: string) => void
+  isOwner?: boolean
+  onDeleteFile?: (fileId: number) => void
+  onRenameFile?: (fileId: number, newName: string) => void
+  isDeletingId?: number | null
+  isRenamingId?: number | null
 }
 
-function TreeNodes({ nodes, itemKey, depth, onOpenViewer }: TreeNodesProps) {
+function TreeNodes({
+  nodes, itemKey, depth, onOpenViewer,
+  isOwner, onDeleteFile, onRenameFile, isDeletingId, isRenamingId,
+}: TreeNodesProps) {
   return (
     <>
       {nodes.map((node, idx) =>
@@ -324,6 +471,11 @@ function TreeNodes({ nodes, itemKey, depth, onOpenViewer }: TreeNodesProps) {
             depth={depth}
             defaultExpanded={depth === 0}
             onOpenViewer={onOpenViewer}
+            isOwner={isOwner}
+            onDeleteFile={onDeleteFile}
+            onRenameFile={onRenameFile}
+            isDeletingId={isDeletingId}
+            isRenamingId={isRenamingId}
           />
         ) : (
           <div
@@ -336,6 +488,11 @@ function TreeNodes({ nodes, itemKey, depth, onOpenViewer }: TreeNodesProps) {
               depth={depth}
               isLast={idx === nodes.length - 1}
               onOpenViewer={onOpenViewer}
+              isOwner={isOwner}
+              onDeleteFile={onDeleteFile}
+              onRenameFile={onRenameFile}
+              isDeletingId={isDeletingId}
+              isRenamingId={isRenamingId}
             />
           </div>
         ),
@@ -351,14 +508,27 @@ function TreeNodes({ nodes, itemKey, depth, onOpenViewer }: TreeNodesProps) {
 export interface DownloadsSectionProps {
   itemKey: string
   files: api.FileOut[]
+  isOwner?: boolean
+  onDeleteFile?: (fileId: number) => void
+  onRenameFile?: (fileId: number, newName: string) => void
+  onUploadFile?: (file: File) => void
+  isDeletingFileId?: number | null
+  isRenamingFileId?: number | null
+  isUploadingFile?: boolean
+  uploadFileError?: string | null
 }
 
-export function DownloadsSection({ itemKey, files }: DownloadsSectionProps) {
+export function DownloadsSection({
+  itemKey, files,
+  isOwner, onDeleteFile, onRenameFile, onUploadFile,
+  isDeletingFileId, isRenamingFileId, isUploadingFile, uploadFileError,
+}: DownloadsSectionProps) {
   const [bundleId, setBundleId] = useState<string | null>(null)
   const [zipStatus, setZipStatus] = useState<ZipPollStatus>('idle')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [includeHistory, setIncludeHistory] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const uploadFileInputRef = useRef<HTMLInputElement | null>(null)
 
   // Viewer state: {filePath, ext} of the currently-open file, or null
   const [viewerFile, setViewerFile] = useState<{ filePath: string; ext: string } | null>(null)
@@ -429,7 +599,6 @@ export function DownloadsSection({ itemKey, files }: DownloadsSectionProps) {
     }
   }, [bundleId, zipStatus, itemKey])
 
-  /** Open the 3D viewer for a given file path. Extracts the extension. */
   const handleOpenViewer = useCallback((filePath: string) => {
     const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase()
     setViewerFile({ filePath, ext })
@@ -446,12 +615,11 @@ export function DownloadsSection({ itemKey, files }: DownloadsSectionProps) {
     expired:  'ZIP expired — retry?',
   }
 
-  // Build file tree; 3MF panels read their thumbnail from analysis.thumbnail_path
   const tree = buildFileTree(files)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* Lazy-loaded 3D viewer modal — only mounted when a file is selected */}
+      {/* Lazy-loaded 3D viewer modal */}
       {viewerFile && (
         <Suspense fallback={null}>
           <LazyModelViewer
@@ -481,7 +649,49 @@ export function DownloadsSection({ itemKey, files }: DownloadsSectionProps) {
             itemKey={itemKey}
             depth={0}
             onOpenViewer={handleOpenViewer}
+            isOwner={isOwner}
+            onDeleteFile={onDeleteFile}
+            onRenameFile={onRenameFile}
+            isDeletingId={isDeletingFileId}
+            isRenamingId={isRenamingFileId}
           />
+        </div>
+      )}
+
+      {/* Upload control (owners only) */}
+      {isOwner && onUploadFile && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <button
+            onClick={() => uploadFileInputRef.current?.click()}
+            disabled={isUploadingFile}
+            style={{
+              ...AURORA_BTN_GHOST,
+              fontSize: 12,
+              padding: '6px 14px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              opacity: isUploadingFile ? 0.5 : 1,
+              alignSelf: 'flex-start',
+              cursor: isUploadingFile ? 'not-allowed' : 'pointer',
+            }}
+          >
+            <Upload size={13} />
+            {isUploadingFile ? 'Uploading…' : 'Upload file'}
+          </button>
+          <input
+            ref={uploadFileInputRef}
+            type="file"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) onUploadFile(f)
+              e.target.value = ''
+            }}
+          />
+          {uploadFileError && (
+            <span style={{ fontSize: 11, color: 'var(--aurora-danger)' }}>{uploadFileError}</span>
+          )}
         </div>
       )}
 

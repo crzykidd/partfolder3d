@@ -13,7 +13,7 @@
  * Styling: Aurora aesthetic — glass cards, teal accent (#0FA4AB), --aurora-* CSS vars.
  */
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Trash2, Upload } from 'lucide-react'
@@ -70,6 +70,69 @@ export function ItemPage() {
       void queryClient.invalidateQueries({ queryKey: ['item', key] })
     },
   })
+
+  // ---- File management mutations (issues #18/#19) ----
+  const [deletingFileId, setDeletingFileId] = useState<number | null>(null)
+  const [renamingFileId, setRenamingFileId] = useState<number | null>(null)
+  const [uploadFileError, setUploadFileError] = useState<string | null>(null)
+
+  const deleteFileMutation = useMutation({
+    mutationFn: async (fileId: number) => {
+      setDeletingFileId(fileId)
+      await api.deleteItemFile(key!, fileId)
+    },
+    onSuccess: () => {
+      setDeletingFileId(null)
+      void queryClient.invalidateQueries({ queryKey: ['item', key] })
+    },
+    onError: () => {
+      setDeletingFileId(null)
+    },
+  })
+
+  const renameFileMutation = useMutation({
+    mutationFn: ({ fileId, name }: { fileId: number; name: string }) => {
+      setRenamingFileId(fileId)
+      return api.renameItemFile(key!, fileId, name)
+    },
+    onSettled: () => {
+      setRenamingFileId(null)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['item', key] })
+    },
+  })
+
+  const uploadFileMutation = useMutation({
+    mutationFn: (file: File) => api.uploadItemFile(key!, file),
+    onSuccess: () => {
+      setUploadFileError(null)
+      void queryClient.invalidateQueries({ queryKey: ['item', key] })
+    },
+    onError: (e) => {
+      setUploadFileError(e instanceof Error ? e.message : 'Upload failed.')
+    },
+  })
+
+  // Poll for active jobs on this item; auto-refresh file list when they clear.
+  const { data: activeJobs } = useQuery({
+    queryKey: ['item-jobs', key],
+    queryFn: () => api.listItemJobs(key!),
+    enabled: !!key && !!user,
+    refetchInterval: (query) => {
+      const jobs = query.state.data
+      return jobs && jobs.length > 0 ? 3000 : false
+    },
+  })
+
+  const prevActiveJobCount = useRef(0)
+  useEffect(() => {
+    const current = activeJobs?.length ?? 0
+    if (prevActiveJobCount.current > 0 && current === 0) {
+      void queryClient.invalidateQueries({ queryKey: ['item', key] })
+    }
+    prevActiveJobCount.current = current
+  }, [activeJobs, key, queryClient])
 
   // Delete item (moves the directory to trash server-side, removes the DB row)
   const [confirmDeleteItem, setConfirmDeleteItem] = useState(false)
@@ -264,7 +327,18 @@ export function ItemPage() {
 
       {/* Downloads — file tree with type-aware affordances and inline 3MF panels */}
       <AuroraSection title="Files &amp; Downloads">
-        <DownloadsSection itemKey={item.key} files={item.files} />
+        <DownloadsSection
+          itemKey={item.key}
+          files={item.files}
+          isOwner={isOwnerOrAdmin}
+          onDeleteFile={(fileId) => deleteFileMutation.mutate(fileId)}
+          onRenameFile={(fileId, name) => renameFileMutation.mutate({ fileId, name })}
+          onUploadFile={(file) => uploadFileMutation.mutate(file)}
+          isDeletingFileId={deletingFileId}
+          isRenamingFileId={renamingFileId}
+          isUploadingFile={uploadFileMutation.isPending}
+          uploadFileError={uploadFileError}
+        />
       </AuroraSection>
 
       {/* Object breakdown (Phase 16) — show when item has model files */}

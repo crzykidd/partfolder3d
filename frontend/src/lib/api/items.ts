@@ -491,6 +491,37 @@ export const pollZip = (key: string, bundleId: string): Promise<BundleOut> =>
 export const fileDownloadUrl = (key: string, filePath: string): string =>
   `/api/items/${key}/files/${filePath}`
 
+export const uploadItemFile = (key: string, file: File): Promise<FileOut> => {
+  const form = new FormData()
+  form.append('file', file)
+  return apiFetchForm<FileOut>(`/api/items/${key}/files`, form)
+}
+
+export const deleteItemFile = (key: string, fileId: number): Promise<void> =>
+  apiFetch<void>(`/api/items/${key}/files/${fileId}`, { method: 'DELETE' })
+
+export const renameItemFile = (
+  key: string,
+  fileId: number,
+  name: string,
+): Promise<FileOut> =>
+  apiFetch<FileOut>(`/api/items/${key}/files/${fileId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  })
+
+export interface ItemJobSummary {
+  id: string
+  type: string
+  status: string
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+
+export const listItemJobs = (key: string): Promise<ItemJobSummary[]> =>
+  apiFetch<ItemJobSummary[]>(`/api/items/${key}/jobs`)
+
 /** URL for streaming the ready ZIP bundle (use as href or window.open). */
 export const zipDownloadUrl = (key: string, bundleId: string): string =>
   `/api/items/${key}/zip/${bundleId}?download=true`

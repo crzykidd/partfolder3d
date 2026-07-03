@@ -41,6 +41,23 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **Item file management** — owners can now upload, rename, and delete individual files
+  from the "Files & Downloads" panel on any item page without a full re-scan.  Each file
+  row gains a rename button (inline edit, Enter to confirm, Escape to cancel) and a
+  two-step trash-can delete.  An "Upload file" control at the bottom of the panel accepts
+  model files, archives, G-code, and documents; the backend sanitizes the filename,
+  resolves collisions with a counter suffix, infers file role from the extension, and
+  enqueues the standard analyze + render pipeline.  PATCH enforces path-traversal and
+  collision guards; DELETE is best-effort on disk.  All three operations sync the item
+  sidecar.  (Closes #19, part of #18)
+
+- **Extraction progress reflected without a manual reload** — `extract_archives` now
+  creates a Job row at the start of the task (type `"extract_archives"`, linked to the
+  item) and marks it succeeded or failed when done.  The item page polls
+  `GET /api/items/{key}/jobs` (active jobs only) via TanStack Query and auto-invalidates
+  the item query when the job count drops to zero, so the file list updates as soon as
+  extraction finishes.  (Part of #18)
+
 - **`render` preference on import-session commit paths** — `POST /api/import-sessions/{id}/commit`
   now accepts an optional JSON body (`CommitOptions`) with `render: "auto" | "off"` (default
   `"auto"`); `POST /api/import-sessions/bulk-commit` gains the same field on `BulkCommitRequest`.
