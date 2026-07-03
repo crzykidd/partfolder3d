@@ -965,7 +965,10 @@ async def bulk_commit_import_sessions(
                 committed_count += 1
 
             except Exception as exc:
-                log.exception("bulk_commit: error on session %s", sid)
+                # Sanitize CR/LF before logging the user-provided session id
+                # (CodeQL py/log-injection); session_ids is list[str].
+                _safe_sid = sid.replace("\r", "\\r").replace("\n", "\\n")
+                log.exception("bulk_commit: error on session %s", _safe_sid)
                 try:
                     await iso_db.rollback()
                 except Exception:

@@ -170,6 +170,12 @@ prefix appears only on git tags and GitHub releases.
   *Failed* (with the error text + a hint to use Rescan disk), or *No job* ("hasn't run
   yet — use Rescan disk to queue it").
 
+### Security
+
+- Sanitize CR/LF before logging the user-provided session id in the bulk-commit handler
+  (CodeQL `py/log-injection`), matching the escaping used elsewhere in the import-sessions
+  package.
+
 ## [0.2.5] — 2026-07-02
 
 ### Added
