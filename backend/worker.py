@@ -69,6 +69,12 @@ SCHEDULED_JOB_REGISTRY: dict[str, tuple[str, str]] = {
         "(JOB_RETENTION_SUCCEEDED_DAYS / JOB_RETENTION_FAILED_DAYS).",
         "daily at 04:00 UTC",
     ),
+    "orphan_cleanup": (
+        "Daily reclamation: purge soft-deleted items under DATA_DIR/trash older "
+        "than TRASH_RETENTION_DAYS, and report (or delete, per ORPHAN_PRINTS_DELETE) "
+        "orphaned files under items' prints/ dirs.",
+        "daily at 05:00 UTC",
+    ),
 }
 
 
@@ -92,6 +98,7 @@ from app.worker.tasks.scheduled import (  # noqa: E402
     cron_inbox_scan,
     cron_job_history_retention,
     cron_library_reconcile_scan,
+    cron_orphan_cleanup,
     cron_share_link_expiry_cleanup,
     exec_scheduled_job,
 )
@@ -101,60 +108,93 @@ from app.worker.tasks.scheduled import (  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-async def _recover_orphaned_render_jobs(
+# Idempotent job types — safe to re-run.  Each maps Job.type → the arq task name;
+# all three tasks take a single positional ``item_id`` and their Job payload
+# carries ``{"item_id": ...}``, so a crashed run can be re-enqueued verbatim.  A
+# completed render/analyze just cache-hits (SHA-256), and extract_archives is a
+# no-op once the archive is already unpacked.  Any Job.type NOT listed here is
+# treated as NON-idempotent (side-effecting) and is only marked failed, never
+# re-run — e.g. backup, import_session commit, zip_bundle.
+_IDEMPOTENT_JOB_TASKS: dict[str, str] = {
+    "render": "render_item",
+    "analyze": "analyze_item",
+    "extract_archives": "extract_archives",
+}
+
+
+async def _recover_orphaned_jobs(
     ctx: dict,
     _db: object | None = None,
 ) -> None:
-    """Mark orphaned 'running' render jobs failed and re-enqueue them.
+    """Reap ALL jobs left 'running' by a crashed/restarted worker.
 
-    At startup the worker has no jobs in flight; any render job still in
-    'running' status was abandoned by a previous crashed/restarted worker.
-    We mark each orphan 'failed', then re-enqueue render_item(item_id) so the
-    render completes.  Renders are idempotent (SHA-256 cache hit skips already-
-    done files), so a previously-completed render just cache-hits.
+    At startup the worker has nothing in flight, so every Job row still in
+    'running' status was abandoned by a previous worker.  We mark each one
+    'failed' (with a clear error + finished_at) so it stops appearing as running
+    forever and becomes eligible for the retention cron.  For IDEMPOTENT job
+    types (see ``_IDEMPOTENT_JOB_TASKS`` — render / analyze / extract_archives,
+    all safe to re-run) we additionally re-enqueue the task, deduped by
+    (task, item_id).  NON-idempotent types are marked failed ONLY and NOT re-run,
+    so a half-finished side-effecting job is surfaced rather than silently
+    repeated.
 
-    Multiple orphans for the same item_id are deduped — one enqueue per item.
+    'queued' rows are intentionally NOT touched: no code path writes them today
+    (issue #20), and once one does, a queued row may still be a live entry in the
+    Redis queue that will run normally after the restart.
 
     Args:
-        ctx:  arq worker context dict (must contain 'redis' key when _db is None
-              and there are orphans to re-enqueue).
+        ctx:  arq worker context dict (must contain 'redis' key when there are
+              idempotent orphans to re-enqueue).
         _db:  Optional AsyncSession for testing (mirrors the _reconcile_render_images
               pattern).  When None (production), opens its own SessionLocal.
     """
+    from datetime import UTC, datetime  # noqa: PLC0415
+
     import sqlalchemy as sa  # noqa: PLC0415
 
     from app.db import SessionLocal  # noqa: PLC0415
     from app.models.job import Job  # noqa: PLC0415
 
-    async def _do_recover(db: object) -> list[int]:  # type: ignore[type-arg]
-        """Inner: mark orphans failed; return item_ids to re-enqueue (deduped)."""
+    async def _do_recover(db: object) -> dict[str, list[int]]:  # type: ignore[type-arg]
+        """Inner: mark orphans failed; return {task_name: [item_id, ...]} to enqueue."""
         result = await db.execute(  # type: ignore[union-attr]
-            sa.select(Job).where(
-                Job.type == "render",
-                Job.status == "running",
-            )
+            sa.select(Job).where(Job.status == "running")
         )
         orphans: list[Job] = list(result.scalars().all())
 
         if not orphans:
-            return []
+            return {}
 
+        idempotent_n = sum(1 for j in orphans if j.type in _IDEMPOTENT_JOB_TASKS)
         log.warning(
-            "startup: %d orphaned render job(s) found — marking failed + re-queuing",
+            "startup: %d orphaned 'running' job(s) found "
+            "(%d idempotent → fail + re-queue, %d non-idempotent → fail only) — reaping",
             len(orphans),
+            idempotent_n,
+            len(orphans) - idempotent_n,
         )
 
-        seen_item_ids: set[int] = set()
-        to_enqueue: list[int] = []
+        now = datetime.now(UTC)
+        to_enqueue: dict[str, list[int]] = {}
+        seen: dict[str, set[int]] = {}
 
         for job in orphans:
             job.status = "failed"  # type: ignore[union-attr]
-            job.error = "orphaned by worker restart — re-queued"  # type: ignore[union-attr]
-
-            item_id: int | None = (job.payload or {}).get("item_id")  # type: ignore[union-attr]
-            if item_id is not None and item_id not in seen_item_ids:
-                seen_item_ids.add(item_id)
-                to_enqueue.append(item_id)
+            job.finished_at = now  # type: ignore[union-attr]
+            task_name = _IDEMPOTENT_JOB_TASKS.get(job.type)  # type: ignore[union-attr]
+            if task_name is not None:
+                job.error = "orphaned by worker restart — re-queued"  # type: ignore[union-attr]
+                item_id: int | None = (job.payload or {}).get("item_id")  # type: ignore[union-attr]
+                if item_id is not None:
+                    bucket = seen.setdefault(task_name, set())
+                    if item_id not in bucket:
+                        bucket.add(item_id)
+                        to_enqueue.setdefault(task_name, []).append(int(item_id))
+            else:
+                job.error = (  # type: ignore[union-attr]
+                    "orphaned by worker restart — not auto-retried "
+                    "(non-idempotent job type; re-run manually if needed)"
+                )
 
         await db.flush()  # type: ignore[union-attr]
         return to_enqueue
@@ -171,12 +211,13 @@ async def _recover_orphaned_render_jobs(
 
     redis = ctx.get("redis")
     if redis is None:
-        log.error("startup: no redis in ctx — cannot re-enqueue orphaned renders")
+        log.error("startup: no redis in ctx — cannot re-enqueue orphaned idempotent jobs")
         return
 
-    for item_id in to_enqueue:
-        await redis.enqueue_job("render_item", item_id)
-        log.info("startup: re-enqueued render_item for item_id=%d", item_id)
+    for task_name, item_ids in to_enqueue.items():
+        for item_id in item_ids:
+            await redis.enqueue_job(task_name, item_id)
+            log.info("startup: re-enqueued %s for item_id=%d", task_name, item_id)
 
 
 async def startup(ctx: dict) -> None:
@@ -222,7 +263,7 @@ async def startup(ctx: dict) -> None:
     log.info("startup: scheduled_jobs table seeded")
 
     # --- Crash recovery ---
-    await _recover_orphaned_render_jobs(ctx)
+    await _recover_orphaned_jobs(ctx)
     log.info("startup: crash recovery complete")
 
 
@@ -255,6 +296,7 @@ class WorkerSettings:
         cron(cron_library_reconcile_scan, hour=3, minute=0, run_at_startup=False),
         cron(cron_db_backup, hour=4, minute=0, run_at_startup=False),
         cron(cron_job_history_retention, hour=4, minute=30, run_at_startup=False),
+        cron(cron_orphan_cleanup, hour=5, minute=0, run_at_startup=False),
     ]
 
     allow_abort_jobs = True

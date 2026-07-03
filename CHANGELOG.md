@@ -100,8 +100,27 @@ prefix appears only on git tags and GitHub releases.
   commit SHA (checkout, setup-python/node, docker/*, codeql-action), and `ci.yml` /
   `dev-checks.yml` gained a top-level least-privilege `permissions: contents: read` block.
 
+### Added
+
+- **Daily disk-reclamation sweep (`orphan_cleanup` cron, 05:00 UTC)** — a new scheduled job
+  reclaims space that previously accumulated forever. It **purges soft-deleted items** under
+  `/data/trash` older than `TRASH_RETENTION_DAYS` (default **30**; set `0` to disable), logging
+  every deletion (path + age) and a summary (entries purged, bytes reclaimed). It also finds
+  **orphaned print files** under items' `prints/` dirs — gcode/photos left behind because
+  deleting a print record intentionally keeps its files — and, by default, **reports them only**
+  (count + sample paths + bytes; nothing deleted) so you can review first. Set
+  `ORPHAN_PRINTS_DELETE=true` to have it delete an orphan only when it is both unreferenced and
+  older than `TRASH_RETENTION_DAYS`, with per-file logging. Both knobs are in `.env.example`
+  with risk notes. (audit §E)
+
 ### Changed
 
+- **Startup crash recovery now covers every job type, not just renders** — when the worker
+  restarts, any job left `running` by the previous (crashed) worker is reaped instead of only
+  `render` rows. Idempotent types (`render`, `analyze`, `extract_archives`) are marked failed and
+  **re-enqueued** (deduped per item); non-idempotent/side-effecting types are marked failed **only**
+  (with a clear error) so a half-finished job is surfaced rather than silently re-run. `queued`
+  rows are intentionally left untouched. (audit §E)
 - **One shared arq Redis pool instead of ~32 per-request pools** — routers and services that
   enqueue background jobs (render, analyze, extract-archives, ZIP bundle, import-session,
   review-apply, scheduled-job run, backup, job retry/cancel/restart) used to open a fresh

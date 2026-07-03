@@ -326,7 +326,12 @@ async def delete_print_record(
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Delete a print record (does NOT delete attached files from disk)."""
+    """Delete a print record (does NOT delete attached files from disk).
+
+    Any attached gcode/photo left behind under the item's prints/ dir becomes an
+    orphan; the daily orphan_cleanup cron reports (or, with ORPHAN_PRINTS_DELETE,
+    reclaims) such files.
+    """
     item = await _get_item_or_404(key, db)
     rec = await _get_record_or_404(record_id, item.id, db)
     _require_record_owner_or_admin(rec, user)

@@ -158,6 +158,25 @@ class Settings(BaseSettings):
     # Days after which a failed/cancelled/superseded job row is hard-deleted.
     JOB_RETENTION_FAILED_DAYS: int = 30
 
+    # ---- Trash / orphaned-file reclamation (Fix Set 8) ----
+    # Days a soft-deleted item folder survives under DATA_DIR/trash before the
+    # daily orphan_cleanup cron HARD-DELETES it.  Item delete moves the folder to
+    # /data/trash/<ts>-<key>/ instead of rm -rf, so this is the grace window
+    # before that copy is permanently removed.
+    # RISK: this permanently deletes files.  Keep the default generous.
+    # Set to 0 (or negative) to DISABLE trash purging entirely (trash then grows
+    # forever — you must prune it by hand).
+    TRASH_RETENTION_DAYS: int = 30
+    # Whether the daily orphan_cleanup cron DELETES orphaned files under items'
+    # prints/ directories — gcode/photo files left on disk when a PrintRecord was
+    # deleted (the DELETE endpoint intentionally leaves files behind).
+    # DEFAULT False = REPORT ONLY: orphans are logged (count + paths + bytes) but
+    # never deleted, so the owner can review before enabling deletion.
+    # When True, an orphaned print file is deleted ONLY if it is BOTH unreferenced
+    # AND older than TRASH_RETENTION_DAYS, with per-file logging.
+    # RISK: True permanently deletes files.
+    ORPHAN_PRINTS_DELETE: bool = False
+
     # ---- ZIP auto-extraction (Phase B / render-rework-B) ----
     # Maximum total uncompressed size (MB) of a single ZIP archive.
     # Archives exceeding this cap are rejected with a clear error.

@@ -835,7 +835,8 @@ async def delete_item(
 
     The on-disk directory is NOT hard-deleted — it is moved to
     /data/trash/<timestamp>-<key>/ to honour "never lose data" (PRD §1).
-    A future purge job (Phase 9) can prune old trash entries.
+    The daily orphan_cleanup cron prunes trash entries older than
+    TRASH_RETENTION_DAYS (default 30d).
     Recorded in docs/decisions.md.
     """
     result = await db.execute(select(Item).where(Item.key == key))

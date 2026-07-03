@@ -2,6 +2,24 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-03 — Operational: generalized crash recovery + conservative reclamation cron
+
+Audit §E remediation (set 8). **Crash recovery** at worker startup now reaps ALL jobs stuck in
+`running` (was render-only): idempotent types (`render`, `analyze`, `extract_archives` — single
+`item_id`, safe to re-run) are marked failed + re-enqueued; everything else (`backup`,
+`import_session` commit, `zip_bundle`) is marked failed only (visible, never silently re-run).
+`queued` rows are left untouched until #20 writes them.
+
+**Reclamation cron** (`orphan_cleanup`, daily 05:00 UTC) — net-new scheduled deletion, kept
+deliberately conservative and owner-tunable (**owner: review these defaults**):
+- **Trash purge** — deletes trash entries older than `TRASH_RETENTION_DAYS` (default **30**;
+  set `0` to disable). Every deletion + a summary is logged (no silent truncation).
+- **Orphaned prints** (print files left on disk by `DELETE .../print-records/{id}`) —
+  **report-only by default** (`ORPHAN_PRINTS_DELETE=false`): logs a warning with count + sample
+  paths + bytes, deletes nothing, so the owner can confirm detection before enabling. When set
+  `true`, deletes an orphan only if unreferenced AND older than the retention window, per-file
+  logged. Chosen report-first because this is destructive against user print history.
+
 ## 2026-07-03 — Shared arq pool + JSON job serializer (audit §A/§E remediation, set 5)
 
 **One process-wide arq pool, injected — not a module singleton.** The ~32 per-request
