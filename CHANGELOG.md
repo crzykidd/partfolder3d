@@ -20,6 +20,8 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.2.5] — 2026-07-02
+
 ### Added
 
 - **Confirm-password field on the setup wizard** — the first-run setup form now
