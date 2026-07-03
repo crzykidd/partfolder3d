@@ -979,3 +979,179 @@ async def test_test_endpoint_no_key_returns_clear_error(client: AsyncClient) -> 
     body = resp.json()
     assert body["ok"] is False
     assert "api key" in (body["error"] or "").lower()
+
+
+# ---------------------------------------------------------------------------
+# 9. Issue #16 — AI cleanup/summarize prefer body description over session value
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ai_cleanup_body_description_overrides_session(
+    client: AsyncClient, db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """cleanup-description prefers description sent in body over persisted session value."""
+    from app.crypto import encrypt  # noqa: PLC0415
+    from app.models.import_session import (  # noqa: PLC0415
+        ImportSession,
+        ImportSessionStatus,
+        ImportSourceType,
+    )
+    from app.models.user import User  # noqa: PLC0415
+
+    csrf = await _setup_and_login(client)
+
+    user_res = await db_session.execute(select(User).limit(1))
+    admin = user_res.scalar_one()
+
+    provider = AiProvider(
+        provider=AiProviderType.claude,
+        model="claude-opus-4-8",
+        api_key_encrypted=encrypt("sk-test"),
+        enabled=True,
+    )
+    db_session.add(provider)
+
+    # Session has a stale persisted description.
+    session = ImportSession(
+        status=ImportSessionStatus.pending_wizard,
+        source_type=ImportSourceType.upload,
+        confirmed_title="Test Design",
+        description="OLD stale persisted description",
+        created_by_id=admin.id,
+    )
+    db_session.add(session)
+    await db_session.flush()
+
+    # Capture what the AI actually receives as the user message.
+    captured: dict = {}
+
+    def mock_caller(api_key, model, system, user_msg, max_tokens):
+        captured["user_msg"] = user_msg
+        return "Cleaned up."
+
+    with patch("app.ai.client._anthropic_caller", mock_caller):
+        resp = await client.post(
+            f"/api/import-sessions/{session.id}/ai/cleanup-description",
+            json={"description": "NEW typed text", "title": "New Title"},
+            headers={"x-csrf-token": csrf},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["provider_available"] is True
+    assert data["error"] is None
+    # The body description — not the stale session value — must have been sent to AI.
+    assert "NEW typed text" in captured.get("user_msg", "")
+    assert "OLD stale persisted description" not in captured.get("user_msg", "")
+
+
+@pytest.mark.asyncio
+async def test_ai_cleanup_body_description_empty_session_succeeds(
+    client: AsyncClient, db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """cleanup-description works when session.description is empty but body provides one.
+
+    This is the exact #16 bug: user types a description but clicks Clean Up (AI)
+    before saving. Previously returned 'Session has no description to clean up'.
+    """
+    from app.crypto import encrypt  # noqa: PLC0415
+    from app.models.import_session import (  # noqa: PLC0415
+        ImportSession,
+        ImportSessionStatus,
+        ImportSourceType,
+    )
+    from app.models.user import User  # noqa: PLC0415
+
+    csrf = await _setup_and_login(client)
+
+    user_res = await db_session.execute(select(User).limit(1))
+    admin = user_res.scalar_one()
+
+    provider = AiProvider(
+        provider=AiProviderType.claude,
+        model="claude-opus-4-8",
+        api_key_encrypted=encrypt("sk-test"),
+        enabled=True,
+    )
+    db_session.add(provider)
+
+    # Session has NO persisted description (not yet saved by the user).
+    session = ImportSession(
+        status=ImportSessionStatus.pending_wizard,
+        source_type=ImportSourceType.upload,
+        confirmed_title="My Design",
+        description=None,
+        created_by_id=admin.id,
+    )
+    db_session.add(session)
+    await db_session.flush()
+
+    with patch("app.ai.client._anthropic_caller", lambda *a: "Well-formed description."):
+        resp = await client.post(
+            f"/api/import-sessions/{session.id}/ai/cleanup-description",
+            json={"description": "typed but not yet saved"},
+            headers={"x-csrf-token": csrf},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["provider_available"] is True
+    # Must NOT return the old "Session has no description" error.
+    assert data["error"] is None
+    assert data["text"] == "Well-formed description."
+
+
+@pytest.mark.asyncio
+async def test_ai_summarize_body_description_empty_session_succeeds(
+    client: AsyncClient, db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """summarize works when session.description is empty but body provides source text.
+
+    Same #16 bug scenario for the Summarize button.
+    """
+    from app.crypto import encrypt  # noqa: PLC0415
+    from app.models.import_session import (  # noqa: PLC0415
+        ImportSession,
+        ImportSessionStatus,
+        ImportSourceType,
+    )
+    from app.models.user import User  # noqa: PLC0415
+
+    csrf = await _setup_and_login(client)
+
+    user_res = await db_session.execute(select(User).limit(1))
+    admin = user_res.scalar_one()
+
+    provider = AiProvider(
+        provider=AiProviderType.claude,
+        model="claude-opus-4-8",
+        api_key_encrypted=encrypt("sk-test"),
+        enabled=True,
+    )
+    db_session.add(provider)
+
+    # Session has NO persisted description (scraper hasn't run yet, or user typed first).
+    session = ImportSession(
+        status=ImportSessionStatus.pending_wizard,
+        source_type=ImportSourceType.url,
+        source_url="https://www.thingiverse.com/thing:999",
+        confirmed_title="Dragon Model",
+        description=None,
+        created_by_id=admin.id,
+    )
+    db_session.add(session)
+    await db_session.flush()
+
+    with patch("app.ai.client._anthropic_caller", lambda *a: "A detailed dragon model."):
+        resp = await client.post(
+            f"/api/import-sessions/{session.id}/ai/summarize",
+            json={"description": "scraped text pasted by user before saving"},
+            headers={"x-csrf-token": csrf},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["provider_available"] is True
+    assert data["error"] is None
+    assert data["text"] == "A detailed dragon model."

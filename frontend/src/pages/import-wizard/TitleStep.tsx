@@ -71,7 +71,11 @@ export function TitleStep({ session, onNext }: TitleStepProps) {
   })
 
   const cleanupMutation = useMutation({
-    mutationFn: () => api.aiCleanupDescription(session.id),
+    mutationFn: () =>
+      api.aiCleanupDescription(session.id, {
+        description: description || null,
+        title: title.trim() || null,
+      }),
     onSuccess: (result) => {
       setProviderAvailable(result.provider_available)
       if (!result.provider_available) return
@@ -89,7 +93,11 @@ export function TitleStep({ session, onNext }: TitleStepProps) {
   })
 
   const summarizeMutation = useMutation({
-    mutationFn: () => api.aiSummarize(session.id),
+    mutationFn: () =>
+      api.aiSummarize(session.id, {
+        description: description || null,
+        title: title.trim() || null,
+      }),
     onSuccess: (result) => {
       setProviderAvailable(result.provider_available)
       if (!result.provider_available) return

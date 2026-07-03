@@ -2,6 +2,35 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-03 — #17 asyncio.to_thread placement and timeout strategy
+
+**Why `asyncio.to_thread` at the router level, not inside client.py:** the public
+functions `suggest_tags`, `cleanup_description`, `summarize_scrape` are designed to be
+pure sync (they never raise). Making them async internally would couple client.py to the
+event loop and complicate unit tests that call them directly. Wrapping at the call site
+in routers keeps concerns separated — client.py stays sync and testable in isolation,
+routers own the async offload.
+
+**Injectable test callers do NOT receive the timeout argument** even though `_dispatch`
+now accepts one. Existing test lambdas use `lambda *a: "text"` which absorbs extra args,
+but the injectable caller is only for tests — it makes no real network call and needs no
+timeout. Keeping the injectable signature stable meant zero test changes were required
+for #17.
+
+**Timeout values chosen:** 10 s for `test_ai_connection` (explicitly a connectivity
+ping; a provider that can't respond in 10 s is broken), 60 s default for all inference
+calls (generous for slow local Ollama models; still protects the event loop from a
+permanently-hung provider).
+
+## 2026-07-03 — #16 body-override approach (not auto-save on blur)
+
+Issue #16 offered two fix options: (1) auto-save on blur before the AI button fires,
+or (2) pass current values in the request body. Chose option 2 because it requires no
+extra PATCH round-trip, works even for a brand-new session (session id just created,
+no title/description ever saved), and keeps the "save only on Next" contract intact.
+The body fields are all optional so existing call sites that send no body continue to
+work (the backend falls back to session values).
+
 ## 2026-07-02 — CodeQL log-injection fix in import-session PATCH (v0.2.5 PR)
 
 CodeQL (`py/log-injection`, Medium) flagged the #14 code on the v0.2.5 release PR:

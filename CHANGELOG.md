@@ -20,6 +20,25 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Import wizard AI buttons now use the typed-but-unsaved description** (issue
+  #16) — clicking "Clean up (AI)" or "Summarize scrape (AI)" before advancing
+  the step previously sent only the session ID; the backend cleaned the already-
+  persisted `session.description`, which was empty/stale. Both cleanup and
+  summarize endpoints now accept `description` and `title` in the request body
+  and prefer those values over the persisted session. The wizard buttons pass the
+  current component state so the AI always sees what is visible in the form.
+
+- **AI provider calls no longer block the event loop** (issue #17) — `_dispatch`
+  (and its callers `suggest_tags`, `cleanup_description`, `summarize_scrape`) is
+  a synchronous function that was called inline inside async route handlers,
+  freezing the single Uvicorn event loop for as long as the AI provider took to
+  respond. All call sites now use `asyncio.to_thread` so a slow or stuck provider
+  only stalls the one request that triggered it. An explicit timeout (10 s for the
+  connectivity test, 60 s for inference calls) is passed to the SDK so the call
+  fails fast rather than hanging indefinitely.
+
 ### Added
 
 - **Bulk commit endpoint** (`POST /api/import-sessions/bulk-commit`) — commits
