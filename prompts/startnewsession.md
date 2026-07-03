@@ -8,10 +8,22 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-07-02 (v0.2.5 released on `main`; **`dev` is AHEAD of `main`** — #15 bulk import
-merged to `dev`, unreleased. New backlog issues #16/#20/#21/#24 filed; render-capture direction shaped)
+**Last updated:** 2026-07-03 (v0.2.5 on `main`; **`dev` is FAR AHEAD** — the whole **v0.3.0 batch**
+landed on `dev` overnight: #15 bulk import + #15 render param + #16 #17 #18 #19 #21 #24 #11, all
+`closes #N`, unreleased. New issues #25/#26 (deferred scope), #23 planned, #20 still open.)
 
-> ## CURRENT STATE (2026-07-02) — v0.2.5 released; #15 bulk import queued on `dev`
+> ## CURRENT STATE (2026-07-03) — v0.2.5 on `main`; full v0.3.0 batch queued on `dev`
+> **`dev` overnight batch (unreleased, all `closes #N`, verify at `/release-prep 0.3.0`):**
+> `7dcf024` #16/#17 AI (wizard buttons use typed description; async-offload `_dispatch` + timeouts so a
+> slow provider no longer freezes the backend) · `9e4b769` #15 `render:auto|off` commit param ·
+> `91b780e` #18/#19 item file upload/delete/rename + `extract_archives` Job-row visibility + item-page
+> job-poll auto-refresh · `716a66f` #21 3D-viewer capture→item image (multiple captures, new
+> `ImageSource.captured` + **migration 0022**) · `e8d893c` #24 release-notes popup (localStorage
+> last-seen + frontend blurb module) · `377d39e` #11 guarded empty-library hard-delete + re-enable.
+> Also: #23 FlareSolverr planned (`prompts/2026-07-03-23-flaresolverr.md`), #25 (move-assets) + #26
+> (wizard capture) + #20 (queued-job visibility) remain open. **Migrations now at 0022.**
+>
+> ## PRIOR STATE (2026-07-02) — v0.2.5 released
 > **Latest release: `v0.2.5`** on `main` (merge `569d5e1`, tag `v0.2.5`). **`dev` is AHEAD of `main`**:
 > the #15 bulk-import feature is merged to `dev` (merge `0952358`) and awaits the next release —
 > **next release is `v0.3.0`** (minor bump — large feature batch: #15 bulk import + the overnight
@@ -156,20 +168,18 @@ merged to `dev`, unreleased. New backlog issues #16/#20/#21/#24 filed; render-ca
 
 ## Current status
 
-- **v0.2.5 is the latest release on `main`** (see the CURRENT STATE block above). **`dev` is AHEAD
-  of `main`** — the **#15 bulk-import** feature is merged to `dev` (bulk-commit endpoint +
-  `import.default_library_id` setting + inbox auto-resolution + "Commit ready" UI on `/imports`),
-  unreleased. The full stack (Phases 0–10 + Aurora UI + render rework + v0.2.x hardening + #15) has shipped/queued.
-- **NEXT ACTIONS:** none blocking. When the owner wants to ship what's on `dev`: `/release-prep 0.3.0`
-  (minor — confirm the warn prompt; it archives 0.2.x) → merge PR → `:latest` publishes →
-  `/release-cut 0.3.0` (never re-tag). **Open GitHub issues**
-  (backlog): **#11** library hard-delete + move-assets-between-libraries (future); **#16** import
-  wizard "Clean up (AI)" ignores a typed-but-unsaved description (frontend must PATCH the description
-  before calling, or the endpoint should accept it in the body); **#20** queued worker jobs are
-  invisible in the Jobs monitor (Job row only created at run-time as `running` — create it at enqueue
-  as `queued`); **#21** capture the in-browser 3D viewer view as an item image (multiple captures for
-  multi-part 3MF; offered in the Add Asset wizard "Try to render file", browser render preferred);
-  **#24** release-notes popup on first load after upgrade. (#13 and #14 shipped in v0.2.5 and are CLOSED.)
+- **v0.2.5 is the latest release on `main`**; **`dev` is FAR ahead** — it carries the entire
+  **v0.3.0 batch** (see the CURRENT STATE block: #15 bulk import + render param, #16/#17 AI,
+  #18/#19 item files, #21 capture, #24 popup, #11 library delete). All committed+pushed on `dev`,
+  each with `closes #N` (they auto-close when v0.3.0 merges to `main`; **until then the issues stay
+  OPEN with a "fixed on dev → shipping in v0.3.0" comment** — that's expected, not a miss).
+- **NEXT ACTIONS:** ship it. `/release-prep 0.3.0` (minor — confirm the warn prompt; it archives the
+  0.2.x changelog series) → merge PR → `:latest` publishes → `/release-cut 0.3.0` (never re-tag).
+  **Still-open backlog (NOT in v0.3.0):** **#20** queued worker jobs invisible in the Jobs monitor
+  (create the Job row at enqueue as `queued`); **#23** FlareSolverr fallback scraper (planned —
+  `prompts/2026-07-03-23-flaresolverr.md`, owner Qs in the issue comment); **#25** move assets between
+  libraries (cross-mount copy→verify→delete); **#26** wizard "Try to render file" capture (deferred
+  from #21 — needs a session-image upload path).
 - **🎨 Render direction (shaped this session, see #21 + #15 comments):** server auto-render stays for
   STL/OBJ/PLY (unchanged); 3MF (often no embedded thumb) → **browser viewport capture** is the answer,
   supporting **multiple captures**; offer capture **in the Add Asset wizard** ("Try to render file",
@@ -305,14 +315,15 @@ merged to `dev`, unreleased. New backlog issues #16/#20/#21/#24 filed; render-ca
       viewer, vtk-osmesa render fix. Verified against a rebuilt image (see CURRENT STATE).
 - [x] **v0.2.5 released** (2026-07-02) — #13 auto-login + #14 default-image + CodeQL log-injection fix.
       Both #13 and #14 CLOSED. **#15 bulk import merged to `dev`** (merge `0952358`) — queued for v0.3.0.
-- [ ] **Ship what's on `dev` as v0.3.0** when the owner wants — `dev` is ahead of `main` by #15 + the
-      overnight batch (#16/#17/#18/#19/#21/#24/#11 + #15 render param). Minor bump; `/release-prep 0.3.0`.
-- [ ] **Open GitHub issues** (backlog): **#11** library hard-delete + move-assets (future); **#16**
-      import "Clean up (AI)" ignores typed-but-unsaved description; **#20** queued jobs invisible in the
-      monitor; **#21** capture 3D viewer view → item image (multi-capture; wizard "Try to render file",
-      browser preferred); **#24** release-notes popup after upgrade. Render direction shaped — see the
-      Current-status "🎨 Render direction" note; **next: turn #21 into a build plan** + add the #15
-      `render` param.
+- [x] **v0.3.0 batch built on `dev`** (2026-07-03 overnight) — #16/#17/#18/#19/#21/#24/#11 + #15
+      render param, 8 commits `7af000d`→`377d39e`, each `closes #N`. Migrations now at **0022** (#21).
+      A **UI test plan** for all touched behaviors was produced (ask if not carried forward).
+- [ ] **Ship `dev` as v0.3.0** — `/release-prep 0.3.0` (minor; confirm warn; archives 0.2.x) → merge →
+      `:latest` → `/release-cut 0.3.0`. This is what auto-closes #11/#15/#16/#17/#18/#19/#21/#24.
+- [ ] **Still-open backlog** (NOT in v0.3.0): **#20** queued jobs invisible in the Jobs monitor;
+      **#23** FlareSolverr fallback scraper (planned — `prompts/2026-07-03-23-flaresolverr.md`, owner
+      Qs pending in the issue comment); **#25** move assets between libraries; **#26** wizard
+      "Try to render file" capture (deferred from #21).
 - [ ] **Re-verify on the owner's prod deploy after upgrading to 0.2.5:** first-run auto-login (#13)
       lands you in the app; import "set default image" (#14) sticks. (0.2.4: dark-mode dropdowns +
       NFS image display already confirmed.)
