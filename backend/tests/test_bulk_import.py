@@ -166,8 +166,13 @@ async def test_bulk_commit_nonexistent_session_skipped(
     client: AsyncClient,
     db_session: AsyncSession,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Session ID that doesn't exist → skipped with reason='not_found'."""
+    import app.db as db_mod
+
+    monkeypatch.setattr(db_mod, "SessionLocal", _make_session_local_patch(db_session))
+
     csrf, _ = await _admin_setup(client, tmp_path)
     fake_id = str(uuid.uuid4())
 
