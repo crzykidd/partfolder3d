@@ -20,6 +20,25 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Object Breakdown no longer shows a false "Analysis pending" for 3MF files.** 3MF files
+  are read, not mesh-analyzed (slice details appear inline in Files & Downloads). Unanalyzed
+  3MF files now say so plainly instead of implying a background job is coming.
+- **Object Breakdown shows accurate job status for mesh files (STL/OBJ/PLY)** when analysis
+  is missing. Instead of a generic "pending" message the section now shows:
+  - *Running* — "Analyzing… N%" with a progress bar and a "View in Jobs" link.
+  - *Queued* — "Analysis queued" with the same link.
+  - *Failed* — the error text, the link, and a hint to use **Rescan disk** to re-queue.
+  - *No job* — "Analysis hasn't run yet — use Rescan disk to queue it."
+
+### Changed
+
+- `GET /api/items/{key}/jobs` (new endpoint) returns active (queued/running) plus
+  non-archived failed jobs for an item. `ItemJobOut` includes `progress` and `error`.
+  `ItemPage` polls this endpoint every 3 s and threads the results into
+  `ObjectBreakdownSection`.
+
 ## [0.2.5] — 2026-07-02
 
 ### Added

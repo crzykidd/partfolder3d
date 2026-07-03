@@ -46,6 +46,15 @@ export function ItemPage() {
     enabled: !!key,
   })
 
+  // Poll for analyze_item jobs so ObjectBreakdown can show running/queued/failed status.
+  // Poll every 3 s while the page is open; the endpoint returns only active + recent-failed.
+  const { data: itemJobs } = useQuery({
+    queryKey: ['item-jobs', key],
+    queryFn: () => api.listItemJobs(key!),
+    enabled: !!key,
+    refetchInterval: 3000,
+  })
+
   const setDefaultMutation = useMutation({
     mutationFn: (imageId: number) => api.setDefaultImage(key!, imageId),
     onSuccess: (updatedItem) => {
@@ -270,7 +279,7 @@ export function ItemPage() {
       {/* Object breakdown (Phase 16) — show when item has model files */}
       {item.files.some((f) => f.role === 'model') && (
         <AuroraSection title="Object Breakdown">
-          <ObjectBreakdownSection item={item} />
+          <ObjectBreakdownSection item={item} jobs={itemJobs ?? []} />
         </AuroraSection>
       )}
 
