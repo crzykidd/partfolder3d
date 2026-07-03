@@ -2,6 +2,106 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-03 — Documentation ecosystem: each doc gets one job
+
+Prompted by the full-repo audit (`docs/audit-2026-07-03.md`), we fixed the root cause behind
+most doc drift: the PRD was trying to be **both** the intent spec **and** a feature inventory,
+so every release silently invalidated it. Locked the roles so each doc has a single job:
+
+- **PRD.md** — durable **product intent & requirements** (the *why*). Kept authoritative, but
+  re-scoped to *intent altitude*: it states intent, not a per-endpoint inventory, and is
+  updated only when intent changes.
+- **GitHub issues** — **near-term feature scope** (what we're building *now*). The roadmap
+  lives here, **not** in the PRD. PRD §17 keeps only long-term *vision*.
+- **docs/features-overview.md** — the **as-built feature catalog** (what exists now), promoted
+  to the living "what shipped" reference; updated in the same commit as the feature.
+- **CHANGELOG.md** — release **history**.
+- **docs/decisions.md** — this ADR log.
+- **docs/architecture.md** *(new)* — the **module/where-things-live map** + load-bearing
+  gotchas (relocated out of startnewsession).
+- **prompts/startnewsession.md** — the **lean live-state handoff** only (slimmed ~50%): current
+  release, what's in progress, and pointers into the docs above. Full verify recipe + gotchas
+  moved to their durable homes.
+
+The same map is at the top of `docs/architecture.md` so a new session knows where to look.
+
+## 2026-07-03 — No-archive changelog policy (formalized)
+
+A single living `CHANGELOG.md`. The earlier plan to archive each old series to
+`docs/CHANGELOG-<minor>.x.md` on a minor bump is **dropped** (it never ran, and the owner
+prefers one file). The `/release-prep` Step 3 and the CHANGELOG footer were rewritten to match;
+Keep-a-Changelog compare-links were added. Also formalized: `/release-prep` Step 5 now refreshes
+the **whole** CLAUDE.md Status line, not just the version number — that narrow sync is why
+"first tagged release pending" survived 7 releases.
+
+## 2026-07-03 — Verify recipe canonicalized into scripts (not prose)
+
+The backend/frontend verify recipe used to live only as prose in startnewsession.md, re-pasted
+into every handoff prompt (four memory files existed just to patch failures it caused). It's now
+`scripts/verify-backend.sh` + `scripts/verify-frontend.sh` (+ `Makefile`, `/verify-backend`,
+`/verify-frontend`), referenced from CLAUDE.md and allowlisted in settings.json. Two gotchas are
+encoded once: **(1)** backend tests **require `pytest -n auto`** — under xdist each worker
+*rewrites* `DATABASE_URL` to its own per-worker DB (`partfolder3d_gw0`, …) and drops/creates/
+migrates it; serial runs get only rollback isolation, so committed rows accumulate and produce
+spurious count failures. **(2)** the frontend gate must be a **fresh** `tsc -b --force` build —
+a stale incremental cache hides real type errors. Also added a rule: **Alembic migration
+numbering is serialized** — parallel agents both creating `0023_*` collide, so the orchestrator
+assigns the next `00NN` in the handoff prompt (head is at 0022).
+
+## 2026-07-03 — PRD re-scoped to intent; build-plan marked historical
+
+The PRD was updated to intent altitude (wrong claims fixed: §7 3MF-not-server-rendered +
+vtk-osmesa, tag-tree-depth removed, API keys hashed-not-encrypted, SiteCapability/Image/
+ShareAuditEvent field names, per-library×per-OS prefixes; brief intent sections added for
+modification tracking, file-analysis/3D-preview, import-session lifecycle, job lifecycle). The
+§18 "Resolved decisions" ledger was lifted out of the spec into this file (below).
+`docs/build-plan.md` was marked **historical** (pre-Phase-0 locked decisions kept for
+provenance; supersessions like render-stack → vtk-osmesa are tracked here). One correction made
+in passing: the old "all secrets encrypted at rest" line was wrong post-hashing — see item 7 in
+the relocated ledger for the accurate hashed-vs-encrypted split.
+
+## Resolved decisions & remaining notes (relocated from PRD §18, 2026-07-03)
+
+Historical decision ledger lifted out of the PRD when the PRD was re-scoped to intent
+altitude. Preserved here for provenance; where a decision was later reversed in code the
+current shipped behavior is noted inline.
+
+**Resolved:**
+1. **Key format** — short hash (6–8 char base32). Item dir and URL slug are both
+   `title`-`key`, so identical titles never collide (PRD §3.2).
+2. **Rendering** — CPU-only; GPU is a possible later option (PRD §7, §17).
+3. **ZIP retention** — expire after ~1 day; invalidate on any change in the item dir (PRD §11).
+4. **Sidecar ⇄ DB conflict resolution** — *(revised from the original "last-write-wins with a
+   configurable conflict-mode setting", which never shipped).* Shipped behavior: when both the
+   sidecar and the DB have changed, reconciliation **raises a conflict Issue** rather than
+   silently overwriting; the user resolves it per-item via **Keep-DB** or **Keep-sidecar**.
+   There is no global conflict-mode switch (PRD §4, §8.1).
+5. **Scan schedule** — daily; inotify/file-watching is a later enhancement. *(As shipped the
+   daily schedule is fixed, not a configurable cron; retention count is the tunable knob —
+   configurable cron remains future intent.)* (PRD §8.4).
+6. **Per-item rescan** — on-demand "Rescan disk" button on each item (PRD §8.6).
+7. **Secrets** — no readable secrets in the DB. One-way credentials (user API keys, invite/
+   reset tokens) are stored **hashed**; reusable credentials that must be replayed (site
+   download tokens, AI provider keys) are stored **encrypted** with an instance key.
+   *(Corrected from the original "all tokens/keys encrypted at rest," which predated API keys
+   moving to SHA-256 hashing.)* (PRD §4, §14).
+
+**Remaining implementation notes:**
+- **Instance encryption key** — provisioning done (Fernet key auto-generated at first run
+  into `DATA_DIR/config/secret.key`, 0600, never in DB; losing it means re-entering all
+  secrets). Rotation remains a later utility.
+- **Move journaling / crash recovery** for an interrupted directory rename (PRD §8.5) —
+  resolved: filesystem journal, atomic-rename-as-commit with roll-forward, locked-file safe,
+  bulk-isolated; see `docs/atomic-moves.md`.
+- **Title sanitization** rules for deriving `itemname` from a user-entered title — resolved
+  (NFKD→ASCII→lowercase→`[a-z0-9-]`, 80-char cap, collision-proofed by `<key>`); see
+  `docs/sidecar-schema.md` §2.
+
+**Tag hierarchy history (relocated from PRD §5.2):** an earlier design nested tags into an
+N-deep browse tree because objects were once stored under a tag-name directory structure on
+disk. That disk layout was dropped, so the hierarchy is gone — a popularity-weighted tag
+cloud + popularity sorting replace it.
+
 ## 2026-07-03 — Merge fallout: duplicate `/{key}/jobs` endpoint (#18 vs object-breakdown)
 
 Two parallel worktree branches both built the item-jobs feature: **#18** added
