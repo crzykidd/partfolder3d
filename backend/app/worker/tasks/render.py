@@ -1,6 +1,7 @@
 """Render task — render mesh thumbnails (STL/OBJ/PLY only)."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -168,7 +169,28 @@ async def _reconcile_render_images(
             await db.commit()
 
 
+# Cap concurrent renders (the heaviest job: mesh load + vtk-osmesa subprocess).
+# Lazily created so the settings import stays deferred (module pattern) and the
+# semaphore binds to the worker's event loop on first use.
+_render_sem: asyncio.Semaphore | None = None
+
+
+def _get_render_sem() -> asyncio.Semaphore:
+    global _render_sem
+    if _render_sem is None:
+        from app.config import settings  # noqa: PLC0415
+
+        _render_sem = asyncio.Semaphore(max(1, settings.RENDER_CONCURRENCY))
+    return _render_sem
+
+
 async def render_item(ctx: dict, item_id: int, retry_of_job_id: str | None = None) -> None:
+    """Arq entrypoint — throttle concurrent renders (RENDER_CONCURRENCY), then render."""
+    async with _get_render_sem():
+        await _render_item_inner(ctx, item_id, retry_of_job_id)
+
+
+async def _render_item_inner(ctx: dict, item_id: int, retry_of_job_id: str | None = None) -> None:
     """Render STL/OBJ/PLY mesh files for an item into renders/<sha256>.png.
 
     PRD §7: SHA-256-keyed cache — skips files whose render already exists.

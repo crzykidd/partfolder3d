@@ -94,6 +94,22 @@ class Settings(BaseSettings):
     # Files over this size get preview_3d=False; the browser viewer is not offered.
     BROWSER_PREVIEW_MAX_MB: int = 50
 
+    # ---- Worker concurrency & resource limits ----
+    # How many background jobs the arq worker runs AT ONCE.  Higher = the queue
+    # drains faster, but uses more CPU/RAM.  A bulk import floods the queue, so on
+    # a small host too high a value will thrash CPU + memory and starve everything
+    # else (including the API).  Rule of thumb: ~1 per 2 CPU cores.  Renders and
+    # mesh analysis are the heavy jobs — cap them separately below.
+    WORKER_MAX_JOBS: int = 2
+    # Max 3D RENDER jobs running at once, independent of WORKER_MAX_JOBS.  Renders
+    # are the heaviest work (each loads a mesh + runs a vtk-osmesa subprocess using
+    # RENDER_CPU_THREADS cores and hundreds of MB of RAM).  Keep at 1 on a host with
+    # < ~16 GB RAM — raising this is the quickest way to OOM a small box.
+    RENDER_CONCURRENCY: int = 1
+    # Max mesh-ANALYSIS jobs running at once.  Analysis loads whole meshes into RAM
+    # (trimesh); on a memory-constrained host keep this low (1–2).
+    ANALYZE_CONCURRENCY: int = 2
+
     # ---- Import / Inbox (Phase 5) ----
     # Directory the inbox scanner watches for incoming asset folders.
     # Each direct subdirectory is treated as one pending import.

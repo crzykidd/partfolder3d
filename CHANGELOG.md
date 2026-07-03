@@ -22,6 +22,14 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **Worker resource limits (env-configurable, small defaults)** — the background worker no
+  longer runs a fixed 10 jobs at once, so a bulk import (or a big startup backlog) can't
+  overrun the host. New settings bound how hard it hits the machine: `WORKER_MAX_JOBS`
+  (default **2**), `RENDER_CONCURRENCY` (default **1** — renders are the heaviest job, mesh +
+  vtk-osmesa subprocess), `ANALYZE_CONCURRENCY` (default **2**), plus **hard docker-compose
+  caps** `WORKER_CPUS` (default 2) and `WORKER_MEM_LIMIT` (default 3g) that confine the worker
+  container so it gets OOM-/CPU-limited instead of taking down the whole box. All documented
+  with per-setting risk notes in `.env.example`. (Closes #29)
 - **Item page uses more of a wide screen** — the detail page cap widened from 900px to
   `min(1280px, 94vw)` so the image + metadata columns scale up on larger displays.
 - **Long descriptions no longer dominate the item page** — a long description is shown in a
