@@ -48,6 +48,10 @@ prefix appears only on git tags and GitHub releases.
 
 ### Fixed
 
+- **3D viewer sizing + close** — the "View in 3D" window is now capped
+  (`min(90vw,1100px)` × `min(82vh,760px)`) so it no longer dominates large
+  displays, and the close control is a clear **X** icon (top-right; Esc also
+  closes). The owner-only **Save view** capture button is unchanged (top-left).
 - **Import wizard AI buttons now use the typed-but-unsaved description** (issue
   #16) — clicking "Clean up (AI)" or "Summarize scrape (AI)" before advancing
   the step previously sent only the session ID; the backend cleaned the already-

@@ -31,7 +31,7 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { ThreeMFLoader } from 'three/examples/jsm/loaders/3MFLoader.js'
 import * as THREE from 'three'
-import { Camera } from 'lucide-react'
+import { Camera, X } from 'lucide-react'
 
 // ---------------------------------------------------------------------------
 // Error boundary — catches loader failures (bad mesh, 404, etc.)
@@ -284,39 +284,42 @@ export default function ModelViewer({
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      {/* Viewer card */}
+      {/* Viewer card — capped so it doesn't dominate large displays */}
       <div
         style={{
           position: 'relative',
-          width: '90vw',
-          height: '85vh',
-          maxWidth: 1200,
+          width: 'min(90vw, 1100px)',
+          height: 'min(82vh, 760px)',
           borderRadius: 12,
           overflow: 'hidden',
           boxShadow: '0 25px 60px rgba(0,0,0,0.55)',
           background: isDark ? '#18181b' : '#f0f0f0',
         }}
       >
-        {/* Close button */}
+        {/* Close button — X icon, always visible top-right */}
         <button
           onClick={onClose}
           aria-label="Close 3D viewer"
+          title="Close (Esc)"
           style={{
             position: 'absolute',
             top: 10,
             right: 10,
             zIndex: 20,
-            padding: '5px 12px',
-            background: 'rgba(0,0,0,0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 32,
+            height: 32,
+            padding: 0,
+            background: 'rgba(0,0,0,0.6)',
             color: '#fff',
-            border: '1px solid rgba(255,255,255,0.15)',
-            borderRadius: 6,
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 8,
             cursor: 'pointer',
-            fontSize: 12,
-            fontWeight: 600,
           }}
         >
-          Close
+          <X size={18} />
         </button>
 
         {/* Capture button — owner only, shown when viewer has no load error */}
