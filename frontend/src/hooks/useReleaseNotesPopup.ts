@@ -41,35 +41,45 @@ export function useReleaseNotesPopup(): UseReleaseNotesPopupResult {
   const [lastSeen, setLastSeen] = useLocalStorage<string | null>(LS_KEY, null)
 
   const { data: currentVersion } = useQuery({
-    queryKey: ['version'],
+    // Distinct key from the ['version'] query used by VersionPage + the nav
+    // shells — that query resolves to a { version } OBJECT.  Sharing the key put
+    // an object into this hook's string slot and crashed compareSemver, blanking
+    // the whole app via AuroraShell.  Keep this query isolated to a string.
+    queryKey: ['release-notes-version'],
     queryFn: fetchCurrentVersion,
     staleTime: 60_000,
   })
 
-  // First-ever use: no lastSeen stored.  Silently record current version as the
+  // Only real strings are valid versions.  A legacy/poisoned non-string value
+  // (from the earlier key collision, possibly already saved in localStorage) is
+  // treated as unset so it is overwritten below instead of crashing the compare.
+  const currentVersionStr = typeof currentVersion === 'string' ? currentVersion : null
+  const lastSeenStr = typeof lastSeen === 'string' ? lastSeen : null
+
+  // First load (or a poisoned seen-value): record the current version as the
   // baseline so the NEXT upgrade triggers the modal.  No modal shown here.
   useEffect(() => {
-    if (currentVersion !== undefined && lastSeen === null) {
-      setLastSeen(currentVersion)
+    if (currentVersionStr !== null && lastSeenStr === null) {
+      setLastSeen(currentVersionStr)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentVersion]) // intentionally excludes lastSeen/setLastSeen to run only once per version load
+  }, [currentVersionStr]) // run once per version load
 
   // Show the modal only when lastSeen is set AND the running version is newer.
   const shouldShow =
-    currentVersion !== undefined &&
-    lastSeen !== null &&
-    compareSemver(currentVersion, lastSeen) > 0
+    currentVersionStr !== null &&
+    lastSeenStr !== null &&
+    compareSemver(currentVersionStr, lastSeenStr) > 0
 
   const dismiss = () => {
-    if (currentVersion !== undefined) {
-      setLastSeen(currentVersion)
+    if (currentVersionStr !== null) {
+      setLastSeen(currentVersionStr)
     }
   }
 
   return {
     shouldShow,
-    currentVersion: currentVersion ?? null,
+    currentVersion: currentVersionStr,
     dismiss,
   }
 }

@@ -48,8 +48,11 @@ export const RELEASE_NOTES: Record<string, ReleaseNote> = {
  */
 export function compareSemver(a: string, b: string): number {
   const parse = (v: string): [number, number, number] => {
+    // Defensive: never throw if handed a non-string (e.g. a corrupted cache or
+    // localStorage value) — treat it as 0.0.0.
+    const s = typeof v === 'string' ? v : ''
     // Strip any pre-release suffix (e.g. "1.2.3-alpha" → "1.2.3")
-    const clean = v.split('-')[0] ?? v
+    const clean = s.split('-')[0] ?? s
     const parts = clean.split('.').map((s) => parseInt(s, 10))
     return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0]
   }

@@ -2,6 +2,21 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-03 — Black-screen on load: React Query key collision (#24 popup)
+
+The #24 release-notes hook used `useQuery({ queryKey: ['version'] })` returning a **bare
+string**, but `VersionPage` and both nav shells already use `['version']` returning a
+`{ version }` **object**. React Query shares one cache entry per key, so the hook's
+`currentVersion` (and the value it wrote to `localStorage`) could be an object. On the next
+load `compareSemver` did `v.split(...)` on that object → `TypeError` thrown inside
+`AuroraShell` (a shell-level component) with **no error boundary** → the whole React tree
+unmounted → blank/black page after ~1s (once `/api/version` resolved). **Fix:** gave the hook
+a distinct key `['release-notes-version']`, and guarded both `currentVersion` and `lastSeen`
+to strings (so an already-poisoned localStorage value self-heals instead of crashing), plus
+made `compareSemver` never throw on a non-string. **Lessons:** (1) never reuse a React Query
+key with a different result shape; (2) the app has NO top-level error boundary — a follow-up
+should add one so a single component crash can't blank the entire app.
+
 ## 2026-07-03 — v0.3.0 full-suite gate: one real regression + a test-hermeticity fix
 
 Running the full backend suite after the overnight batch surfaced two issues:
