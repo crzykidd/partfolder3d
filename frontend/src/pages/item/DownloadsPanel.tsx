@@ -679,64 +679,66 @@ export function DownloadsSection({
         </div>
       )}
 
-      {/* Upload control (owners only) */}
-      {isOwner && onUploadFile && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <button
-            onClick={() => uploadFileInputRef.current?.click()}
-            disabled={isUploadingFile}
-            style={{
-              ...AURORA_BTN_GHOST,
-              fontSize: 12,
-              padding: '6px 14px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              opacity: isUploadingFile ? 0.5 : 1,
-              alignSelf: 'flex-start',
-              cursor: isUploadingFile ? 'not-allowed' : 'pointer',
-            }}
-          >
-            <Upload size={13} />
-            {isUploadingFile ? 'Uploading…' : 'Upload file'}
-          </button>
-          <input
-            ref={uploadFileInputRef}
-            type="file"
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              const f = e.target.files?.[0]
-              if (f) onUploadFile(f)
-              e.target.value = ''
-            }}
-          />
+      {/* File actions (owners only): Upload + Rescan disk on one row */}
+      {isOwner && (onUploadFile || onRescan) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {onUploadFile && (
+              <button
+                onClick={() => uploadFileInputRef.current?.click()}
+                disabled={isUploadingFile}
+                style={{
+                  ...AURORA_BTN_GHOST,
+                  fontSize: 12,
+                  padding: '6px 14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  opacity: isUploadingFile ? 0.5 : 1,
+                  cursor: isUploadingFile ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <Upload size={13} />
+                {isUploadingFile ? 'Uploading…' : 'Upload file'}
+              </button>
+            )}
+            {onRescan && (
+              <button
+                onClick={onRescan}
+                disabled={isRescanning}
+                title="Re-scan this item's folder on disk and apply any file/metadata changes"
+                style={{
+                  ...AURORA_BTN_GHOST,
+                  fontSize: 12,
+                  padding: '6px 14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  opacity: isRescanning ? 0.5 : 1,
+                  cursor: isRescanning ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <RefreshCw size={13} />
+                {isRescanning ? 'Rescanning…' : 'Rescan disk'}
+              </button>
+            )}
+          </div>
+          {onUploadFile && (
+            <input
+              ref={uploadFileInputRef}
+              type="file"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) onUploadFile(f)
+                e.target.value = ''
+              }}
+            />
+          )}
           {uploadFileError && (
             <span style={{ fontSize: 11, color: 'var(--aurora-danger)' }}>{uploadFileError}</span>
           )}
         </div>
-      )}
-
-      {/* Rescan disk (owners only) — re-inventory the folder + resync sidecar */}
-      {isOwner && onRescan && (
-        <button
-          onClick={onRescan}
-          disabled={isRescanning}
-          title="Re-scan this item's folder on disk and apply any file/metadata changes"
-          style={{
-            ...AURORA_BTN_GHOST,
-            fontSize: 12,
-            padding: '6px 14px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            opacity: isRescanning ? 0.5 : 1,
-            alignSelf: 'flex-start',
-            cursor: isRescanning ? 'not-allowed' : 'pointer',
-          }}
-        >
-          <RefreshCw size={13} />
-          {isRescanning ? 'Rescanning…' : 'Rescan disk'}
-        </button>
       )}
 
       {/* ZIP download */}
