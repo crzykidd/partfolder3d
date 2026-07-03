@@ -196,7 +196,7 @@ export function ItemPage() {
         display: 'flex',
         flexDirection: 'column',
         gap: 16,
-        maxWidth: 900,
+        maxWidth: 'min(1280px, 94vw)',
         margin: '0 auto',
         color: 'var(--aurora-text)',
       }}

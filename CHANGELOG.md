@@ -22,6 +22,10 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **Item page uses more of a wide screen** — the detail page cap widened from 900px to
+  `min(1280px, 94vw)` so the image + metadata columns scale up on larger displays.
+- **Long descriptions no longer dominate the item page** — a long description is shown in a
+  capped, scrollable box with an **Expand** button that opens the full text in a modal.
 - **Responsive catalog grid** — the grid column count now adapts to the window width
   (ResizeObserver): narrowing removes columns, widening adds them (min card width 220px
   compact / 340px full), instead of a hardcoded 3 columns.
