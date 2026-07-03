@@ -519,15 +519,19 @@ export const renameItemFile = (
     body: JSON.stringify({ name }),
   })
 
+/** Slim job record from GET /api/items/{key}/jobs — active or recent failed. */
 export interface ItemJobSummary {
   id: string
   type: string
   status: string
+  progress: number
+  error: string | null
   created_at: string
   started_at: string | null
   finished_at: string | null
 }
 
+/** Return active (queued/running) + recent non-archived failed jobs for an item. */
 export const listItemJobs = (key: string): Promise<ItemJobSummary[]> =>
   apiFetch<ItemJobSummary[]>(`/api/items/${key}/jobs`)
 
@@ -563,20 +567,6 @@ export const approvePendingTag = (id: number): Promise<TagApproveOut> =>
 // ---------------------------------------------------------------------------
 // Item jobs (for ObjectBreakdown analysis status)
 // ---------------------------------------------------------------------------
-
-/** Slim job record from GET /api/items/{key}/jobs — active or recent failed. */
-export interface ItemJobSummary {
-  id: string
-  type: string
-  status: string
-  progress: number
-  error: string | null
-  created_at: string
-}
-
-/** Return active (queued/running) + recent non-archived failed jobs for an item. */
-export const listItemJobs = (key: string): Promise<ItemJobSummary[]> =>
-  apiFetch<ItemJobSummary[]>(`/api/items/${key}/jobs`)
 
 export const listAllTags = (params: {
   q?: string

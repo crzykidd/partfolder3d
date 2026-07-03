@@ -68,6 +68,8 @@ function makeJob(overrides: Partial<ItemJobSummary> = {}): ItemJobSummary {
     progress: 0,
     error: null,
     created_at: '2026-07-03T00:00:00Z',
+    started_at: null,
+    finished_at: null,
     ...overrides,
   }
 }
