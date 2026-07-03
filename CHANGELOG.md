@@ -51,6 +51,12 @@ prefix appears only on git tags and GitHub releases.
   `commit_import_session` handles the edge case where `default_image_path` is
   set before image rows are materialized.
 
+### Security
+
+- Sanitize CR/LF before logging the user-provided `default_image_path` in the
+  import-session PATCH handler (CodeQL `py/log-injection`), matching the escaping
+  already used elsewhere in the import-sessions package.
+
 ## [0.2.4] — 2026-07-02
 
 > ⚠️ **nginx config changed** — if you are running a custom nginx config

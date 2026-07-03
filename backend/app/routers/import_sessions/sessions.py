@@ -439,9 +439,14 @@ async def patch_import_session(
             else:
                 img.is_default = False
         if not matched:
+            # Sanitize CR/LF before logging a user-provided value (CodeQL
+            # py/log-injection); match the escaping used elsewhere in this package.
+            _safe_default = body.default_image_path.replace("\r", "\\r").replace(
+                "\n", "\\n"
+            )
             log.debug(
                 "patch_import_session: default_image_path %r has no matching image row yet",
-                body.default_image_path,
+                _safe_default,
             )
     if body.library_id is not None:
         session.library_id = body.library_id

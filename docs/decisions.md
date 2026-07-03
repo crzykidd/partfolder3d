@@ -2,6 +2,18 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-02 — CodeQL log-injection fix in import-session PATCH (v0.2.5 PR)
+
+CodeQL (`py/log-injection`, Medium) flagged the #14 code on the v0.2.5 release PR:
+`patch_import_session` logged the user-provided `default_image_path` raw in the
+"no matching image row" debug line. **Fixed (not dismissed)** — this is a real,
+if low-severity, log-forging vector. Escaped CR/LF before logging
+(`.replace("\r", "\\r").replace("\n", "\\n")`), matching the existing pattern in
+`import_sessions/__init__.py:258` and `storage/ssrf_guard.py` (and consistent with the
+earlier `fs_browse` CR/LF fix). Not the strip-style used in `fs_browse.py:161` — escaping
+preserves the value for debugging while neutralizing newlines. CodeQL is not a required
+check on `main`, but the finding was fixed pre-merge rather than carried into the release.
+
 ## 2026-07-02 — Auto-login race fix and confirm-password field (issue #13)
 
 **Root cause confirmed: Suspect B (frontend navigation race).**
