@@ -372,12 +372,6 @@ prefix appears only on git tags and GitHub releases.
   wrong-image bug when an item has two or more `.3mf` files. Existing cached
   analyses are backfilled on the next analysis run. The field is generic
   (`thumbnail_path`) so STL/OBJ server renders can populate it in the future.
-
-### Fixed
-
-- 3MF panels no longer share one thumbnail when an item has multiple `.3mf`
-  files — each panel now shows the thumbnail extracted from its own file.
-
 - **File-tree browser** — the flat file list in the "Files & Downloads" section
   is replaced with a collapsible folder hierarchy built client-side from each
   file's path. Folders expand/collapse with chevron controls; top-level folders
@@ -410,7 +404,6 @@ prefix appears only on git tags and GitHub releases.
   Breakdown" section uses the same expand/collapse pattern as the 3MF panel,
   with each analyzed file starting collapsed. When all model files are sliced
   3MFs the section shows a note directing users to the inline panels above.
-
 - **ZIP auto-extraction** — uploaded or imported ZIP files are automatically
   extracted into the item directory when the import is committed. Internal folder
   structure is preserved; a lone top-level wrapper folder is stripped; filenames
@@ -460,18 +453,6 @@ prefix appears only on git tags and GitHub releases.
   are regenerated deterministically on scan and are not written to `sidecar.yaml`.
 - **`ImageSource.embedded` added** — migration 0021 adds the new enum value to
   PostgreSQL via `ALTER TYPE … ADD VALUE` (outside the transaction, as required by PG).
-
-### Fixed
-
-- **README production-install guide** — `## Getting started` now documents the
-  primary production path (pull published images, configure `.env` + library mounts,
-  `docker compose up -d`) and prominently links the in-app **Quick Start** guide at
-  `/quick-start` for guided first steps (add a library, load Starter Tags, enable AI,
-  schedule backups). A "Build from source (dev)" subsection for contributors is kept as
-  a collapsible secondary path.
-
-### Changed
-
 - **`docker-compose.yml` is now a production, image-based deploy** — `build:` blocks
   removed; `backend` and `worker` pull `ghcr.io/crzykidd/partfolder3d:latest`; `frontend`
   pulls `ghcr.io/crzykidd/partfolder3d-frontend:latest`. A version-pin comment (`:0.1.1`)
@@ -483,6 +464,14 @@ prefix appears only on git tags and GitHub releases.
 
 ### Fixed
 
+- 3MF panels no longer share one thumbnail when an item has multiple `.3mf`
+  files — each panel now shows the thumbnail extracted from its own file.
+- **README production-install guide** — `## Getting started` now documents the
+  primary production path (pull published images, configure `.env` + library mounts,
+  `docker compose up -d`) and prominently links the in-app **Quick Start** guide at
+  `/quick-start` for guided first steps (add a library, load Starter Tags, enable AI,
+  schedule backups). A "Build from source (dev)" subsection for contributors is kept as
+  a collapsible secondary path.
 - **Sidebar over-highlighting** — a nav item is now highlighted only for its own route:
   selecting "API Keys" (`/settings/api-keys`) no longer also highlights the parent
   "Settings" (`/settings`). Section items still highlight across their sub-tabs.
@@ -584,6 +573,10 @@ prefix appears only on git tags and GitHub releases.
 
 ## [0.1.0] — 2026-07-01
 
+> **Shipped untagged** — no `v0.1.0` git tag or GitHub release was ever cut; the first
+> published tag is **v0.1.1**, which superseded it the same day. This entry is retained
+> for the full feature record.
+>
 > First full-stack alpha release covering Phases 0–10 of the build plan.
 
 ### Added
@@ -803,9 +796,22 @@ prefix appears only on git tags and GitHub releases.
 
 ---
 
-## Archived releases
+## Release history policy
 
-_No archived releases yet. When v0.2.0 or later ships, the v0.1.x detail is moved to
-[`docs/CHANGELOG-0.1.x.md`](docs/CHANGELOG-0.1.x.md) and a summary block replaces it
-here. See Step 3 of [`/release-prep`](.claude/commands/release-prep.md) for the
-archive trigger rules._
+This is a **single living changelog** — old release series are **not** archived or split
+out into separate files. Every release, from the oldest to the newest, stays in full
+detail in this one file. (An earlier plan to archive closed minor series into
+`docs/CHANGELOG-<minor>.x.md` was dropped; there is no archive file to look for.)
+
+<!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
+     earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
+
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/crzykidd/partfolder3d/compare/v0.2.5...v0.3.0
+[0.2.5]: https://github.com/crzykidd/partfolder3d/compare/v0.2.4...v0.2.5
+[0.2.4]: https://github.com/crzykidd/partfolder3d/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/crzykidd/partfolder3d/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/crzykidd/partfolder3d/compare/v0.2.0...v0.2.2
+[0.2.0]: https://github.com/crzykidd/partfolder3d/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/crzykidd/partfolder3d/releases/tag/v0.1.1
+[0.1.0]: https://github.com/crzykidd/partfolder3d/releases/tag/v0.1.1

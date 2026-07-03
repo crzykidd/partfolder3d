@@ -1,14 +1,23 @@
 # PartFolder 3D — Phased Build Plan
 
+> ⚠️ **HISTORICAL — this is the original pre-Phase-0 roadmap, kept for provenance.**
+> The "Locked build-time technical decisions" below were fixed *before* Phase 0 and some
+> have since been superseded — most notably the **render stack**, which collapsed to a
+> single **`vtk-osmesa`** backend in v0.2.0 (pyrender/PyOpenGL/EGL removed). Treat every
+> row here as "what we decided going in," not "what runs today." For current, authoritative
+> state see [`decisions.md`](decisions.md) (supersessions), [`features-overview.md`](features-overview.md)
+> (as-built catalog), and [`../CHANGELOG.md`](../CHANGELOG.md).
+
 Durable roadmap for building the whole product in [`PRD.md`](../PRD.md). Each phase is a
 shippable increment with explicit exit criteria. The central Opus planning session drives
 this by writing a handoff prompt per phase (or per slice of a large phase) and dispatching
 a Sonnet agent (see [`CLAUDE.md`](../CLAUDE.md) operating model).
 
-> **Status:** Phases 0–10 shipped in the v0.1.0 alpha. A post-revamp feature/fix run,
-> modularization refactor, and admin nav reorganization are on `dev`. Phase prompts live in
-> `prompts/`; completed ones in `prompts/done/`. Full decision history in
-> [`decisions.md`](decisions.md).
+> **Status (historical):** Phases 0–10 were delivered in the v0.1.0 alpha; the product has
+> since shipped through **v0.3.0** (3MF reading + in-browser 3D viewer, ZIP auto-extraction,
+> item file management, bulk import, worker resource limits, and more — see the CHANGELOG).
+> Phase prompts live in `prompts/`; completed ones in `prompts/done/`. Full decision history
+> in [`decisions.md`](decisions.md).
 
 ---
 
@@ -26,7 +35,7 @@ These fill gaps the PRD intentionally left open. Recorded here + in
 | Version file | `backend/app/version.py` → `__version__ = "0.1.0"` (bare, per release-prep). Frontend shows it via `/api/version`. **Start at 0.1.0.** |
 | DB | PostgreSQL 16. |
 | Frontend | Vite + React 18 + TS + Tailwind + **shadcn/ui**; **TanStack Query** (data), **React Router** (routing), **TanStack Table** (table view), **TanStack Virtual** (large lists). Theme = CSS vars, system→light/dark, persisted per-user + localStorage. |
-| Mesh render | `trimesh` for parsing (STL/OBJ/PLY/3MF); offscreen render via **pyrender + EGL** (headless GL) with a **VTK offscreen** fallback. Headless GL in a container is the known risk → Phase 4 starts with a render spike. |
+| Mesh render | `trimesh` for parsing (STL/OBJ/PLY). ~~offscreen render via **pyrender + EGL** with a **VTK offscreen** fallback~~ — **SUPERSEDED in v0.2.0:** the render stack collapsed to the single **`vtk-osmesa`** wheel (pyrender/PyOpenGL/EGL removed); `.3mf` is not server-rendered (embedded slicer thumbnails are used instead). See [`decisions.md`](decisions.md) 2026-07-02. |
 | Image footprint | Root `Dockerfile` = backend+worker image (`ghcr.io/crzykidd/partfolder3d`). nginx serves the built frontend. CPU-only. |
 | Testing | Backend **pytest**; frontend **vitest** (added as components land) + `tsc --noEmit` in CI. Lint: **ruff** (backend), tsc/eslint (frontend). |
 

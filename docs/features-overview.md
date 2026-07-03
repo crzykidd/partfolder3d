@@ -1,8 +1,11 @@
 # PartFolder 3D — Features Overview
 
-Concise reference for features shipped through the v0.1.0 alpha cycle and the
-post-Phase-10 feature run. Each entry notes the admin section/route where the feature
-is configured (where applicable).
+**As-built feature catalog — current as of v0.3.0.** This is the living "what exists
+now" reference for shipped functionality (kept current with each release); the
+[`PRD.md`](../PRD.md) holds product intent, and [`CHANGELOG.md`](../CHANGELOG.md) holds
+the per-release history. Each entry notes the admin section/route where the feature is
+configured (where applicable). When a feature ships or changes, update the relevant
+entry here in the same commit.
 
 ---
 
@@ -34,12 +37,16 @@ View: **AI & Scraping** → `/admin/ai/usage`.
 
 ## Asset analysis (filament estimate + color count)
 
-For STL and 3MF files, the background worker computes per-object **estimated filament
-grams** (volume × density × infill %) and **color count** (from 3MF material/paint
-attributes). Results appear in an "Object Breakdown" section on the item page. Meshes
-that are not watertight are flagged with a **LOW CONF** badge. Two site-wide settings
-control the estimate: `estimate.filament_density_g_cm3` (default 1.24 g/cm³, typical
-PLA) and `estimate.infill_pct` (default 15 %). Analysis is cached per file SHA-256 and
+For **STL, 3MF, OBJ, and PLY** files (`MESH_ANALYSIS_EXTENSIONS`), the background worker
+computes per-object **estimated filament grams** (volume × density × infill %) and
+**color count**. For mesh files (STL/OBJ/PLY) the estimate comes from mesh volume; for
+`.3mf` the worker prefers **real slicer data** (per-plate print time, filament
+grams/meters, colors) embedded by Bambu Studio / OrcaSlicer and only falls back to a
+volume estimate when the file is unsliced (`est_method` records which was used).
+Results appear in an "Object Breakdown" section on the item page. Meshes that are not
+watertight are flagged with a **LOW CONF** badge. Two site-wide settings control the
+volume estimate: `estimate.filament_density_g_cm3` (default 1.24 g/cm³, typical PLA)
+and `estimate.infill_pct` (default 15 %). Analysis is cached per file SHA-256 and
 re-runs automatically when a file changes.
 
 No admin configuration needed; runs automatically on import/rescan.
@@ -89,6 +96,68 @@ No admin configuration needed; actions are available on the item page.
 
 ---
 
+## Item file management (upload, rename, delete, rescan)
+
+Owners and admins can maintain an item's on-disk files directly from the **Files &
+Downloads** panel on the item page — no full re-scan required:
+
+- **Upload file** — accepts model files, archives, G-code, and documents. The backend
+  sanitizes the filename, resolves collisions with a counter suffix (`part (1).stl`),
+  infers the file role from its extension, and enqueues the standard analyze + render
+  pipeline. ZIP uploads auto-extract (see below).
+- **Rename file** — inline edit (Enter to confirm, Escape to cancel); path-traversal and
+  collision guarded.
+- **Delete file** — two-step trash-can confirm; best-effort removal on disk.
+- **Rescan disk** — re-inventories the item's folder and resyncs the sidecar via the
+  reconcile engine, then refreshes the page. Per-item rescans always apply changes
+  automatically (no review queue), so out-of-band edits show up immediately.
+
+All three file operations sync the item sidecar. The panel is collapsible/scrollable,
+shows a file count, sorts model files (stl/obj/3mf/ply) to the top of each folder, and
+starts the `images/` folder collapsed.
+
+No admin configuration needed; actions are on the item page (owner-gated).
+
+---
+
+## In-browser 3D viewer and view capture
+
+Clicking **View in 3D** on any `.stl`, `.obj`, or `.3mf` file whose size is within
+`BROWSER_PREVIEW_MAX_MB` (default 50 MB; exposed as `preview_3d` on each file) opens an
+interactive viewer powered by three.js + `@react-three/fiber`:
+
+- Rotate / **zoom-to-cursor** / pan via OrbitControls; the camera auto-fits the model
+  bounding box; background follows the active light/dark theme.
+- The viewer renders through a portal as a **centered overlay** with an
+  **expand-to-full-window** toggle; ESC / backdrop / **X** close it.
+- The three.js bundle is **lazy-loaded** (`React.lazy` + Suspense) so it never inflates
+  the initial page load. Over-cap files show only the static thumbnail (no button).
+- **Save view (capture)** — owners get a camera-icon button that snapshots the current
+  WebGL frame and saves it as a new item image (`source=captured`, migration 0022).
+  Multiple captures are supported and any can be promoted to the default thumbnail.
+  Especially useful for `.3mf`, which has no server-side render.
+
+No admin configuration needed; available on the item page.
+
+---
+
+## ZIP auto-extraction
+
+Uploaded or imported `.zip` files are **automatically extracted** into the item
+directory on import commit (or on upload from the item page). Internal folder structure
+is preserved; a lone top-level wrapper folder is stripped; filenames that collide are
+renamed (`cover (1).png`). Zip-slip paths and junk entries (`__MACOSX/`, `.DS_Store`,
+`Thumbs.db`, `desktop.ini`) are discarded; nested archives are kept as plain files (no
+recursion). Guards: `ZIP_MAX_UNCOMPRESSED_MB` (default 2048), `ZIP_MAX_FILES` (default
+10 000), and a zip-bomb ratio check. The original `.zip` is discarded after successful
+extraction (reconstructable via the ZIP-bundle download). Extracted files flow through
+the normal inventory → analyze → render pipeline. An `extract_archives` Job row tracks
+progress so the item page updates when extraction finishes.
+
+No admin configuration needed; runs on import/upload.
+
+---
+
 ## Tag improvements: delete, autocomplete, starter tags, and sort
 
 - **Tag delete** (`DELETE /api/admin/tags/{id}`) — removes a tag and untags all items
@@ -127,6 +196,25 @@ Operators can manage in-progress import sessions without needing database access
 - **Clear inbox folder** — removes a detected-but-unprocessed inbox directory.
 
 Access: **Imports** page → `/import` (active import session list).
+
+---
+
+## Bulk import commit
+
+Instead of committing pending import sessions one wizard at a time, the **Commit ready**
+button on `/imports` commits many at once (`POST /api/import-sessions/bulk-commit`). Pass
+a list of session IDs or `null` to target all visible pending-wizard sessions; an
+optional `library_id` override applies to the whole batch. Library resolution per
+session falls back through: request override → the session's own `library_id` → the
+`import.default_library_id` instance setting → the sole enabled library → skip-with-
+reason. **Each session commits in its own isolated transaction**, so one failure never
+rolls back the others, and the call returns `{ total, committed, skipped, errors }` for a
+partial-success summary. Both the per-session commit and bulk-commit accept a
+`render: "auto" | "off"` option to defer server renders (e.g. for scripted migrations).
+
+Configure the default target library: **Settings** (admin) → `import.default_library_id`.
+Access: **Imports** page → `/imports` (Commit ready button; a library picker appears when
+multiple libraries exist and no default is set).
 
 ---
 
@@ -181,6 +269,27 @@ are automatically detected, marked `failed`, and re-enqueued — one re-enqueue 
 
 Configure: `RENDER_TIMEOUT_S`, `RENDER_CPU_THREADS`, `RENDER_MODE` in `.env`; or
 **Settings** → `/settings` (Instance settings section, admin only).
+
+---
+
+## Worker resource limits
+
+The background worker no longer runs a fixed pool, so a bulk import (or a large startup
+backlog) can't overrun a small host. Two layers bound it:
+
+- **Concurrency limits** (env): `WORKER_MAX_JOBS` (default 2, total jobs at once),
+  `RENDER_CONCURRENCY` (default 1 — renders are the heaviest job, each a mesh +
+  vtk-osmesa subprocess), and `ANALYZE_CONCURRENCY` (default 2, mesh analysis loads whole
+  meshes into RAM).
+- **Hard container caps** (docker-compose, the backstop): `WORKER_CPUS` (default 2) and
+  `WORKER_MEM_LIMIT` (default 3g) confine the worker container so it gets CPU-/OOM-limited
+  instead of taking down the whole box.
+
+Each setting carries a per-setting risk note in `.env.example`. Start small and raise
+carefully on constrained hosts.
+
+Configure: `WORKER_MAX_JOBS`, `RENDER_CONCURRENCY`, `ANALYZE_CONCURRENCY`, `WORKER_CPUS`,
+`WORKER_MEM_LIMIT` in `.env`.
 
 ---
 

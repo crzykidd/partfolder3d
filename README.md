@@ -21,10 +21,7 @@
 
 ![Version](https://img.shields.io/badge/version-0.3.0-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
-![Stage](https://img.shields.io/badge/stage-alpha-orange)
-![Code](https://img.shields.io/badge/code-yes-brightgreen)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
-![PRs](https://img.shields.io/badge/PRs-not%20yet-inactive)
 
 </div>
 
@@ -113,6 +110,9 @@ active-section highlight, and dark-theme native dropdowns/scrollbars.
 See [CHANGELOG.md](CHANGELOG.md) for the full details.
 
 ### v0.1.0 (2026-07-01)
+
+> **Note:** v0.1.0 shipped untagged — the first published git tag is **v0.1.1**, which
+> superseded it the same day. It's kept here for the historical feature record.
 
 First full-stack alpha covering all core features: multi-user catalog with full-text
 search and tag cloud browse; item library with YAML sidecars and atomic renames;
@@ -534,12 +534,39 @@ After setup, visit **http://localhost:8973/quick-start** for the in-app Quick St
 
 ---
 
+## Upgrading
+
+This is alpha software — **breaking changes can land between releases** (schema, config,
+or API), so upgrade deliberately:
+
+1. **Pin a specific version.** Set explicit image tags in `docker-compose.yml` (e.g.
+   `:0.3.0` instead of `:latest`) so a `pull` never surprises you.
+2. **Read the release notes first.** Check the [CHANGELOG](CHANGELOG.md) / the GitHub
+   release for the version you're moving to — watch for **⚠️ nginx config changed** and
+   other migration callouts.
+3. **Back up.** Run a backup from **Admin → Data & Backups** (DB + `secret.key`) and
+   snapshot your library mount. See [`docs/backup-restore.md`](docs/backup-restore.md).
+4. **Bump the pins and pull:**
+
+   ```bash
+   # edit docker-compose.yml image tags to the new version, then:
+   docker compose pull
+   docker compose up -d
+   ```
+
+   Migrations run automatically on startup (the backend entrypoint runs
+   `alembic upgrade head` before serving). Watch `docker compose logs -f backend` for the
+   startup banner and migration output.
+
+---
+
 ## Contributing
 
 Early days! 🌱 Ideas, questions, and use-case feedback are **very welcome** — please
-open an issue or start a discussion. There is **no code to contribute to yet**, so
-we are not accepting code PRs at this stage. Watch or star the repo to follow
-progress.
+open an issue or start a discussion. The full stack is built and released, but the
+project is still moving fast on a single-maintainer roadmap, so we're **not accepting
+external code PRs yet** — the architecture and priorities are still settling. That will
+open up as things stabilise; watch or star the repo to follow progress.
 
 ---
 
