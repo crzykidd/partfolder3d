@@ -2,6 +2,88 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-02 — CodeQL log-injection fix in import-session PATCH (v0.2.5 PR)
+
+CodeQL (`py/log-injection`, Medium) flagged the #14 code on the v0.2.5 release PR:
+`patch_import_session` logged the user-provided `default_image_path` raw in the
+"no matching image row" debug line. **Fixed (not dismissed)** — this is a real,
+if low-severity, log-forging vector. Escaped CR/LF before logging
+(`.replace("\r", "\\r").replace("\n", "\\n")`), matching the existing pattern in
+`import_sessions/__init__.py:258` and `storage/ssrf_guard.py` (and consistent with the
+earlier `fs_browse` CR/LF fix). Not the strip-style used in `fs_browse.py:161` — escaping
+preserves the value for debugging while neutralizing newlines. CodeQL is not a required
+check on `main`, but the finding was fixed pre-merge rather than carried into the release.
+
+## 2026-07-02 — Auto-login race fix and confirm-password field (issue #13)
+
+**Root cause confirmed: Suspect B (frontend navigation race).**
+
+Two suspects were analysed before fixing:
+
+**Suspect A — backend commit ordering:** `run_setup` only called `db.flush()` before
+returning; the real `COMMIT` happened in `get_db`'s post-yield cleanup. FastAPI
+0.115.6 routing (see `fastapi/routing.py` line 290) exits the `AsyncExitStack` — and
+thus runs all `yield`-dependency teardown including `await session.commit()` — **before**
+the response object is returned to Starlette for byte transmission. So the commit lands
+before the `Set-Cookie` response bytes reach the client. **Suspect A was ruled out as
+the primary cause for FastAPI 0.115.6.** Belt-and-suspenders: an explicit
+`await db.commit()` was added to `run_setup` after `create_session` so the behaviour
+is robust across FastAPI version changes and the intent is self-documenting. A redundant
+commit on an already-committed SQLAlchemy async session is a harmless no-op.
+
+**Suspect B — frontend navigation race (confirmed primary cause):** `SetupPage.onSuccess`
+called `queryClient.invalidateQueries({queryKey:['me']})` (fire-and-forget, not awaited)
+then `navigate('/', {replace:true})` synchronously. When `AuthGuard` rendered at `/`:
+- `user` was still `null` (stale cached value)
+- `isLoading` was `false` (background refetch triggered by `invalidateQueries` does
+  **not** set `isLoading=true` when the query already has data; only `isFetching`
+  becomes true, which `AuthGuard` does not check)
+- Result: `AuthGuard` immediately rendered `<Navigate to="/login" />` before the
+  background refetch could update `user`.
+
+**Fix:** `SetupPage.onSuccess` and `LoginPage.onSuccess` are now `async` and call
+`await queryClient.refetchQueries({queryKey:['me']})` before `navigate`, guaranteeing
+`AuthContext.user` is non-null before `AuthGuard` evaluates the route.
+- `SetupPage`: falls back to `/login` on refetch error (session cookie is set; normal
+  login flow can proceed).
+- `LoginPage`: navigates to `from` regardless of refetch outcome (session is set; a
+  re-fetch will happen on the next `AuthGuard` render).
+- A local `isNavigating` state keeps the Finish Setup button disabled/loading during
+  the async post-mutation refetch window.
+
+**Confirm-password field** added to `SetupPage` step 1 as an owner request riding in
+the same commit. The field is local UI state only; `admin_confirm_password` is never
+sent to the API. Backend `SetupRequest` schema is unchanged.
+
+## 2026-07-02 — Fix import-wizard default image not applied on commit (issue #14)
+
+**Root cause:** `patch_import_session` stored `session.default_image_path` but did
+not sync `ImportSessionImage.is_default` flags. `commit_import_session` builds final
+`Image` rows solely from `si.is_default` (never reading `session.default_image_path`),
+so the user's wizard selection was silently dropped.
+
+**Fix (two parts):**
+
+1. **Primary — sync `is_default` in the PATCH handler.** When
+   `body.default_image_path` is set, query all `ImportSessionImage` rows for the
+   session, clear `is_default` on all, then set `is_default = True` on the row whose
+   `path` matches. Matches the clear-all-then-set-one pattern already used in
+   `delete_import_session_image` and `items.py:set_default_image`. No match (path set
+   before images materialised) → log debug and leave `default_image_path` stored;
+   fallback below covers it.
+
+2. **Defensive fallback — commit handler.** Before the image-building loop, if
+   `session.default_image_path` is set but no `ImportSessionImage` has
+   `is_default=True`, scan the list for the matching path and set it; if no path
+   matches and images exist, fall back to the lowest-order image. This makes the
+   outcome correct even if PATCH ordering ever races with image materialisation.
+
+**Tests added** in `backend/tests/test_import_management.py`:
+- `test_patch_default_image_path_syncs_is_default` — PATCH syncs DB flags
+- `test_commit_honors_patched_default_image` — full commit flow regression guard
+  (confirmed FAILs without the fix: first image is default instead of second)
+- `test_commit_fallback_honors_default_image_path` — commit-side fallback
+
 ## 2026-07-02 — CodeQL triage for the FS browser endpoint (issue #8, PR #12)
 
 CodeQL flagged 5 alerts on `backend/app/routers/fs_browse.py`:

@@ -121,12 +121,19 @@ export function LoginPage() {
 
   const mutation = useMutation({
     mutationFn: () => api.login({ email, password }),
-    onSuccess: () => {
+    onSuccess: async () => {
       // A successful login means the instance is initialized — assert it in the
       // cache so AuthGuard can't bounce us to /setup on a stale `false`.
       queryClient.setQueryData(['setupStatus'], { initialized: true })
-      // Invalidate /me so AuthContext re-fetches the logged-in user.
-      queryClient.invalidateQueries({ queryKey: ['me'] })
+      // Await the /me refetch so AuthContext.user is populated before we
+      // navigate.  Without this await, AuthGuard can render with user===null and
+      // isLoading===false (background refetch doesn't flip isLoading) and
+      // immediately redirect back to /login — the same race as issue #13.
+      try {
+        await queryClient.refetchQueries({ queryKey: ['me'] })
+      } catch {
+        // Refetch failed; navigate anyway since the session cookie is set.
+      }
       navigate(from, { replace: true })
     },
   })

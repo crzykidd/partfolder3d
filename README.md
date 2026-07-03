@@ -11,7 +11,7 @@
 </div>
 
 > [!WARNING]
-> **Early alpha (v0.2.4) — under active development.** This is an early release: expect rough
+> **Early alpha (v0.2.5) — under active development.** This is an early release: expect rough
 > edges, and **breaking changes can land between releases** (database schema, config, or API).
 > It's usable and published — pull the images and follow [Getting started](#getting-started) — but
 > **pin a specific version, back up your data, and read the release notes before upgrading.**
@@ -19,7 +19,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.2.4-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.2.5-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![Stage](https://img.shields.io/badge/stage-alpha-orange)
 ![Code](https://img.shields.io/badge/code-yes-brightgreen)
@@ -31,6 +31,14 @@
 ---
 
 ## What's New
+
+### v0.2.5 (2026-07-02)
+
+Setup + import bug fixes. **First-run setup now logs you straight in** — completing the
+wizard previously bounced you back to the login screen; it now lands you in the app. The
+setup form also gains a **confirm-password field** to catch typos. **The import wizard's
+"set default image" now takes effect** — the image you pick is applied to the item on
+commit (previously ignored, most visibly for URL imports).
 
 ### v0.2.4 (2026-07-02)
 
@@ -117,7 +125,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.2.4 alpha) — see the
+> The full feature set below is **built and released** (v0.2.5 alpha) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -381,7 +389,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is at the **alpha** stage (v0.2.4).
+Honest snapshot — this project is at the **alpha** stage (v0.2.5).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -546,6 +554,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — alpha (v0.2.4) · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — alpha (v0.2.5) · built by <code>crzykidd</code></sub>
 
 </div>

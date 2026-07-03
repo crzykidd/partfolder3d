@@ -57,7 +57,7 @@ export async function apiFetch<T>(
     }
   }
 
-  const res = await fetch(path, { ...options, headers })
+  const res = await fetch(path, { ...options, headers, credentials: 'include' })
 
   if (!res.ok) {
     let detail: unknown
@@ -93,7 +93,7 @@ export async function apiFetchForm<T>(path: string, body: FormData): Promise<T> 
     headers.set(CSRF_HEADER, csrf)
   }
 
-  const res = await fetch(path, { method: 'POST', headers, body })
+  const res = await fetch(path, { method: 'POST', headers, body, credentials: 'include' })
 
   if (!res.ok) {
     let detail: unknown
