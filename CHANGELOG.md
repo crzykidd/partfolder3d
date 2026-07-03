@@ -20,6 +20,14 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Fixed
+
+- Import wizard "set default image" not applied on commit (issue #14). PATCH
+  `default_image_path` now syncs `ImportSessionImage.is_default` flags so the
+  commit handler sees the correct default; a defensive fallback in
+  `commit_import_session` handles the edge case where `default_image_path` is
+  set before image rows are materialized.
+
 ## [0.2.4] — 2026-07-02
 
 > ⚠️ **nginx config changed** — if you are running a custom nginx config

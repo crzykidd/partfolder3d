@@ -422,6 +422,27 @@ async def patch_import_session(
         session.creator_is_own_design = body.creator_is_own_design
     if body.default_image_path is not None:
         session.default_image_path = body.default_image_path
+        # Sync is_default flags on the session's ImportSessionImage rows so the
+        # commit handler (which reads si.is_default) sees the correct default.
+        # Use clear-all-then-set-one — same pattern as delete_import_session_image.
+        imgs_result = await db.execute(
+            select(ImportSessionImage).where(
+                ImportSessionImage.session_id == session.id
+            )
+        )
+        session_imgs = imgs_result.scalars().all()
+        matched = False
+        for img in session_imgs:
+            if img.path == body.default_image_path:
+                img.is_default = True
+                matched = True
+            else:
+                img.is_default = False
+        if not matched:
+            log.debug(
+                "patch_import_session: default_image_path %r has no matching image row yet",
+                body.default_image_path,
+            )
     if body.library_id is not None:
         session.library_id = body.library_id
 
@@ -635,6 +656,23 @@ async def commit_import_session(
         await db.flush()
 
         # ---- 7. Handle images ----
+        # Defensive fallback: if PATCH set default_image_path before the image
+        # rows were materialized (edge case), no is_default flag will be True.
+        # Honor default_image_path now so the commit still picks the right image.
+        if session.default_image_path and not any(
+            si.is_default for si in session.images
+        ):
+            matched = False
+            for si in sorted(session.images, key=lambda x: x.order):
+                if si.path == session.default_image_path:
+                    si.is_default = True
+                    matched = True
+                    break
+            if not matched and session.images:
+                # Path no longer present — fall back to lowest-order image.
+                sorted_imgs = sorted(session.images, key=lambda x: x.order)
+                sorted_imgs[0].is_default = True
+
         img_order = 0
         for si in session.images:
             if si.is_url:
