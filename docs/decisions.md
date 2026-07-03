@@ -2,6 +2,40 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-03 — Catalog grid improvements: responsive cols, compact/full mode, page-size selector
+
+### Virtual scroll container height changed from fixed 640 px to viewport-relative
+
+**Previous:** `height: 640` (px, constant).
+
+**New:** `height: calc(100vh - 320px)` with `minHeight: 480` / `maxHeight: 900`.
+
+**Rationale:** With larger page sizes (60–100 items) the previous 640 px showed only
+~2 compact rows at once (~6 items), making paging feel necessary even when the user
+wanted a denser view. Viewport-relative height means users with taller screens see
+proportionally more content without the virtualizer doing extra work. The 320 px
+subtraction accounts for the fixed chrome above the grid (navbar, search bar, tag
+chips, toolbar). Clamped to 480–900 px so very short screens still get a usable
+scroll area and very tall screens don't waste space.
+
+**Alternative considered:** raise to a fixed 800 px or 900 px. Rejected because a
+fixed height always under- or over-shoots on different screen sizes; viewport-relative
+is self-adjusting.
+
+### Column computation uses floor((W + gap) / (minCard + gap))
+
+This accounts for N cards + (N − 1) gaps fitting in a container of width W:
+`N ≤ (W + gap) / (minCard + gap)`. Extracted as `computeCols` in `catalog-utils.ts`
+and unit-tested. Min card widths chosen as 220 px (compact) and 340 px (full) to
+give 3–4 cols in typical browser widths for compact and 2–3 for full.
+
+### gridMode and perPage stored in localStorage (not URL params)
+
+`pf3d-catalog-grid-mode` and `pf3d-catalog-per-page` are preferences, not navigation
+state. Keeping them out of the URL avoids polluting shared/bookmarked links with
+UI-density choices that the recipient may not want. The URL already carries
+`q`, `tags`, `sort`, `page`, and `view` for deep-linking of filter state.
+
 ## 2026-07-02 — CodeQL log-injection fix in import-session PATCH (v0.2.5 PR)
 
 CodeQL (`py/log-injection`, Medium) flagged the #14 code on the v0.2.5 release PR:

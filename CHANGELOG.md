@@ -20,6 +20,23 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Added
+
+- **Responsive catalog grid** — column count now adapts to the available container
+  width via a ResizeObserver. Narrowing the window reduces columns automatically;
+  widening it adds them. Minimum card widths: 220 px (compact) / 340 px (full).
+
+- **Compact / Full grid mode** — a "Compact / Full" toggle appears in the catalog
+  toolbar when the grid view is active. Compact is the previous dense layout
+  (cropped cover images, ~160 px tall). Full shows uncropped images (~260 px, contain
+  fit) with a subtle backdrop for letterboxing. Selection persists to localStorage
+  (`pf3d-catalog-grid-mode`, default `compact`).
+
+- **Configurable page size** — a "Per page: 20 / 40 / 60 / 100" selector in the
+  catalog toolbar replaces the hardcoded 20-item limit. Changing the page size resets
+  to page 1 and the paginator updates accordingly. Selection persists to localStorage
+  (`pf3d-catalog-per-page`, default `20`).
+
 ## [0.2.5] — 2026-07-02
 
 ### Added
