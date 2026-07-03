@@ -354,10 +354,15 @@ export const setDefaultImage = (key: string, imageId: number): Promise<ItemDetai
     body: JSON.stringify({ image_id: imageId }),
   })
 
-export const uploadItemImage = (key: string, file: File): Promise<ImageOut> => {
+export const uploadItemImage = (
+  key: string,
+  file: File,
+  source: 'uploaded' | 'captured' = 'uploaded',
+): Promise<ImageOut> => {
   const form = new FormData()
   form.append('file', file)
-  return apiFetchForm<ImageOut>(`/api/items/${key}/images`, form)
+  const qs = source !== 'uploaded' ? `?source=${source}` : ''
+  return apiFetchForm<ImageOut>(`/api/items/${key}/images${qs}`, form)
 }
 
 // Delete an item from the catalog. The server moves its directory to

@@ -41,6 +41,15 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **3D viewer capture** — owners can now save a snapshot of the current 3D viewer
+  viewpoint as an item image.  A camera-icon "Save view" button appears in the top-left
+  of the viewer overlay (gated on ownership); each click captures the WebGL canvas frame
+  and saves it as a new `Image` row with `source=captured` — multiple captures per item
+  are supported, and any can be promoted to the default thumbnail via the existing
+  set-default flow.  Especially useful for 3MF files, which have no server-side render and
+  may lack an embedded thumbnail.  A new `ImageSource.captured` enum value and Alembic
+  migration 0022 back the provenance.  (Closes #21)
+
 - **Item file management** — owners can now upload, rename, and delete individual files
   from the "Files & Downloads" panel on any item page without a full re-scan.  Each file
   row gains a rename button (inline edit, Enter to confirm, Escape to cancel) and a

@@ -1037,12 +1037,14 @@ async def upload_image(
     _user: Annotated[User, Depends(get_current_user)],
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    source: Annotated[str, Query()] = "uploaded",
 ) -> ImageOut:
     """Upload an image to an existing item.
 
     Accepts png/jpg/jpeg/webp/gif.  Writes the file into the item's
-    ``images/`` subdirectory with a safe unique name and creates an Image row
-    (source=uploaded).  Syncs the sidecar.
+    ``images/`` subdirectory with a safe unique name and creates an Image row.
+    ``source`` query param accepts ``uploaded`` (default) or ``captured``
+    (browser 3D viewer screenshot).  Syncs the sidecar.
     """
     result = await db.execute(
         select(Item).options(selectinload(Item.creator)).where(Item.key == key)
@@ -1074,7 +1076,8 @@ async def upload_image(
 
     # Generate a unique filename to avoid collisions / path traversal
     unique_stem = secrets.token_hex(8)
-    safe_filename = f"upload_{unique_stem}{safe_ext}"
+    file_prefix = "capture" if source == "captured" else "upload"
+    safe_filename = f"{file_prefix}_{unique_stem}{safe_ext}"
 
     # Write into item_dir/images/
     item_dir = Path(item.dir_path)
@@ -1095,6 +1098,11 @@ async def upload_image(
     data = await file.read()
     dest.write_bytes(data)
 
+    # Validate and resolve the source value
+    _source = ImageSource.uploaded
+    if source == "captured":
+        _source = ImageSource.captured
+
     # Determine order (after all existing images)
     order_result = await db.execute(
         sa.select(sa.func.max(Image.order)).where(Image.item_id == item.id)
@@ -1105,7 +1113,7 @@ async def upload_image(
     img = Image(
         item_id=item.id,
         path=rel_path,
-        source=ImageSource.uploaded,
+        source=_source,
         is_default=False,
         order=new_order,
     )

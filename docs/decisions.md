@@ -2,6 +2,27 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-03 — #21 viewer capture: ImageSource.captured as native PG enum value
+
+`ImageSource` is a native PG enum (`Enum(ImageSource, name="imagesource")`). Added
+`captured` via migration 0022 using `ALTER TYPE imagesource ADD VALUE IF NOT EXISTS 'captured'`
+outside a transaction (`autocommit_block()`), matching the existing 0021 pattern for
+`embedded`.
+
+The `POST /api/items/{key}/images` endpoint gains a `?source=captured` query param
+(default: `"uploaded"`). The frontend passes `source=captured` when uploading a canvas
+screenshot so captured images carry distinct provenance in the DB and sidecar.
+
+Filenames use a `capture_` prefix (vs. `upload_`) to make the origin visible on disk.
+
+## 2026-07-03 — #21 viewer capture: wizard ImagesStep capture deferred
+
+The issue owner requested a "Try to render file" action in the import wizard
+(`ImagesStep.tsx`) that captures a browser render during import. During the wizard, items
+don't exist yet — images are `ImportSessionImage` rows — so the upload path is different.
+This is more involved and was deferred as a follow-up rather than risk rework of the
+wizard flow. The item-page capture (the core request) ships in this commit.
+
 ## 2026-07-03 — #18/#19 file management: upload extension allowlist, rename-in-dir-only
 
 `upload_file` (`POST /api/items/{key}/files`) rejects extensions not in

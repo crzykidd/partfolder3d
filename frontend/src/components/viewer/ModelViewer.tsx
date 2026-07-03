@@ -16,10 +16,13 @@
 
 import {
   Component,
+  type MutableRefObject,
   type ReactNode,
   Suspense,
+  useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react'
 import { Canvas, useLoader, useThree } from '@react-three/fiber'
@@ -28,6 +31,7 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { ThreeMFLoader } from 'three/examples/jsm/loaders/3MFLoader.js'
 import * as THREE from 'three'
+import { Camera } from 'lucide-react'
 
 // ---------------------------------------------------------------------------
 // Error boundary — catches loader failures (bad mesh, 404, etc.)
@@ -191,6 +195,18 @@ function Lights() {
 }
 
 // ---------------------------------------------------------------------------
+// GlCanvas — stores the WebGL canvas element into a ref (inside Canvas context)
+// ---------------------------------------------------------------------------
+
+function GlCanvas({ glRef }: { glRef: MutableRefObject<HTMLCanvasElement | null> }) {
+  const { gl } = useThree()
+  useEffect(() => {
+    glRef.current = gl.domElement
+  }, [gl, glRef])
+  return null
+}
+
+// ---------------------------------------------------------------------------
 // Public component (default export — consumed by React.lazy in DownloadsPanel)
 // ---------------------------------------------------------------------------
 
@@ -201,11 +217,21 @@ export interface ModelViewerProps {
   ext: string
   /** Called when the user closes the viewer */
   onClose: () => void
+  /** Called with the captured PNG blob when the user clicks "Save view as image". Owner-only. */
+  onCapture?: (blob: Blob) => void
+  /** When true, shows a spinner on the capture button (upload in progress). */
+  isCapturing?: boolean
+  /** Show the capture button only when true (owner gate). */
+  isOwner?: boolean
 }
 
-export default function ModelViewer({ fileUrl, ext, onClose }: ModelViewerProps) {
+export default function ModelViewer({
+  fileUrl, ext, onClose, onCapture, isCapturing, isOwner,
+}: ModelViewerProps) {
   const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
   const [loadError, setLoadError] = useState<Error | null>(null)
+  const glRef = useRef<HTMLCanvasElement | null>(null)
+  const [captureMsg, setCaptureMsg] = useState<string | null>(null)
 
   // Normalise extension to include leading dot
   const normExt = (ext.startsWith('.') ? ext : '.' + ext).toLowerCase() as SupportedExt
@@ -218,6 +244,26 @@ export default function ModelViewer({ fileUrl, ext, onClose }: ModelViewerProps)
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  // Clear capture feedback after 3 s
+  useEffect(() => {
+    if (!captureMsg) return
+    const t = setTimeout(() => setCaptureMsg(null), 3000)
+    return () => clearTimeout(t)
+  }, [captureMsg])
+
+  const handleCapture = useCallback(() => {
+    const canvas = glRef.current
+    if (!canvas || !onCapture) return
+    canvas.toBlob((blob) => {
+      if (blob) {
+        onCapture(blob)
+        setCaptureMsg('Saving…')
+      } else {
+        setCaptureMsg('Capture failed')
+      }
+    }, 'image/png')
+  }, [onCapture])
 
   return (
     /* Modal backdrop — click outside the card to close */
@@ -273,6 +319,58 @@ export default function ModelViewer({ fileUrl, ext, onClose }: ModelViewerProps)
           Close
         </button>
 
+        {/* Capture button — owner only, shown when viewer has no load error */}
+        {isOwner && onCapture && !loadError && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 10,
+              left: 10,
+              zIndex: 20,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <button
+              onClick={handleCapture}
+              disabled={isCapturing}
+              aria-label="Save view as image"
+              title="Save current view as item image"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '5px 10px',
+                background: 'rgba(0,0,0,0.55)',
+                color: '#fff',
+                border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: 6,
+                cursor: isCapturing ? 'not-allowed' : 'pointer',
+                fontSize: 12,
+                fontWeight: 600,
+                opacity: isCapturing ? 0.6 : 1,
+              }}
+            >
+              <Camera size={13} />
+              {isCapturing ? 'Saving…' : 'Save view'}
+            </button>
+            {captureMsg && !isCapturing && (
+              <span
+                style={{
+                  fontSize: 11,
+                  color: '#fff',
+                  background: 'rgba(0,0,0,0.55)',
+                  padding: '3px 8px',
+                  borderRadius: 5,
+                }}
+              >
+                {captureMsg}
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Error overlay (rendered outside Canvas so it shows even if WebGL fails) */}
         {loadError && (
           <div
@@ -322,9 +420,10 @@ export default function ModelViewer({ fileUrl, ext, onClose }: ModelViewerProps)
         {!loadError && (
           <Canvas
             camera={{ position: [0, 0, 5], fov: 45, near: 0.01, far: 100000 }}
-            gl={{ antialias: true }}
+            gl={{ antialias: true, preserveDrawingBuffer: true }}
             style={{ width: '100%', height: '100%' }}
           >
+            <GlCanvas glRef={glRef} />
             <SceneBackground isDark={isDark} />
             <Lights />
             {/* No maxDistance cap; near/far are wide (above) so dollying out never

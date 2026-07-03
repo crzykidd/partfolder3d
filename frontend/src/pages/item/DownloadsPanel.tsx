@@ -15,7 +15,7 @@
  */
 
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight, Download, Box, Trash2, Pencil, Upload } from 'lucide-react'
 
 import * as api from '@/lib/api'
@@ -523,6 +523,7 @@ export function DownloadsSection({
   isOwner, onDeleteFile, onRenameFile, onUploadFile,
   isDeletingFileId, isRenamingFileId, isUploadingFile, uploadFileError,
 }: DownloadsSectionProps) {
+  const queryClient = useQueryClient()
   const [bundleId, setBundleId] = useState<string | null>(null)
   const [zipStatus, setZipStatus] = useState<ZipPollStatus>('idle')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -532,6 +533,21 @@ export function DownloadsSection({
 
   // Viewer state: {filePath, ext} of the currently-open file, or null
   const [viewerFile, setViewerFile] = useState<{ filePath: string; ext: string } | null>(null)
+
+  // Capture mutation — uploads the viewer blob as a new item image
+  const captureMutation = useMutation({
+    mutationFn: (blob: Blob) => {
+      const file = new File([blob], 'capture.png', { type: 'image/png' })
+      return api.uploadItemImage(itemKey, file, 'captured')
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['item', itemKey] })
+    },
+  })
+
+  const handleCapture = useCallback((blob: Blob) => {
+    captureMutation.mutate(blob)
+  }, [captureMutation])
 
   const stopPoll = useCallback(() => {
     if (pollRef.current !== null) {
@@ -626,6 +642,9 @@ export function DownloadsSection({
             fileUrl={`/api/items/${itemKey}/files/${viewerFile.filePath}`}
             ext={viewerFile.ext}
             onClose={handleCloseViewer}
+            isOwner={isOwner}
+            onCapture={handleCapture}
+            isCapturing={captureMutation.isPending}
           />
         </Suspense>
       )}
