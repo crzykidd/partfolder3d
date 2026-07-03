@@ -334,7 +334,11 @@ export function ItemPage() {
       </AuroraSection>
 
       {/* Downloads — file tree with type-aware affordances and inline 3MF panels */}
-      <AuroraSection title="Files &amp; Downloads">
+      <AuroraSection
+        title="Files &amp; Downloads"
+        collapsible
+        storageKey="partfolder3d-files-collapsed"
+      >
         <DownloadsSection
           itemKey={item.key}
           files={item.files}

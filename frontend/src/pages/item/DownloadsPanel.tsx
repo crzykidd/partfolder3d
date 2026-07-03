@@ -662,7 +662,9 @@ export function DownloadsSection({
             background: 'var(--aurora-glass)',
             border: '1px solid var(--aurora-glass-border)',
             borderRadius: 10,
-            overflow: 'hidden',
+            overflowX: 'hidden',
+            overflowY: 'auto',
+            maxHeight: 420,
           }}
         >
           <TreeNodes

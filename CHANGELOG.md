@@ -27,6 +27,10 @@ prefix appears only on git tags and GitHub releases.
   (`source === 'render'`) so you can quickly page through just the renders.
 - **3D viewer "expand to full window"** — a maximize button (top-right, next to Close) grows
   the "View in 3D" viewer to fill the whole browser window; the same button restores it.
+- **Files & Downloads is collapsible + scrollable** — the section header now toggles the
+  panel open/closed, and the collapsed state is remembered in the browser (localStorage) so
+  it stays that way across item pages until you change it. The file list also scrolls
+  (capped height) so items with many files no longer run off the section.
 - **"Rescan disk" button on the item page** — the Files & Downloads panel now has a Rescan
   button (owner-only) that re-inventories the item's folder on disk and resyncs the sidecar
   via the reconcile engine, then refreshes the page. Per-item rescans always apply changes
