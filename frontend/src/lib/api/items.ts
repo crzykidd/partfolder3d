@@ -1,4 +1,4 @@
-import { apiFetch, apiFetchForm, getCsrfToken, ApiError } from './core'
+import { apiFetch, apiFetchForm } from './core'
 
 // ---------------------------------------------------------------------------
 // Phase 3 — Catalog types
@@ -374,23 +374,8 @@ export const uploadItemImage = (
 export const deleteItem = (key: string): Promise<void> =>
   apiFetch<void>(`/api/items/${key}`, { method: 'DELETE' })
 
-export const deleteItemImage = (key: string, imageId: number): Promise<void> => {
-  const headers = new Headers()
-  const csrf = getCsrfToken()
-  if (csrf) headers.set('X-CSRF-Token', csrf)
-  return fetch(`/api/items/${key}/images/${imageId}`, { method: 'DELETE', headers })
-    .then(async (res) => {
-      if (!res.ok) {
-        let detail: unknown
-        try { detail = await res.json() } catch { detail = res.statusText }
-        const message =
-          typeof detail === 'object' && detail !== null && 'detail' in detail
-            ? String((detail as Record<string, unknown>)['detail'])
-            : res.statusText
-        throw new ApiError(res.status, message, detail)
-      }
-    })
-}
+export const deleteItemImage = (key: string, imageId: number): Promise<void> =>
+  apiFetch<void>(`/api/items/${key}/images/${imageId}`, { method: 'DELETE' })
 
 export const listTags = (params: {
   q?: string
