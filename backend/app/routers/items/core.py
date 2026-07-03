@@ -1,4 +1,4 @@
-"""Item CRUD endpoints.
+"""Item CRUD, listing, rescan, default-image, modified-override, and jobs endpoints.
 
 POST   /api/items                       → create item (auth required)
 GET    /api/items                       → list items (paginated, searchable, filterable)
@@ -7,6 +7,8 @@ PATCH  /api/items/{key}                 → update metadata; title change = atom
 DELETE /api/items/{key}                 → move to trash (auth required)
 POST   /api/items/{key}/rescan          → re-inventory + re-sync sidecar (auth required)
 PATCH  /api/items/{key}/default-image   → set default image (Phase 3)
+PATCH  /api/items/{key}/modified-override→ set/clear manual modified flag (Phase 15)
+GET    /api/items/{key}/jobs            → active + recent failed jobs for an item
 
 Phase 3 additions to GET /api/items:
   q          — full-text search (title + description + tags via tsvector + GIN index)
@@ -19,13 +21,14 @@ Phase 3 additions to GET /api/items:
 Auth:  item writes require get_current_user.
        No admin-only gate on item operations (all authenticated users can write).
        Library management is admin-only (see libraries.py).
+
+Split out of the former monolithic ``routers/items.py`` (audit §D); routes,
+paths, methods, and response models are unchanged.
 """
 
 from __future__ import annotations
 
 import logging
-import re
-import secrets
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -37,346 +40,49 @@ from fastapi import (
     Depends,
     HTTPException,
     Query,
-    UploadFile,
     status,
 )
-from fastapi import (
-    File as FastAPIFile,
-)
-from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from ..auth.deps import csrf_protect, get_current_user, get_db, get_optional_user
-from ..models.creator import Creator
-from ..models.favorite import Favorite
-from ..models.file import File
-from ..models.image import Image, ImageSource
-from ..models.item import Item
-from ..models.job import Job
-from ..models.library import Library
-from ..models.tag import ItemTag, Tag
-from ..models.user import User
-from ..services.item_helpers import (
+from ...auth.deps import csrf_protect, get_current_user, get_db, get_optional_user
+from ...models.creator import Creator
+from ...models.favorite import Favorite
+from ...models.file import File
+from ...models.image import Image
+from ...models.item import Item
+from ...models.job import Job
+from ...models.library import Library
+from ...models.tag import ItemTag, Tag
+from ...models.user import User
+from ...services.item_helpers import (
     _attach_tags,
     _enqueue_analyze,
     _enqueue_render,
     _update_search_vector,
     _write_item_sidecar,
 )
-from ..storage.inventory import FileRecord, hash_file_sha256, infer_role, inventory_item
-from ..storage.journal import MoveError, atomic_rename, move_to_trash
-from ..storage.keys import generate_unique_key
-from ..storage.link_url import validate_link_url
-from ..storage.paths import item_dir_path, item_slug, sidecar_name
-from ..worker.arq_pool import get_arq_pool
+from ...storage.inventory import inventory_item
+from ...storage.journal import MoveError, atomic_rename, move_to_trash
+from ...storage.keys import generate_unique_key
+from ...storage.paths import item_dir_path, item_slug, sidecar_name
+from ...worker.arq_pool import get_arq_pool
+from .helpers import _VALID_SORTS, _build_item_detail, _sort_clause
+from .schemas import (
+    ItemCreate,
+    ItemDetail,
+    ItemJobOut,
+    ItemSummary,
+    ItemUpdate,
+    PaginatedItems,
+    PatchModifiedOverrideRequest,
+    SetDefaultImageRequest,
+)
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/items", tags=["items"])
-
-
-# ---------------------------------------------------------------------------
-# Schemas
-# ---------------------------------------------------------------------------
-
-
-class CreatorIn(BaseModel):
-    name: str
-    profile_url: str | None = None
-    source_site: str | None = None
-
-    _validate_profile_url = field_validator("profile_url")(validate_link_url)
-
-
-class TagIn(BaseModel):
-    name: str
-
-
-class ItemCreate(BaseModel):
-    title: str
-    library_id: int
-    description: str | None = None
-    source_url: str | None = None
-    source_site: str | None = None
-    license: str | None = None
-    creator: CreatorIn | None = None
-    tags: list[str] = []
-
-    _validate_source_url = field_validator("source_url")(validate_link_url)
-
-
-class ItemUpdate(BaseModel):
-    title: str | None = None
-    description: str | None = None
-    source_url: str | None = None
-    source_site: str | None = None
-    license: str | None = None
-    creator: CreatorIn | None = None
-    tags: list[str] | None = None
-
-    _validate_source_url = field_validator("source_url")(validate_link_url)
-
-
-class CreatorOut(BaseModel):
-    id: int
-    name: str
-    profile_url: str | None
-    source_site: str | None
-
-    model_config = {"from_attributes": True}
-
-
-class FileOut(BaseModel):
-    id: int
-    path: str
-    role: str
-    size: int
-    sha256: str | None
-    # Phase 16: per-object mesh analysis (null until worker runs)
-    object_analysis: Any | None = None
-    # render-rework-A: true when the file can be previewed in the browser 3D viewer.
-    # Gated by extension (.stl/.obj/.3mf) and file size ≤ BROWSER_PREVIEW_MAX_MB.
-    preview_3d: bool = False
-
-    model_config = {"from_attributes": True}
-
-    @model_validator(mode="after")
-    def _compute_preview_3d(self) -> FileOut:
-        from app.config import settings  # noqa: PLC0415
-
-        _PREVIEW_EXTS = frozenset({".stl", ".obj", ".3mf"})
-        ext = Path(self.path).suffix.lower()
-        max_bytes = settings.BROWSER_PREVIEW_MAX_MB * 1024 * 1024
-        self.preview_3d = ext in _PREVIEW_EXTS and self.size <= max_bytes
-        return self
-
-
-class ImageOut(BaseModel):
-    id: int
-    path: str
-    source: str
-    is_default: bool
-    order: int
-
-    model_config = {"from_attributes": True}
-
-
-class TagOut(BaseModel):
-    id: int
-    name: str
-    category: str | None
-
-    model_config = {"from_attributes": True}
-
-
-class SetDefaultImageRequest(BaseModel):
-    image_id: int
-
-
-class ItemSummary(BaseModel):
-    id: int
-    key: str
-    title: str
-    slug: str
-    library_id: int
-    dir_path: str
-    created_at: datetime
-    updated_at: datetime
-    # Phase 3 additions: enriched catalog data (default None for backward compat)
-    default_image_path: str | None = None
-    creator_name: str | None = None
-    tag_names: list[str] = []
-    favorited: bool = False
-
-    model_config = {"from_attributes": False}
-
-
-class ItemDetail(BaseModel):
-    id: int
-    key: str
-    title: str
-    slug: str
-    library_id: int
-    dir_path: str
-    created_at: datetime
-    updated_at: datetime
-    description: str | None
-    source_url: str | None
-    source_site: str | None
-    license: str | None
-    schema_version: int
-    creator: CreatorOut | None
-    tags: list[TagOut]
-    files: list[FileOut]
-    images: list[ImageOut]
-    # Phase 15: local-modification tracking
-    is_modified: bool = False           # effective state (override wins over auto)
-    locally_modified_at: datetime | None = None
-    modified_override: str | None = None
-    # Phase 16: object-analysis aggregate (null until at least one file is analyzed)
-    analysis_total_objects: int | None = None
-    analysis_total_colors: int | None = None
-    analysis_total_est_grams: float | None = None
-
-    model_config = {"from_attributes": True}
-
-
-class PatchModifiedOverrideRequest(BaseModel):
-    override: str | None = None  # 'modified' | 'original' | null
-
-
-class ItemJobOut(BaseModel):
-    """Slim job record surfaced on the item detail page (active + recent failed)."""
-    id: str
-    type: str
-    status: str
-    progress: int
-    error: str | None
-    created_at: datetime
-    started_at: datetime | None
-    finished_at: datetime | None
-
-    model_config = {"from_attributes": False}
-
-
-class PaginatedItems(BaseModel):
-    total: int
-    page: int
-    per_page: int
-    items: list[ItemSummary]
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _apply_file_records(
-    item: Item,
-    records: list[FileRecord],
-    db_files: list[File],
-) -> tuple[list[File], list[File]]:
-    """Merge inventory records with existing DB File rows.
-
-    Returns (files_to_upsert, files_to_delete).
-    """
-    existing_by_path: dict[str, File] = {f.path: f for f in db_files}
-    disk_paths = {r.relative_path for r in records}
-
-    to_delete = [f for path, f in existing_by_path.items() if path not in disk_paths]
-
-    to_upsert: list[File] = []
-    for rec in records:
-        if rec.relative_path in existing_by_path:
-            f = existing_by_path[rec.relative_path]
-            f.size = rec.size
-            f.sha256 = rec.sha256
-            f.mtime = rec.mtime
-            f.role = rec.role
-            f.last_seen_size = rec.size
-            f.last_seen_mtime = rec.mtime
-        else:
-            f = File(
-                item_id=item.id,
-                path=rec.relative_path,
-                role=rec.role,
-                size=rec.size,
-                sha256=rec.sha256,
-                mtime=rec.mtime,
-                last_seen_size=rec.size,
-                last_seen_mtime=rec.mtime,
-            )
-        to_upsert.append(f)
-
-    return to_upsert, to_delete
-
-
-def _effective_is_modified(item: Item) -> bool:
-    """Compute the effective is_modified flag.
-
-    override='modified' → True
-    override='original' → False
-    override=None       → locally_modified (auto)
-    """
-    override = getattr(item, "modified_override", None)
-    if override == "modified":
-        return True
-    if override == "original":
-        return False
-    return bool(getattr(item, "locally_modified", False))
-
-
-def _build_analysis_aggregate(
-    files: list[File],
-) -> tuple[int | None, int | None, float | None]:
-    """Compute item-level analysis aggregate from analyzed file rows.
-
-    Returns (total_objects, total_colors, total_est_grams).
-    Returns (None, None, None) if no files have been analyzed yet.
-    """
-    total_objects = 0
-    total_colors = 0
-    total_grams = 0.0
-    any_analyzed = False
-
-    for f in files:
-        a = getattr(f, "object_analysis", None)
-        if not isinstance(a, dict):
-            continue
-        any_analyzed = True
-        total_objects += a.get("total_objects", 0)
-        total_colors += a.get("total_colors", 0)
-        g = a.get("total_est_grams")
-        if g is not None:
-            total_grams += float(g)
-
-    if not any_analyzed:
-        return None, None, None
-    return total_objects, total_colors, round(total_grams, 3)
-
-
-def _build_item_detail(
-    item: Item,
-    tags: list[Tag],
-    files: list[File],
-    images: list[Image],
-) -> dict[str, Any]:
-    """Build the ItemDetail dict from loaded ORM objects."""
-    total_obj, total_col, total_g = _build_analysis_aggregate(files)
-    return {
-        "id": item.id,
-        "key": item.key,
-        "title": item.title,
-        "slug": item.slug,
-        "library_id": item.library_id,
-        "dir_path": item.dir_path,
-        "description": item.description,
-        "source_url": item.source_url,
-        "source_site": item.source_site,
-        "license": item.license,
-        "schema_version": item.schema_version,
-        "created_at": item.created_at,
-        "updated_at": item.updated_at,
-        "creator": item.creator,
-        "tags": tags,
-        "files": files,
-        "images": images,
-        # Phase 15: local-modification tracking
-        "is_modified": _effective_is_modified(item),
-        "locally_modified_at": getattr(item, "locally_modified_at", None),
-        "modified_override": getattr(item, "modified_override", None),
-        # Phase 16: object-analysis aggregate
-        "analysis_total_objects": total_obj,
-        "analysis_total_colors": total_col,
-        "analysis_total_est_grams": total_g,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
 
 
 @router.post("", response_model=ItemDetail, status_code=status.HTTP_201_CREATED)
@@ -491,32 +197,6 @@ async def create_item(
     await _enqueue_analyze(item.id, pool=arq)
 
     return _build_item_detail(item, tags, file_objs, images)
-
-
-_VALID_SORTS = {
-    "created_at_desc",
-    "created_at_asc",
-    "updated_at_desc",
-    "title_asc",
-    "title_desc",
-    "relevance",
-}
-
-
-def _sort_clause(sort: str, q: str | None) -> Any:
-    """Return the ORDER BY clause for the given sort key."""
-    if sort == "relevance" and q:
-        tsq = func.websearch_to_tsquery(sa.literal("english"), q)
-        return func.ts_rank(Item.search_vector, tsq).desc()
-    if sort == "created_at_asc":
-        return Item.created_at.asc()
-    if sort == "updated_at_desc":
-        return Item.updated_at.desc()
-    if sort == "title_asc":
-        return Item.title.asc()
-    if sort == "title_desc":
-        return Item.title.desc()
-    return Item.created_at.desc()  # default: created_at_desc
 
 
 @router.get("", response_model=PaginatedItems)
@@ -875,7 +555,7 @@ async def rescan_item(
     Drives the same engine as the scheduled library scan so the per-item Rescan button
     produces identical Issues / ChangeLog / ReviewItem outcomes.
     """
-    from ..worker.reconcile import load_mode_settings, reconcile_one_item  # noqa: PLC0415
+    from ...worker.reconcile import load_mode_settings, reconcile_one_item  # noqa: PLC0415
 
     result = await db.execute(
         select(Item)
@@ -916,7 +596,6 @@ async def rescan_item(
 
     # Reload creator (may have changed)
     if item.creator_id and not item.creator:
-        from ..models.creator import Creator  # noqa: PLC0415
         creator_result = await db.execute(select(Creator).where(Creator.id == item.creator_id))
         item.creator = creator_result.scalar_one_or_none()
 
@@ -1095,469 +774,3 @@ async def list_item_jobs(
         )
         for j in jobs
     ]
-
-
-# ---------------------------------------------------------------------------
-# Allowed image MIME types / extensions for upload
-# ---------------------------------------------------------------------------
-
-_ALLOWED_IMAGE_TYPES = {
-    "image/png",
-    "image/jpeg",
-    "image/webp",
-    "image/gif",
-}
-_ALLOWED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
-
-
-@router.post("/{key}/images", response_model=ImageOut, status_code=status.HTTP_201_CREATED)
-async def upload_image(
-    key: str,
-    file: Annotated[UploadFile, FastAPIFile(...)],
-    _user: Annotated[User, Depends(get_current_user)],
-    _csrf: Annotated[None, Depends(csrf_protect)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-    source: Annotated[str, Query()] = "uploaded",
-) -> ImageOut:
-    """Upload an image to an existing item.
-
-    Accepts png/jpg/jpeg/webp/gif.  Writes the file into the item's
-    ``images/`` subdirectory with a safe unique name and creates an Image row.
-    ``source`` query param accepts ``uploaded`` (default) or ``captured``
-    (browser 3D viewer screenshot).  Syncs the sidecar.
-    """
-    result = await db.execute(
-        select(Item).options(selectinload(Item.creator)).where(Item.key == key)
-    )
-    item = result.scalar_one_or_none()
-    if item is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found.")
-
-    # Validate content-type / extension
-    content_type = (file.content_type or "").split(";")[0].strip().lower()
-    suffix = Path(file.filename or "").suffix.lower()
-    if content_type not in _ALLOWED_IMAGE_TYPES and suffix not in _ALLOWED_IMAGE_EXTS:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Unsupported image type.  Allowed: png, jpg, jpeg, webp, gif.",
-        )
-
-    # Derive a safe extension (prefer from extension; fall back to content-type)
-    if suffix in _ALLOWED_IMAGE_EXTS:
-        safe_ext = suffix
-    else:
-        ct_to_ext = {
-            "image/png": ".png",
-            "image/jpeg": ".jpg",
-            "image/webp": ".webp",
-            "image/gif": ".gif",
-        }
-        safe_ext = ct_to_ext.get(content_type, ".jpg")
-
-    # Generate a unique filename to avoid collisions / path traversal
-    unique_stem = secrets.token_hex(8)
-    file_prefix = "capture" if source == "captured" else "upload"
-    safe_filename = f"{file_prefix}_{unique_stem}{safe_ext}"
-
-    # Write into item_dir/images/
-    item_dir = Path(item.dir_path)
-    images_dir = item_dir / "images"
-    images_dir.mkdir(parents=True, exist_ok=True)
-    dest = images_dir / safe_filename
-    rel_path = str(dest.relative_to(item_dir))
-
-    # Path traversal guard (should be impossible with safe_filename but be defensive)
-    try:
-        dest.resolve().relative_to(item_dir.resolve())
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid file path.",
-        ) from exc
-
-    data = await file.read()
-    dest.write_bytes(data)
-
-    # Validate and resolve the source value
-    _source = ImageSource.uploaded
-    if source == "captured":
-        _source = ImageSource.captured
-
-    # Determine order (after all existing images)
-    order_result = await db.execute(
-        sa.select(sa.func.max(Image.order)).where(Image.item_id == item.id)
-    )
-    max_order = order_result.scalar_one_or_none()
-    new_order = (max_order or 0) + 1
-
-    img = Image(
-        item_id=item.id,
-        path=rel_path,
-        source=_source,
-        is_default=False,
-        order=new_order,
-    )
-    db.add(img)
-    await db.flush()
-    await db.refresh(img)
-
-    item.updated_at = datetime.now(UTC)
-    await db.flush()
-
-    await _write_item_sidecar(db, item)
-
-    return ImageOut(
-        id=img.id,
-        path=img.path,
-        source=img.source.value,
-        is_default=img.is_default,
-        order=img.order,
-    )
-
-
-@router.delete(
-    "/{key}/images/{image_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    response_model=None,
-)
-async def delete_image(
-    key: str,
-    image_id: int,
-    _user: Annotated[User, Depends(get_current_user)],
-    _csrf: Annotated[None, Depends(csrf_protect)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> None:
-    """Delete an image from an item.
-
-    Removes the DB row and (if it exists) the file from the item dir.
-    If the deleted image was the default, reassigns default to the first
-    remaining image (or leaves none if no images remain).  Syncs the sidecar.
-    """
-    result = await db.execute(
-        select(Item).options(selectinload(Item.creator)).where(Item.key == key)
-    )
-    item = result.scalar_one_or_none()
-    if item is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found.")
-
-    img_result = await db.execute(
-        select(Image).where(Image.id == image_id, Image.item_id == item.id)
-    )
-    image = img_result.scalar_one_or_none()
-    if image is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Image not found or does not belong to this item.",
-        )
-
-    was_default = image.is_default
-
-    # Remove the on-disk file (best-effort — don't fail if missing)
-    try:
-        file_path = Path(item.dir_path) / image.path
-        if file_path.exists() and file_path.is_file():
-            file_path.unlink()
-    except OSError as exc:
-        log.warning("delete_image: could not remove file %s: %s", image.path, exc)
-
-    await db.delete(image)
-    await db.flush()
-
-    # Reassign default if needed
-    if was_default:
-        remaining_result = await db.execute(
-            select(Image).where(Image.item_id == item.id).order_by(Image.order).limit(1)
-        )
-        first_remaining = remaining_result.scalar_one_or_none()
-        if first_remaining is not None:
-            await db.execute(
-                sa.update(Image).where(Image.item_id == item.id).values(is_default=False)
-            )
-            await db.execute(
-                sa.update(Image).where(Image.id == first_remaining.id).values(is_default=True)
-            )
-            item.default_image_id = first_remaining.id
-        else:
-            item.default_image_id = None
-
-    item.updated_at = datetime.now(UTC)
-    await db.flush()
-
-    await _write_item_sidecar(db, item)
-
-
-# ---------------------------------------------------------------------------
-# File management: upload, delete, rename (issues #18 / #19)
-# ---------------------------------------------------------------------------
-
-_ALLOWED_FILE_EXTENSIONS = frozenset({
-    # 3D model formats
-    ".stl", ".3mf", ".obj", ".ply", ".blend", ".f3d",
-    ".step", ".stp", ".fcstd", ".amf", ".dae",
-    # Archive
-    ".zip",
-    # G-code
-    ".gcode", ".gco", ".bgcode",
-    # Documents / project notes
-    ".pdf", ".txt", ".md",
-})
-
-
-class RenameFileRequest(BaseModel):
-    name: str  # new basename only — no path separators
-
-
-@router.post(
-    "/{key}/files",
-    response_model=FileOut,
-    status_code=status.HTTP_201_CREATED,
-)
-async def upload_file(
-    key: str,
-    file: Annotated[UploadFile, FastAPIFile(...)],
-    _user: Annotated[User, Depends(get_current_user)],
-    _csrf: Annotated[None, Depends(csrf_protect)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-    arq: Annotated[ArqRedis, Depends(get_arq_pool)],
-) -> FileOut:
-    """Upload an additional file to an existing item.
-
-    Accepts model formats, archives, and g-code.  Saves the file into the item
-    directory root with a sanitized, collision-safe filename.  Creates a File row,
-    syncs the sidecar, and enqueues analyze + render (3MF skips render via the
-    model_extensions guard in _enqueue_render).
-    """
-    result = await db.execute(
-        select(Item).options(selectinload(Item.creator)).where(Item.key == key)
-    )
-    item = result.scalar_one_or_none()
-    if item is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found.")
-
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in _ALLOWED_FILE_EXTENSIONS:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"Unsupported file type {suffix!r}. "
-                f"Allowed: {', '.join(sorted(_ALLOWED_FILE_EXTENSIONS))}"
-            ),
-        )
-
-    # Derive a safe filename from the uploaded name.
-    original_stem = Path(file.filename or "upload").stem
-    safe_stem = re.sub(r"[^\w.\-]", "_", original_stem)[:200] or "upload"
-    safe_filename = f"{safe_stem}{suffix}"
-
-    item_dir = Path(item.dir_path)
-    dest = item_dir / safe_filename
-    counter = 1
-    while dest.exists():
-        dest = item_dir / f"{safe_stem}_{counter}{suffix}"
-        counter += 1
-
-    rel_path = str(dest.relative_to(item_dir))
-
-    # Path traversal guard (belt-and-suspenders after safe_stem construction).
-    try:
-        dest.resolve().relative_to(item_dir.resolve())
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file path."
-        ) from exc
-
-    data = await file.read()
-    dest.write_bytes(data)
-
-    stat = dest.stat()
-    sha256 = hash_file_sha256(dest)
-    role = infer_role(rel_path)
-    mtime = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
-    size = stat.st_size
-
-    f = File(
-        item_id=item.id,
-        path=rel_path,
-        role=role,
-        size=size,
-        sha256=sha256,
-        mtime=mtime,
-        last_seen_size=size,
-        last_seen_mtime=mtime,
-    )
-    db.add(f)
-    await db.flush()
-    await db.refresh(f)
-
-    item.updated_at = datetime.now(UTC)
-    await db.flush()
-
-    await _write_item_sidecar(db, item)
-
-    await _enqueue_analyze(item.id, pool=arq)
-    await _enqueue_render(item.id, pool=arq, model_extensions=[suffix])
-
-    return FileOut(
-        id=f.id,
-        path=f.path,
-        role=f.role.value,
-        size=f.size,
-        sha256=f.sha256,
-        object_analysis=None,
-    )
-
-
-@router.delete(
-    "/{key}/files/{file_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    response_model=None,
-)
-async def delete_file(
-    key: str,
-    file_id: int,
-    _user: Annotated[User, Depends(get_current_user)],
-    _csrf: Annotated[None, Depends(csrf_protect)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> None:
-    """Delete a single file from an item.
-
-    Removes the DB row and (if it exists on disk) the physical file.
-    Syncs the sidecar.
-    """
-    result = await db.execute(
-        select(Item).options(selectinload(Item.creator)).where(Item.key == key)
-    )
-    item = result.scalar_one_or_none()
-    if item is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found.")
-
-    file_result = await db.execute(
-        select(File).where(File.id == file_id, File.item_id == item.id)
-    )
-    f = file_result.scalar_one_or_none()
-    if f is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="File not found or does not belong to this item.",
-        )
-
-    # Remove the on-disk file (best-effort — don't fail if already missing).
-    try:
-        file_path = Path(item.dir_path) / f.path
-        if file_path.exists() and file_path.is_file():
-            file_path.unlink()
-    except OSError as exc:
-        log.warning("delete_file: could not remove file %s: %s", f.path, exc)
-
-    await db.delete(f)
-    item.updated_at = datetime.now(UTC)
-    await db.flush()
-
-    await _write_item_sidecar(db, item)
-
-
-@router.patch(
-    "/{key}/files/{file_id}",
-    response_model=FileOut,
-)
-async def rename_file(
-    key: str,
-    file_id: int,
-    body: RenameFileRequest,
-    _user: Annotated[User, Depends(get_current_user)],
-    _csrf: Annotated[None, Depends(csrf_protect)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> FileOut:
-    """Rename a file (new basename only — file stays in its current directory).
-
-    Updates the on-disk file and the files.path DB column.  Re-infers role from
-    the new extension.  Syncs the sidecar.  The new name must be a plain filename
-    with no path separators or traversal components.
-    """
-    result = await db.execute(
-        select(Item).options(selectinload(Item.creator)).where(Item.key == key)
-    )
-    item = result.scalar_one_or_none()
-    if item is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found.")
-
-    file_result = await db.execute(
-        select(File).where(File.id == file_id, File.item_id == item.id)
-    )
-    f = file_result.scalar_one_or_none()
-    if f is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="File not found or does not belong to this item.",
-        )
-
-    new_name = body.name.strip()
-
-    if not new_name or "/" in new_name or "\\" in new_name or ".." in new_name:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Invalid filename: must be a plain name with no path separators.",
-        )
-    if len(new_name) > 255:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Filename too long (max 255 characters).",
-        )
-
-    item_dir = Path(item.dir_path)
-    old_abs = item_dir / f.path
-
-    # New path: same parent directory as the current file.
-    parent = Path(f.path).parent
-    new_rel = str(parent / new_name)
-    new_abs = item_dir / new_rel
-
-    # Path traversal guard.
-    try:
-        new_abs.resolve().relative_to(item_dir.resolve())
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid file path.",
-        ) from exc
-
-    # Collision guard.
-    if new_abs.exists():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"A file named {new_name!r} already exists in this location.",
-        )
-
-    # Rename on disk (atomic on same filesystem).
-    if old_abs.exists():
-        try:
-            old_abs.rename(new_abs)
-        except OSError as exc:
-            log.exception("rename_file: failed to rename %s on disk", f.path)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to rename file on disk.",
-            ) from exc
-    else:
-        log.warning(
-            "rename_file: source %s not found on disk — updating DB path only", f.path
-        )
-
-    f.path = new_rel
-    f.role = infer_role(new_rel)
-    item.updated_at = datetime.now(UTC)
-    await db.flush()
-    await db.refresh(f)
-
-    await _write_item_sidecar(db, item)
-
-    return FileOut(
-        id=f.id,
-        path=f.path,
-        role=f.role.value,
-        size=f.size,
-        sha256=f.sha256,
-        object_analysis=f.object_analysis,
-    )
-
-
