@@ -20,6 +20,17 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Added
+
+- **Release-notes popup** (issue #24) — after an upgrade, authenticated users
+  see a dismissible "What's New" modal once on their first app load at the new
+  version.  The modal is skipped on first-ever use (no prior seen-version) and
+  does not reappear until the next upgrade.  The last-seen version is stored in
+  browser localStorage (`partfolder3d-seen-version`).  Release blurbs live in
+  `frontend/src/lib/releaseNotes.ts`; the release-prep process should add a
+  new entry there when bumping the version.  The modal includes a "View full
+  release notes" link to the GitHub release page.
+
 ### Fixed
 
 - **Import wizard AI buttons now use the typed-but-unsaved description** (issue

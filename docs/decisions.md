@@ -2,6 +2,36 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-03 — #24 release-notes popup: localStorage over per-user DB column
+
+The issue proposed two options for persisting last-seen version: a `last_seen_version`
+DB column (syncs across devices) or the existing `useLocalStorage` hook (per-browser).
+
+Chose **localStorage** for v1:
+- Zero backend changes — no migration, no PATCH endpoint, no round-trip latency.
+- The app is already using localStorage for theme and nav-layout preferences.
+- The modal's "once per upgrade" goal is satisfied per browser; the per-device gap is
+  an acceptable v1 trade-off (worst case: user sees the modal again on a second device,
+  which is harmless).
+- Promoted to DB storage if per-device annoyance proves significant in practice.
+
+## 2026-07-03 — #24 release-notes popup: frontend blurb module over served CHANGELOG
+
+The CHANGELOG.md is not bundled into the frontend build or served by the backend.
+Parsing it would require either:
+(a) a new backend endpoint that slices the file, or
+(b) bundling a markdown renderer + the full changelog into the frontend.
+
+Chose a **small frontend module** (`frontend/src/lib/releaseNotes.ts`) that maps
+version strings to curated "What's New" bullet arrays.  This is:
+- Dependency-free (no markdown renderer)
+- Bundle-minimal (one TS module, a few hundred bytes)
+- Author-friendly: the release-prep process already writes README "What's New" and
+  CHANGELOG entries; adding a `releaseNotes.ts` entry is one more step of the same kind.
+
+The release-prep skill/process should update `releaseNotes.ts` alongside the version
+bump (noted in decisions.md as a reminder and in the CHANGELOG entry).
+
 ## 2026-07-03 — #21 viewer capture: ImageSource.captured as native PG enum value
 
 `ImageSource` is a native PG enum (`Enum(ImageSource, name="imagesource")`). Added
