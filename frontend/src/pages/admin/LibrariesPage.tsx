@@ -1,5 +1,5 @@
 /**
- * LibrariesPage — Admin: list, add, and disable library mounts.
+ * LibrariesPage — Admin: list, add, disable, re-enable, and hard-delete library mounts.
  *
  * A library is a directory mounted into the container from the host.
  * The mount path must be an absolute path inside the container (e.g. /library).
@@ -10,7 +10,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { HardDrive, Plus, Trash2, AlertCircle, FolderOpen, ChevronRight, ArrowLeft, Check, X } from 'lucide-react'
+import { HardDrive, Plus, Trash2, AlertCircle, FolderOpen, ChevronRight, ArrowLeft, Check, X, RefreshCw } from 'lucide-react'
 
 import * as api from '@/lib/api'
 
@@ -416,102 +416,216 @@ function AddLibraryForm({ onSuccess }: AddLibraryFormProps) {
 interface LibraryRowProps {
   library: api.LibraryOut
   onDisable: (id: number) => void
+  onEnable: (id: number) => void
+  onPurge: (id: number) => void
   isDisabling: boolean
+  isEnabling: boolean
+  isPurging: boolean
   isLast?: boolean
 }
 
-function LibraryRow({ library, onDisable, isDisabling, isLast = false }: LibraryRowProps) {
+function LibraryRow({
+  library,
+  onDisable,
+  onEnable,
+  onPurge,
+  isDisabling,
+  isEnabling,
+  isPurging,
+  isLast = false,
+}: LibraryRowProps) {
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
   const handleDisable = () => {
     if (!window.confirm(`Disable library "${library.name}"? Items are not deleted.`)) return
     onDisable(library.id)
   }
 
+  const handleEnable = () => {
+    onEnable(library.id)
+  }
+
+  const handlePurge = () => {
+    setDeleteError(null)
+    if (library.item_count > 0) {
+      setDeleteError(
+        `Cannot delete: this library has ${library.item_count} asset(s). ` +
+        'Move or remove all assets first. ' +
+        'Move-between-libraries is coming — see issue #25.'
+      )
+      return
+    }
+    if (!window.confirm(`Permanently delete library "${library.name}"? This cannot be undone.`)) return
+    onPurge(library.id)
+  }
+
   return (
     <div
       style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 14,
-        padding: '14px 18px',
         borderBottom: isLast ? 'none' : '1px solid var(--aurora-divider)',
       }}
     >
       <div
         style={{
-          width: 36,
-          height: 36,
-          borderRadius: 8,
-          background: library.enabled ? 'rgba(15,164,171,0.12)' : 'var(--aurora-glass)',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
+          gap: 14,
+          padding: '14px 18px',
         }}
       >
-        <HardDrive
-          size={17}
-          style={{ color: library.enabled ? 'var(--aurora-accent)' : 'var(--aurora-muted)' }}
-        />
-      </div>
-
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--aurora-text)' }}>
-            {library.name}
-          </span>
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 700,
-              padding: '2px 8px',
-              borderRadius: 20,
-              letterSpacing: '0.06em',
-              background: library.enabled ? 'rgba(15,164,171,0.12)' : 'var(--aurora-glass)',
-              color: library.enabled ? 'var(--aurora-accent)' : 'var(--aurora-muted)',
-              border: `1px solid ${library.enabled ? 'rgba(15,164,171,0.3)' : 'var(--aurora-glass-border)'}`,
-            }}
-          >
-            {library.enabled ? 'enabled' : 'disabled'}
-          </span>
-        </div>
         <div
           style={{
-            marginTop: 2,
-            fontSize: 12,
-            color: 'var(--aurora-muted)',
-            fontFamily: 'monospace',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
+            width: 36,
+            height: 36,
+            borderRadius: 8,
+            background: library.enabled ? 'rgba(15,164,171,0.12)' : 'var(--aurora-glass)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
           }}
         >
-          {library.mount_path}
+          <HardDrive
+            size={17}
+            style={{ color: library.enabled ? 'var(--aurora-accent)' : 'var(--aurora-muted)' }}
+          />
         </div>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--aurora-text)' }}>
+              {library.name}
+            </span>
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                padding: '2px 8px',
+                borderRadius: 20,
+                letterSpacing: '0.06em',
+                background: library.enabled ? 'rgba(15,164,171,0.12)' : 'var(--aurora-glass)',
+                color: library.enabled ? 'var(--aurora-accent)' : 'var(--aurora-muted)',
+                border: `1px solid ${library.enabled ? 'rgba(15,164,171,0.3)' : 'var(--aurora-glass-border)'}`,
+              }}
+            >
+              {library.enabled ? 'enabled' : 'disabled'}
+            </span>
+            {library.item_count > 0 && (
+              <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>
+                {library.item_count} asset{library.item_count !== 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
+          <div
+            style={{
+              marginTop: 2,
+              fontSize: 12,
+              color: 'var(--aurora-muted)',
+              fontFamily: 'monospace',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {library.mount_path}
+          </div>
+        </div>
+
+        {library.enabled ? (
+          <button
+            onClick={handleDisable}
+            disabled={isDisabling}
+            title="Disable library"
+            style={{
+              ...BTN_GHOST_STYLE,
+              color: isDisabling ? 'var(--aurora-muted)' : '#EF4444',
+              borderColor: isDisabling ? 'var(--aurora-glass-border)' : 'rgba(239,68,68,0.3)',
+              opacity: isDisabling ? 0.5 : 1,
+            }}
+            onMouseEnter={(e) => {
+              if (!isDisabling) {
+                (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.08)'
+              }
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)'
+            }}
+          >
+            <Trash2 size={13} />
+            Disable
+          </button>
+        ) : (
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={handleEnable}
+              disabled={isEnabling}
+              title="Re-enable library"
+              style={{
+                ...BTN_GHOST_STYLE,
+                color: isEnabling ? 'var(--aurora-muted)' : 'var(--aurora-accent)',
+                borderColor: isEnabling ? 'var(--aurora-glass-border)' : 'rgba(15,164,171,0.3)',
+                opacity: isEnabling ? 0.5 : 1,
+              }}
+              onMouseEnter={(e) => {
+                if (!isEnabling) {
+                  (e.currentTarget as HTMLButtonElement).style.background = 'rgba(15,164,171,0.08)'
+                }
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)'
+              }}
+            >
+              <RefreshCw size={13} />
+              {isEnabling ? 'Enabling…' : 'Re-enable'}
+            </button>
+            <button
+              onClick={handlePurge}
+              disabled={isPurging}
+              title="Delete permanently"
+              style={{
+                ...BTN_GHOST_STYLE,
+                color: isPurging ? 'var(--aurora-muted)' : '#EF4444',
+                borderColor: isPurging ? 'var(--aurora-glass-border)' : 'rgba(239,68,68,0.3)',
+                opacity: isPurging ? 0.5 : 1,
+              }}
+              onMouseEnter={(e) => {
+                if (!isPurging) {
+                  (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.08)'
+                }
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)'
+              }}
+            >
+              <Trash2 size={13} />
+              {isPurging ? 'Deleting…' : 'Delete permanently'}
+            </button>
+          </div>
+        )}
       </div>
 
-      {library.enabled && (
-        <button
-          onClick={handleDisable}
-          disabled={isDisabling}
-          title="Disable library"
+      {deleteError && (
+        <div
           style={{
-            ...BTN_GHOST_STYLE,
-            color: isDisabling ? 'var(--aurora-muted)' : '#EF4444',
-            borderColor: isDisabling ? 'var(--aurora-glass-border)' : 'rgba(239,68,68,0.3)',
-            opacity: isDisabling ? 0.5 : 1,
-          }}
-          onMouseEnter={(e) => {
-            if (!isDisabling) {
-              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.08)'
-            }
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)'
+            margin: '0 18px 12px',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 7,
+            background: 'rgba(239,68,68,0.07)',
+            border: '1px solid rgba(239,68,68,0.25)',
+            borderRadius: 8,
+            padding: '8px 12px',
           }}
         >
-          <Trash2 size={13} />
-          Disable
-        </button>
+          <AlertCircle size={14} style={{ color: '#EF4444', flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontSize: 12, color: '#EF4444', lineHeight: 1.5 }}>{deleteError}</span>
+          <button
+            onClick={() => setDeleteError(null)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--aurora-muted)', padding: 0, marginLeft: 'auto', display: 'flex', alignItems: 'center' }}
+          >
+            <X size={13} />
+          </button>
+        </div>
       )}
     </div>
   )
@@ -525,6 +639,8 @@ export function LibrariesPage() {
   const queryClient = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [disablingId, setDisablingId] = useState<number | null>(null)
+  const [enablingId, setEnablingId] = useState<number | null>(null)
+  const [purgingId, setPurgingId] = useState<number | null>(null)
 
   const { data: libraries = [], isLoading } = useQuery({
     queryKey: ['libraries'],
@@ -540,9 +656,23 @@ export function LibrariesPage() {
     },
   })
 
-  const handleDisable = (id: number) => {
-    disableMutation.mutate(id)
-  }
+  const enableMutation = useMutation({
+    mutationFn: (id: number) => api.enableLibrary(id),
+    onMutate: (id) => setEnablingId(id),
+    onSettled: () => {
+      setEnablingId(null)
+      void queryClient.invalidateQueries({ queryKey: ['libraries'] })
+    },
+  })
+
+  const purgeMutation = useMutation({
+    mutationFn: (id: number) => api.purgeLibrary(id),
+    onMutate: (id) => setPurgingId(id),
+    onSettled: () => {
+      setPurgingId(null)
+      void queryClient.invalidateQueries({ queryKey: ['libraries'] })
+    },
+  })
 
   const handleAddSuccess = () => {
     setShowForm(false)
@@ -610,8 +740,12 @@ export function LibrariesPage() {
               <LibraryRow
                 key={lib.id}
                 library={lib}
-                onDisable={handleDisable}
+                onDisable={(id) => disableMutation.mutate(id)}
+                onEnable={(id) => enableMutation.mutate(id)}
+                onPurge={(id) => purgeMutation.mutate(id)}
                 isDisabling={disablingId === lib.id}
+                isEnabling={enablingId === lib.id}
+                isPurging={purgingId === lib.id}
                 isLast={i === libraries.length - 1}
               />
             ))}
@@ -635,6 +769,7 @@ export function LibrariesPage() {
           <code style={{ background: 'var(--aurora-glass)', borderRadius: 4, padding: '1px 5px' }}>/library</code>.
           Both the backend and worker containers must have the same volume mounted at the same path.
           Disabling a library hides it from the UI but does not delete any files.
+          A disabled library can be re-enabled, or permanently deleted once it has no assets.
         </p>
       </div>
     </div>

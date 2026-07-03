@@ -22,6 +22,17 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **Hard-delete empty library + re-enable disabled library** (issue #11) — two new admin
+  actions fill the soft-delete gap.  A disabled library row in the admin Libraries page now
+  shows **Re-enable** (restores `enabled = true` instantly) and **Delete permanently**.
+  Delete permanently is guarded: if the library still has assets the UI shows the count and
+  a message directing the user to issue #25 (move-assets-between-libraries, coming later);
+  if the library is empty a confirmation dialog is shown and the row is hard-deleted from
+  the database.  The `GET /api/libraries` response now includes `item_count` per library
+  so the frontend always knows the count without an extra fetch.
+  New endpoints: `POST /api/libraries/{id}/enable` (re-enable) and
+  `DELETE /api/libraries/{id}/purge` (hard-delete, guarded).
+
 - **Release-notes popup** (issue #24) — after an upgrade, authenticated users
   see a dismissible "What's New" modal once on their first app load at the new
   version.  The modal is skipped on first-ever use (no prior seen-version) and

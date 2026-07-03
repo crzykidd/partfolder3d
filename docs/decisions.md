@@ -2,6 +2,30 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-03 — #11 library purge: no on-disk directory removal
+
+`DELETE /api/libraries/{id}/purge` hard-deletes the `libraries` row but does not remove
+the on-disk directory.  The existing `disable_library` endpoint never touched the
+filesystem either, so there is no existing directory-management pattern to follow.
+The library directory is a host-mounted volume; deleting it from inside the container
+would be destructive and surprising.  Operators who want to reclaim the disk space can
+unmount and remove the volume on the host after deleting the library through the UI.
+
+## 2026-07-03 — #11 library purge: item_count added to LibraryOut (not a separate endpoint)
+
+The frontend needs the asset count before deciding whether to show the delete-blocked
+message.  Two options: (a) a separate count endpoint called on demand, or (b) include
+`item_count` in the `GET /api/libraries` list response.  Chose (b): the count is a
+correlated subquery on an indexed FK column — cheap at small library counts — and it
+eliminates a round-trip on every library page load.  The field defaults to `0` so
+callers that don't use it are unaffected.
+
+## 2026-07-03 — #11 purge endpoint: allow purge of enabled library
+
+The purge endpoint (`DELETE /api/libraries/{id}/purge`) does not require the library to
+be disabled first.  An operator might want to create-and-immediately-delete an empty
+library without the extra disable step.  The only guard is the item count check.
+
 ## 2026-07-03 — #24 release-notes popup: localStorage over per-user DB column
 
 The issue proposed two options for persisting last-seen version: a `last_seen_version`
