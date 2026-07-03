@@ -20,6 +20,8 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-07-03
+
 ### Added
 
 - **Worker resource limits (env-configurable, small defaults)** — the background worker no
@@ -81,36 +83,6 @@ prefix appears only on git tags and GitHub releases.
   `frontend/src/lib/releaseNotes.ts`; the release-prep process should add a
   new entry there when bumping the version.  The modal includes a "View full
   release notes" link to the GitHub release page.
-
-### Fixed
-
-- **3D viewer overlay, sizing, close, and zoom** — the "View in 3D" window now
-  renders through a portal to `document.body`, so it's a true centered overlay
-  instead of being trapped inline at the bottom of the page by an Aurora card's
-  `backdrop-filter` (which also pushed its top controls under the nav bar). It's
-  capped (`min(90vw,1100px)` × `min(82vh,760px)`) so it no longer dominates large
-  displays, the close control is a clear **X** (top-right; Esc/backdrop also close),
-  and OrbitControls now uses **zoom-to-cursor** + faster pan so you can zoom in on
-  one side/object to frame a clean capture. Owner-only **Save view** is unchanged.
-- **Import wizard AI buttons now use the typed-but-unsaved description** (issue
-  #16) — clicking "Clean up (AI)" or "Summarize scrape (AI)" before advancing
-  the step previously sent only the session ID; the backend cleaned the already-
-  persisted `session.description`, which was empty/stale. Both cleanup and
-  summarize endpoints now accept `description` and `title` in the request body
-  and prefer those values over the persisted session. The wizard buttons pass the
-  current component state so the AI always sees what is visible in the form.
-
-- **AI provider calls no longer block the event loop** (issue #17) — `_dispatch`
-  (and its callers `suggest_tags`, `cleanup_description`, `summarize_scrape`) is
-  a synchronous function that was called inline inside async route handlers,
-  freezing the single Uvicorn event loop for as long as the AI provider took to
-  respond. All call sites now use `asyncio.to_thread` so a slow or stuck provider
-  only stalls the one request that triggered it. An explicit timeout (10 s for the
-  connectivity test, 60 s for inference calls) is passed to the SDK so the call
-  fails fast rather than hanging indefinitely.
-
-### Added
-
 - **3D viewer capture** — owners can now save a snapshot of the current 3D viewer
   viewpoint as an item image.  A camera-icon "Save view" button appears in the top-left
   of the viewer overlay (gated on ownership); each click captures the WebGL canvas frame
@@ -119,7 +91,6 @@ prefix appears only on git tags and GitHub releases.
   set-default flow.  Especially useful for 3MF files, which have no server-side render and
   may lack an embedded thumbnail.  A new `ImageSource.captured` enum value and Alembic
   migration 0022 back the provenance.  (Closes #21)
-
 - **Item file management** — owners can now upload, rename, and delete individual files
   from the "Files & Downloads" panel on any item page without a full re-scan.  Each file
   row gains a rename button (inline edit, Enter to confirm, Escape to cancel) and a
@@ -129,14 +100,11 @@ prefix appears only on git tags and GitHub releases.
   enqueues the standard analyze + render pipeline.  PATCH enforces path-traversal and
   collision guards; DELETE is best-effort on disk.  All three operations sync the item
   sidecar.  (Closes #19, part of #18)
-
 - **Extraction progress reflected without a manual reload** — `extract_archives` now
   creates a Job row at the start of the task (type `"extract_archives"`, linked to the
   item) and marks it succeeded or failed when done.  The item page polls
-  `GET /api/items/{key}/jobs` (active jobs only) via TanStack Query and auto-invalidates
-  the item query when the job count drops to zero, so the file list updates as soon as
-  extraction finishes.  (Part of #18)
-
+  `GET /api/items/{key}/jobs` and auto-invalidates the item query when active jobs
+  drop to zero, so the file list updates as soon as extraction finishes.  (Part of #18)
 - **`render` preference on import-session commit paths** — `POST /api/import-sessions/{id}/commit`
   now accepts an optional JSON body (`CommitOptions`) with `render: "auto" | "off"` (default
   `"auto"`); `POST /api/import-sessions/bulk-commit` gains the same field on `BulkCommitRequest`.
@@ -144,7 +112,6 @@ prefix appears only on git tags and GitHub releases.
   scripted bulk migrations where renders are deferred or triggered later via browser capture.
   `"auto"` preserves existing behaviour (still gated by the instance `render.mode` setting).
   Omitting the body/field is fully backward-compatible. (Closes #15)
-
 - **Bulk commit endpoint** (`POST /api/import-sessions/bulk-commit`) — commits
   multiple pending-wizard import sessions in one call.  Pass `session_ids` (list
   of UUIDs) or `null` to target all visible pending-wizard sessions.  An optional
@@ -163,22 +130,45 @@ prefix appears only on git tags and GitHub releases.
   default is configured, a library-picker modal appears before submitting.  Shows a
   partial-success summary (committed N/M; reasons for skips/errors).
 
-- **Object Breakdown no longer shows a false "Analysis pending" for 3MF files.** 3MF files
-  are read, not mesh-analyzed (slice details appear inline in Files & Downloads). Unanalyzed
-  3MF files now say so plainly instead of implying a background job is coming.
-- **Object Breakdown shows accurate job status for mesh files (STL/OBJ/PLY)** when analysis
-  is missing. Instead of a generic "pending" message the section now shows:
-  - *Running* — "Analyzing… N%" with a progress bar and a "View in Jobs" link.
-  - *Queued* — "Analysis queued" with the same link.
-  - *Failed* — the error text, the link, and a hint to use **Rescan disk** to re-queue.
-  - *No job* — "Analysis hasn't run yet — use Rescan disk to queue it."
-
 ### Changed
 
 - `GET /api/items/{key}/jobs` (new endpoint) returns active (queued/running) plus
   non-archived failed jobs for an item. `ItemJobOut` includes `progress` and `error`.
   `ItemPage` polls this endpoint every 3 s and threads the results into
   `ObjectBreakdownSection`.
+
+### Fixed
+
+- **3D viewer overlay, sizing, close, and zoom** — the "View in 3D" window now
+  renders through a portal to `document.body`, so it's a true centered overlay
+  instead of being trapped inline at the bottom of the page by an Aurora card's
+  `backdrop-filter` (which also pushed its top controls under the nav bar). It's
+  capped (`min(90vw,1100px)` × `min(82vh,760px)`) so it no longer dominates large
+  displays, the close control is a clear **X** (top-right; Esc/backdrop also close),
+  and OrbitControls now uses **zoom-to-cursor** + faster pan so you can zoom in on
+  one side/object to frame a clean capture. Owner-only **Save view** is unchanged.
+- **Import wizard AI buttons now use the typed-but-unsaved description** (issue
+  #16) — clicking "Clean up (AI)" or "Summarize scrape (AI)" before advancing
+  the step previously sent only the session ID; the backend cleaned the already-
+  persisted `session.description`, which was empty/stale. Both cleanup and
+  summarize endpoints now accept `description` and `title` in the request body
+  and prefer those values over the persisted session. The wizard buttons pass the
+  current component state so the AI always sees what is visible in the form.
+- **AI provider calls no longer block the event loop** (issue #17) — `_dispatch`
+  (and its callers `suggest_tags`, `cleanup_description`, `summarize_scrape`) is
+  a synchronous function that was called inline inside async route handlers,
+  freezing the single Uvicorn event loop for as long as the AI provider took to
+  respond. All call sites now use `asyncio.to_thread` so a slow or stuck provider
+  only stalls the one request that triggered it. An explicit timeout (10 s for the
+  connectivity test, 60 s for inference calls) is passed to the SDK so the call
+  fails fast rather than hanging indefinitely.
+- **Object Breakdown reports real analysis status instead of a blanket "Analysis
+  pending."** 3MF files are read, not mesh-analyzed, so they now say so plainly (slice
+  details appear inline in Files & Downloads) rather than implying a job is coming. For
+  mesh files (STL/OBJ/PLY) awaiting analysis the section shows the actual job state:
+  *Running* ("Analyzing… N%" with a progress bar + "View in Jobs" link), *Queued*,
+  *Failed* (with the error text + a hint to use Rescan disk), or *No job* ("hasn't run
+  yet — use Rescan disk to queue it").
 
 ## [0.2.5] — 2026-07-02
 
