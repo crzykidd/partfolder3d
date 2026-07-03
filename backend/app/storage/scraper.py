@@ -33,9 +33,21 @@ from urllib.robotparser import RobotFileParser
 
 import httpx
 
-from .ssrf_guard import SSRFBlockedError, assert_safe_url
+from .ssrf_guard import (
+    GuardedFetchError,
+    SSRFBlockedError,
+    assert_safe_url,
+    guarded_fetch,
+    sanitize_for_log,
+)
 
 log = logging.getLogger(__name__)
+
+# Robots files are tiny; cap the fetch hard so a hostile host can't stream MBs.
+_ROBOTS_MAX_BYTES = 512 * 1024
+# Default HTML body cap (bytes) if a caller doesn't override it.  The worker
+# passes settings.SCRAPE_HTML_MAX_MB; this default keeps direct/test callers safe.
+_DEFAULT_HTML_MAX_BYTES = 5 * 1024 * 1024
 
 # ---------------------------------------------------------------------------
 # Result data structure
@@ -84,15 +96,20 @@ def _get_robots(domain: str, timeout: int = 10) -> RobotFileParser | None:
     rp = RobotFileParser()
     rp.set_url(robots_url)
     try:
-        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-            resp = client.get(robots_url, headers={"User-Agent": _ROBOTS_UA})
-            if resp.status_code == 200:
-                rp.parse(resp.text.splitlines())
-            else:
-                # No robots.txt or blocked → conservative: allow
-                pass
-    except Exception:
-        log.debug("robots.txt fetch failed for %s (treating as allow-all)", domain)
+        resp = guarded_fetch(
+            robots_url,
+            max_bytes=_ROBOTS_MAX_BYTES,
+            timeout=timeout,
+            headers={"User-Agent": _ROBOTS_UA},
+        )
+        if resp.status_code == 200:
+            rp.parse(resp.text.splitlines())
+        # else: no robots.txt or blocked → conservative: allow
+    except (SSRFBlockedError, GuardedFetchError, httpx.HTTPError):
+        log.debug(
+            "robots.txt fetch failed for %s (treating as allow-all)",
+            sanitize_for_log(domain),
+        )
     _robots_cache[domain] = rp
     return rp
 
@@ -209,6 +226,7 @@ def scrape_url(
     url: str,
     timeout: int = 15,
     max_images: int = 20,
+    html_max_bytes: int = _DEFAULT_HTML_MAX_BYTES,
 ) -> ScrapeResult:
     """Scrape public metadata from a URL.
 
@@ -226,33 +244,39 @@ def scrape_url(
 
     result = ScrapeResult(url=url, domain=domain)
 
-    # SSRF guard — reject URLs resolving to internal/link-local/cloud-metadata IPs
+    _safe_url = sanitize_for_log(url)
+
+    # SSRF guard — reject URLs resolving to internal/link-local/cloud-metadata IPs.
+    # (The guarded fetch below re-validates every hop; this pre-flight gives a
+    # friendlier note and short-circuits before the robots.txt fetch.)
     try:
         assert_safe_url(url)
     except SSRFBlockedError as exc:
         result.blocked = True
         result.note = str(exc)
-        log.warning("scrape_url: SSRF guard blocked %s: %s", url, exc)
+        log.warning("scrape_url: SSRF guard blocked %s: %s", _safe_url, exc)
         return result
 
     # robots.txt check
     if not _robots_allows(domain, parsed.path or "/"):
         result.blocked = True
         result.note = f"robots.txt disallows fetching {url}"
-        log.info("scrape_url: robots.txt blocked %s", url)
+        log.info("scrape_url: robots.txt blocked %s", _safe_url)
         return result
 
     try:
-        with httpx.Client(
+        # Guarded fetch: no auto-redirects (each hop re-validated), body streamed
+        # and aborted once html_max_bytes is exceeded (no unbounded resp.text).
+        resp = guarded_fetch(
+            url,
+            max_bytes=html_max_bytes,
             timeout=timeout,
-            follow_redirects=True,
             headers={
                 "User-Agent": _ROBOTS_UA,
                 "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.5",
             },
-        ) as client:
-            resp = client.get(url)
+        )
 
         if resp.status_code != 200:
             result.note = f"HTTP {resp.status_code}"
@@ -264,20 +288,30 @@ def scrape_url(
                 result.blocked = True
             return result
 
-        content_type = resp.headers.get("content-type", "")
+        content_type = resp.content_type
         if "html" not in content_type:
             result.note = f"Non-HTML response: {content_type}"
             return result
 
         html = resp.text
 
+    except SSRFBlockedError as exc:
+        # A redirect hop pointed at an internal/blocked target.
+        result.blocked = True
+        result.note = str(exc)
+        log.warning("scrape_url: SSRF guard blocked redirect for %s: %s", _safe_url, exc)
+        return result
+    except GuardedFetchError as exc:
+        result.note = f"Scrape error: {exc}"
+        log.warning("scrape_url: guarded fetch failed for %s: %s", _safe_url, exc)
+        return result
     except httpx.TimeoutException:
         result.note = "Scrape timed out"
-        log.info("scrape_url: timeout for %s", url)
+        log.info("scrape_url: timeout for %s", _safe_url)
         return result
     except Exception as exc:
         result.note = f"Scrape error: {exc}"
-        log.warning("scrape_url: error for %s: %s", url, exc)
+        log.warning("scrape_url: error for %s: %s", _safe_url, exc)
         return result
 
     tree = _parse_html(html)
@@ -329,7 +363,7 @@ def scrape_url(
 
     log.debug(
         "scrape_url: %s → title=%r images=%d tags=%d",
-        url, result.title, len(result.image_urls), len(result.raw_tags),
+        _safe_url, result.title, len(result.image_urls), len(result.raw_tags),
     )
     return result
 

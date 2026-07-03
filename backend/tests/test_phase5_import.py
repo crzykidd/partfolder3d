@@ -6,8 +6,9 @@ Scrape-related tests use local fixtures — no real network calls.
 
 from __future__ import annotations
 
+import socket
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient
@@ -16,6 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.site_capability import SiteToken
 from app.models.tag import Tag, TagAlias, TagStatus
+
+
+def _fake_public_getaddrinfo(host, port, *a, **kw):  # type: ignore[no-untyped-def]
+    """Resolve any hostname to a public IP so the SSRF pre-flight passes offline."""
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port or 0))]
 
 # ---------------------------------------------------------------------------
 # Auth helper
@@ -558,19 +564,19 @@ def test_scrape_url_extracts_og_metadata() -> None:
 <body><h1>Benchy</h1></body>
 </html>"""
 
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.headers = {"content-type": "text/html; charset=utf-8"}
-    mock_response.text = html
+    from app.storage.ssrf_guard import GuardedResponse  # noqa: PLC0415
 
-    mock_client = MagicMock()
-    mock_client.__enter__ = MagicMock(return_value=mock_client)
-    mock_client.__exit__ = MagicMock(return_value=False)
-    mock_client.get = MagicMock(return_value=mock_response)
+    resp = GuardedResponse(
+        status_code=200,
+        headers={"content-type": "text/html; charset=utf-8"},
+        content=html.encode("utf-8"),
+        final_url="https://example.com/thing/123",
+    )
 
-    with patch("app.storage.scraper.httpx.Client", return_value=mock_client):
+    with patch("app.storage.scraper.guarded_fetch", return_value=resp):
         with patch("app.storage.scraper._robots_allows", return_value=True):
-            result = scrape_url("https://example.com/thing/123")
+            with patch("socket.getaddrinfo", _fake_public_getaddrinfo):
+                result = scrape_url("https://example.com/thing/123")
 
     assert result.title == "Awesome 3D Benchy"
     assert result.description == "The 3D printing torture test boat."
@@ -596,14 +602,13 @@ def test_scrape_url_http_timeout() -> None:
 
     from app.storage.scraper import scrape_url  # noqa: PLC0415
 
-    mock_client = MagicMock()
-    mock_client.__enter__ = MagicMock(return_value=mock_client)
-    mock_client.__exit__ = MagicMock(return_value=False)
-    mock_client.get = MagicMock(side_effect=httpx.TimeoutException("timeout"))
-
-    with patch("app.storage.scraper.httpx.Client", return_value=mock_client):
+    with patch(
+        "app.storage.scraper.guarded_fetch",
+        side_effect=httpx.TimeoutException("timeout"),
+    ):
         with patch("app.storage.scraper._robots_allows", return_value=True):
-            result = scrape_url("https://slow-site.com/thing")
+            with patch("socket.getaddrinfo", _fake_public_getaddrinfo):
+                result = scrape_url("https://slow-site.com/thing")
 
     assert result.blocked is False
     assert result.title is None
@@ -767,23 +772,22 @@ async def test_commit_scraped_images_unique_filenames(
     db_session.add(img_b)
     await db_session.flush()
 
-    # Mock httpx.Client so both URLs return 200 with webp content-type.
-    # Patch the global httpx.Client because the lazy import inside the function
-    # pulls the already-cached module from sys.modules.
+    # Stub the guarded image fetch so both URLs return 200 with webp content-type.
     fake_img_bytes = b"\x00\x00\x00\x0c"  # minimal placeholder bytes
 
-    def _make_mock_client(*args: object, **kwargs: object) -> MagicMock:  # type: ignore[return]
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "image/webp"}
-        mock_response.content = fake_img_bytes
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get = MagicMock(return_value=mock_response)
-        return mock_client
+    from app.storage.ssrf_guard import GuardedResponse  # noqa: PLC0415
 
-    with patch("httpx.Client", side_effect=_make_mock_client):
+    def _fake_guarded_fetch(url: str, **kwargs: object) -> GuardedResponse:
+        return GuardedResponse(
+            status_code=200,
+            headers={"content-type": "image/webp"},
+            content=fake_img_bytes,
+            final_url=url,
+        )
+
+    with patch(
+        "app.routers.import_sessions.sessions.guarded_fetch", _fake_guarded_fetch
+    ):
         commit_resp = await client.post(
             f"/api/import-sessions/{session_id}/commit",
             headers={"X-CSRF-Token": csrf},

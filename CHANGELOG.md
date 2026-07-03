@@ -20,6 +20,16 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Security
+
+- **SSRF hardening on the scrape/import fetch path** — every user-influenced outbound fetch
+  (URL metadata scrape, `robots.txt`, and the commit-time download of scraped/AgentQL images)
+  now goes through one guarded helper that rejects non-`http(s)` schemes, re-validates **every
+  redirect hop** against the internal-IP block-list (no silent auto-follow into `169.254.169.254`
+  or RFC1918), **streams with a size cap** instead of buffering unbounded response bodies,
+  enforces `image/*` on scraped images, and sanitizes URLs before logging. New caps
+  `SCRAPE_IMAGE_MAX_MB` (25) and `SCRAPE_HTML_MAX_MB` (5).
+
 ## [0.3.0] — 2026-07-03
 
 ### Added

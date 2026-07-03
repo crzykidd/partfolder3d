@@ -47,6 +47,12 @@ from ...services.item_helpers import (
 from ...storage.inventory import inventory_item
 from ...storage.keys import generate_unique_key
 from ...storage.paths import item_dir_path, item_slug, sidecar_name
+from ...storage.ssrf_guard import (
+    GuardedFetchError,
+    SSRFBlockedError,
+    guarded_fetch,
+    sanitize_for_log,
+)
 from .helpers import (
     _enqueue_import_job,
     _ensure_creator,
@@ -693,33 +699,46 @@ async def _commit_session_inner(
     img_order = 0
     for si in session.images:
         if si.is_url:
+            _safe_img_url = sanitize_for_log(si.path)
             try:
-                import httpx as _httpx  # noqa: PLC0415
-
+                # Guarded fetch: SSRF-checked (scheme + DNS + IP per hop, no
+                # auto-redirect), image/* content-type enforced, body streamed
+                # and aborted past the size cap.  A per-image failure skips that
+                # image only — it must not crash the whole commit.
                 images_dir = item_dir / "images"
                 images_dir.mkdir(exist_ok=True)
-                with _httpx.Client(timeout=settings.SCRAPE_TIMEOUT) as c:
-                    r = c.get(si.path, follow_redirects=True)
-                    if r.status_code == 200:
-                        ext = _scraped_image_ext(
-                            si.path,
-                            r.headers.get("content-type", ""),
-                        )
-                        img_name = f"scraped_{img_order:02d}{ext}"
-                        img_dest = images_dir / img_name
-                        img_dest.write_bytes(r.content)
-                        rel_path = str(img_dest.relative_to(item_dir))
-                        img_obj = Image(
-                            item_id=item.id,
-                            path=rel_path,
-                            source=ImageSource.scraped,
-                            is_default=si.is_default,
-                            order=img_order,
-                        )
-                        db.add(img_obj)
-                        img_order += 1
+                r = guarded_fetch(
+                    si.path,
+                    max_bytes=settings.SCRAPE_IMAGE_MAX_MB * 1024 * 1024,
+                    timeout=settings.SCRAPE_TIMEOUT,
+                    allowed_content_types=("image/",),
+                )
+                if r.status_code == 200:
+                    ext = _scraped_image_ext(si.path, r.content_type)
+                    img_name = f"scraped_{img_order:02d}{ext}"
+                    img_dest = images_dir / img_name
+                    img_dest.write_bytes(r.content)
+                    rel_path = str(img_dest.relative_to(item_dir))
+                    img_obj = Image(
+                        item_id=item.id,
+                        path=rel_path,
+                        source=ImageSource.scraped,
+                        is_default=si.is_default,
+                        order=img_order,
+                    )
+                    db.add(img_obj)
+                    img_order += 1
+                else:
+                    log.warning(
+                        "commit: image fetch returned HTTP %s for %s",
+                        r.status_code, _safe_img_url,
+                    )
+            except (SSRFBlockedError, GuardedFetchError) as exc:
+                log.warning(
+                    "commit: blocked/failed image %s: %s", _safe_img_url, exc
+                )
             except Exception:
-                log.warning("commit: failed to download image %s", si.path)
+                log.warning("commit: failed to download image %s", _safe_img_url)
         else:
             rel = Path(si.path).name
             img_path = item_dir / rel

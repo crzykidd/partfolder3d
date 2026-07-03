@@ -2,6 +2,24 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-03 — SSRF: one guarded-fetch chokepoint; DNS-rebinding accepted as residual
+
+Audit §A remediation (set 1). All user-influenced outbound HTTP now goes through
+`guarded_fetch()` in `backend/app/storage/ssrf_guard.py` — a single chokepoint that validates
+the scheme (http/https only), re-validates **every redirect hop** against the existing IP
+block-list (redirects are NOT auto-followed by httpx anymore), streams with a byte cap, and can
+enforce a content-type allow-list. Wired into `scraper.scrape_url`, `scraper._get_robots`, and
+the commit-time image download in `import_sessions/sessions.py` (the previously-unguarded
+`follow_redirects=True` fetch that wrote `r.content` to disk). New caps `SCRAPE_IMAGE_MAX_MB=25`
+/ `SCRAPE_HTML_MAX_MB=5`; robots cap is a fixed 512 KB constant.
+
+**Accepted residual:** DNS-rebinding (TOCTOU) between the `assert_safe_url`/`guarded_fetch`
+pre-resolution check and httpx's own connect-time resolution is NOT closed — full closure needs
+pinning the connection to the vetted IP via a custom transport, which is invasive for HTTPS
+SNI/cert validation and would break the mock-based test seam. Accepted for the
+single-household / trusted-importer deployment; revisit if the instance ever accepts imports
+from untrusted users.
+
 ## 2026-07-03 — Documentation ecosystem: each doc gets one job
 
 Prompted by the full-repo audit (`docs/audit-2026-07-03.md`), we fixed the root cause behind

@@ -50,6 +50,7 @@ from urllib.parse import urlparse
 import httpx
 
 from .scraper import ScrapeResult
+from .ssrf_guard import sanitize_for_log
 
 log = logging.getLogger(__name__)
 
@@ -112,6 +113,7 @@ def agentql_scrape(
     if domain.startswith("www."):
         domain = domain[4:]
 
+    _su = sanitize_for_log(url)  # CR/LF-escaped copy for log lines
     result = ScrapeResult(url=url, domain=domain)
 
     # Build request body
@@ -143,19 +145,19 @@ def agentql_scrape(
         if resp.status_code == 401:
             result.blocked = True
             result.note = "AgentQL: authentication failed — check your API key."
-            log.warning("agentql_scrape: 401 Unauthorized for %s", url)
+            log.warning("agentql_scrape: 401 Unauthorized for %s", _su)
             return result
 
         if resp.status_code == 402:
             result.blocked = True
             result.note = "AgentQL: payment required or quota exceeded on their side."
-            log.warning("agentql_scrape: 402 for %s", url)
+            log.warning("agentql_scrape: 402 for %s", _su)
             return result
 
         if resp.status_code != 200:
             result.blocked = True
             result.note = f"AgentQL: HTTP {resp.status_code}"
-            log.warning("agentql_scrape: HTTP %s for %s", resp.status_code, url)
+            log.warning("agentql_scrape: HTTP %s for %s", resp.status_code, _su)
             return result
 
         data = resp.json()
@@ -182,18 +184,18 @@ def agentql_scrape(
 
         log.info(
             "agentql_scrape: %s → title=%r images=%d",
-            url, result.title, len(result.image_urls),
+            _su, result.title, len(result.image_urls),
         )
         return result
 
     except httpx.TimeoutException:
         result.blocked = True
         result.note = f"AgentQL: request timed out after {AGENTQL_TIMEOUT}s."
-        log.warning("agentql_scrape: timeout for %s", url)
+        log.warning("agentql_scrape: timeout for %s", _su)
         return result
 
     except Exception as exc:
         result.blocked = True
         result.note = f"AgentQL: unexpected error — {exc}"
-        log.warning("agentql_scrape: error for %s: %s", url, exc)
+        log.warning("agentql_scrape: error for %s: %s", _su, exc)
         return result

@@ -121,6 +121,13 @@ class Settings(BaseSettings):
     SCRAPE_TIMEOUT: int = 15
     # Maximum number of images to collect per scrape.
     SCRAPE_MAX_IMAGES: int = 20
+    # Max size (MB) of a single scraped/AgentQL image fetched at commit time.
+    # The guarded fetch streams the body and aborts once this cap is exceeded,
+    # so a hostile page can't OOM/fill-disk the worker with a huge "image".
+    SCRAPE_IMAGE_MAX_MB: int = 25
+    # Max size (MB) of an HTML page body read by the URL scraper.  Streamed with
+    # the same abort-on-cap guard; non-HTML/oversized responses are rejected.
+    SCRAPE_HTML_MAX_MB: int = 5
 
     # ---- Sharing (Phase 7) ----
     # Default expiry for new share links, in days.
