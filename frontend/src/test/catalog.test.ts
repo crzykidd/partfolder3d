@@ -6,6 +6,7 @@
  *  - Path prefix rewrite (rewritePath) — prefix set vs unset, trailing-slash,
  *    Windows vs Unix styles
  *  - ZIP poll state machine (mapBundleStatus, shouldContinuePolling)
+ *  - Grid column computation (computeCols)
  */
 
 import { describe, it, expect } from 'vitest'
@@ -19,6 +20,8 @@ import {
   rewriteLocalPath,
   mapBundleStatus,
   shouldContinuePolling,
+  computeCols,
+  GRID_GAP_PX,
 } from '@/lib/catalog-utils'
 
 // ---------------------------------------------------------------------------
@@ -416,5 +419,71 @@ describe('ZIP state machine flow', () => {
     const uiStatus = mapBundleStatus(backendStatus)
     expect(uiStatus).toBe('failed')
     expect(shouldContinuePolling(uiStatus)).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// computeCols — responsive grid column computation
+// ---------------------------------------------------------------------------
+
+describe('computeCols', () => {
+  it('uses the exported GRID_GAP_PX constant as default gap', () => {
+    // With gap=12 and minCardWidth=220: (800+12)/(220+12) = 812/232 ≈ 3.5 → 3
+    expect(computeCols(800, 220, GRID_GAP_PX)).toBe(3)
+    // Explicit gap matches default
+    expect(computeCols(800, 220)).toBe(3)
+  })
+
+  it('returns 1 for container width <= 0', () => {
+    expect(computeCols(0, 220)).toBe(1)
+    expect(computeCols(-1, 220)).toBe(1)
+  })
+
+  it('returns 1 when container is narrower than a single card', () => {
+    expect(computeCols(100, 220)).toBe(1)
+  })
+
+  it('compact mode: 3 cols at ~800px container', () => {
+    // MIN_CARD_WIDTH_COMPACT = 220
+    expect(computeCols(800, 220)).toBe(3)
+  })
+
+  it('compact mode: 2 cols at ~600px container', () => {
+    // (600+12)/(220+12) = 612/232 ≈ 2.6 → 2
+    expect(computeCols(600, 220)).toBe(2)
+  })
+
+  it('compact mode: 5 cols at ~1200px container', () => {
+    // (1200+12)/(220+12) = 1212/232 ≈ 5.2 → 5
+    expect(computeCols(1200, 220)).toBe(5)
+  })
+
+  it('full mode: 2 cols at ~800px container', () => {
+    // MIN_CARD_WIDTH_FULL = 340; (800+12)/(340+12) = 812/352 ≈ 2.3 → 2
+    expect(computeCols(800, 340)).toBe(2)
+  })
+
+  it('full mode: 1 col at ~600px container', () => {
+    // (600+12)/(340+12) = 612/352 ≈ 1.7 → 1
+    expect(computeCols(600, 340)).toBe(1)
+  })
+
+  it('full mode: 3 cols at ~1200px container', () => {
+    // (1200+12)/(340+12) = 1212/352 ≈ 3.4 → 3
+    expect(computeCols(1200, 340)).toBe(3)
+  })
+
+  it('scales monotonically with container width', () => {
+    const widths = [300, 500, 700, 900, 1100, 1400]
+    const cols = widths.map((w) => computeCols(w, 220))
+    for (let i = 1; i < cols.length; i++) {
+      expect(cols[i]).toBeGreaterThanOrEqual(cols[i - 1])
+    }
+  })
+
+  it('wider cards produce fewer columns', () => {
+    const compactCols = computeCols(900, 220)
+    const fullCols = computeCols(900, 340)
+    expect(compactCols).toBeGreaterThan(fullCols)
   })
 })

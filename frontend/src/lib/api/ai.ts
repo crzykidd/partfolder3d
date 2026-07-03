@@ -111,16 +111,33 @@ export const aiSuggestTags = (sessionId: string): Promise<AiTagSuggestionOut> =>
     { method: 'POST' },
   )
 
-export const aiCleanupDescription = (sessionId: string): Promise<AiTextOut> =>
+/**
+ * Optional overrides for AI cleanup and summarize.
+ *
+ * Pass the user's current typed-but-not-yet-saved values so the AI sees what
+ * is actually in the form, not the (potentially stale) persisted session values.
+ */
+export interface AiDescriptionRequest {
+  description?: string | null
+  title?: string | null
+}
+
+export const aiCleanupDescription = (
+  sessionId: string,
+  body: AiDescriptionRequest = {},
+): Promise<AiTextOut> =>
   apiFetch<AiTextOut>(
     `/api/import-sessions/${sessionId}/ai/cleanup-description`,
-    { method: 'POST' },
+    { method: 'POST', body: JSON.stringify(body) },
   )
 
-export const aiSummarize = (sessionId: string): Promise<AiTextOut> =>
+export const aiSummarize = (
+  sessionId: string,
+  body: AiDescriptionRequest = {},
+): Promise<AiTextOut> =>
   apiFetch<AiTextOut>(
     `/api/import-sessions/${sessionId}/ai/summarize`,
-    { method: 'POST' },
+    { method: 'POST', body: JSON.stringify(body) },
   )
 
 export interface AiStatusOut {

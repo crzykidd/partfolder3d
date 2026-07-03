@@ -14,6 +14,7 @@ and never returned in any response. ``has_key`` indicates whether a key is set.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Annotated
 
@@ -283,11 +284,16 @@ async def test_ai_connection(
         )
 
     try:
-        result = _dispatch(
+        # Run _dispatch in a thread so a slow/stuck provider never blocks the event
+        # loop.  Use an aggressive 10-second timeout — this is a connectivity check,
+        # not a real inference call.
+        result = await asyncio.to_thread(
+            _dispatch,
             ephemeral,
             system="You are a helpful assistant.",
             user_msg="Reply with the single word 'ok'.",
             max_tokens=10,
+            timeout=10.0,
         )
         if result is not None:
             return TestConnectionResponse(ok=True)

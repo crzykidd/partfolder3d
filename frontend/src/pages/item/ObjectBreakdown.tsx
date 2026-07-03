@@ -5,12 +5,19 @@
  * for consistency with the 3MF collapsible detail panels in DownloadsPanel.
  * Files with est_method='sliced' (3MF) are handled separately by ThreeMfPanel;
  * this component covers STL/OBJ (est_method='volume') breakdown.
+ *
+ * Pending model files are split by type:
+ *  - .3mf: not mesh-analyzed (says so plainly; no false "pending")
+ *  - .stl/.obj/.ply: correlate with the analyze_item job to show running/queued/failed/no-job
  */
 
 import { useState } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 import * as api from '@/lib/api'
+import type { ItemJobSummary } from '@/lib/api/items'
+import { is3mf } from '@/lib/file-tree'
 
 // ---------------------------------------------------------------------------
 // Object breakdown section (Phase 16)
@@ -18,6 +25,8 @@ import * as api from '@/lib/api'
 
 export interface ObjectBreakdownProps {
   item: api.ItemDetail
+  /** Active + recent-failed jobs from GET /api/items/{key}/jobs, polled by ItemPage. */
+  jobs: ItemJobSummary[]
 }
 
 /** Small color swatch when a hex code is available. */
@@ -227,7 +236,129 @@ function AnalysisFileCard({ file }: { file: api.FileOut }) {
   )
 }
 
-export function ObjectBreakdownSection({ item }: ObjectBreakdownProps) {
+// ---------------------------------------------------------------------------
+// Pending-state sub-components
+// ---------------------------------------------------------------------------
+
+const JOBS_LINK = '/admin/activity/jobs'
+
+function JobsLink() {
+  return (
+    <Link
+      to={JOBS_LINK}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 3,
+        color: 'var(--aurora-accent)',
+        textDecoration: 'none',
+        fontSize: 11,
+      }}
+    >
+      View in Jobs
+      <ExternalLink size={10} />
+    </Link>
+  )
+}
+
+/** Progress bar (0–100 %). */
+function ProgressBar({ value }: { value: number }) {
+  return (
+    <div
+      style={{
+        height: 4,
+        borderRadius: 2,
+        background: 'var(--aurora-glass-border)',
+        overflow: 'hidden',
+        width: '100%',
+        maxWidth: 200,
+      }}
+    >
+      <div
+        style={{
+          height: '100%',
+          width: `${Math.min(100, Math.max(0, value))}%`,
+          background: 'var(--aurora-accent)',
+          borderRadius: 2,
+          transition: 'width 0.3s ease',
+        }}
+      />
+    </div>
+  )
+}
+
+/** Pending status banner for mesh files (stl/obj/ply) — correlates with analyze_item job. */
+function MeshPendingStatus({ jobs }: { jobs: ItemJobSummary[] }) {
+  // Find the most recent analyze_item job (jobs are returned newest-first by the endpoint)
+  const analyzeJob = jobs.find((j) => j.type === 'analyze_item')
+
+  if (analyzeJob) {
+    if (analyzeJob.status === 'running') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, color: 'var(--aurora-text-dim)' }}>
+              Analyzing… {analyzeJob.progress}%
+            </span>
+            <JobsLink />
+          </div>
+          <ProgressBar value={analyzeJob.progress} />
+        </div>
+      )
+    }
+
+    if (analyzeJob.status === 'queued') {
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--aurora-text-dim)' }}>
+            Analysis queued
+          </span>
+          <JobsLink />
+        </div>
+      )
+    }
+
+    if (analyzeJob.status === 'failed') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>
+              Analysis failed
+            </span>
+            <JobsLink />
+          </div>
+          {analyzeJob.error && (
+            <span
+              style={{
+                fontSize: 11,
+                color: 'var(--aurora-muted)',
+                fontFamily: 'monospace',
+                wordBreak: 'break-all',
+              }}
+            >
+              {analyzeJob.error}
+            </span>
+          )}
+          <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>
+            Use <strong style={{ color: 'var(--aurora-text)' }}>Rescan disk</strong> in
+            Files &amp; Downloads above to re-queue it.
+          </span>
+        </div>
+      )
+    }
+  }
+
+  // No job found
+  return (
+    <p style={{ fontSize: 12, color: 'var(--aurora-muted)', fontStyle: 'italic', margin: 0 }}>
+      Analysis hasn't run yet — use{' '}
+      <strong style={{ fontStyle: 'normal', color: 'var(--aurora-text)' }}>Rescan disk</strong>{' '}
+      in Files &amp; Downloads above to queue it.
+    </p>
+  )
+}
+
+export function ObjectBreakdownSection({ item, jobs }: ObjectBreakdownProps) {
   // Only show STL/OBJ model files here; sliced 3MF is handled by ThreeMfPanel inline in the tree
   const analyzedFiles = item.files.filter(
     (f) =>
@@ -238,6 +369,10 @@ export function ObjectBreakdownSection({ item }: ObjectBreakdownProps) {
   const pendingFiles = item.files.filter(
     (f) => f.role === 'model' && f.object_analysis == null,
   )
+
+  // Split pending files: 3MF (read, not mesh-analyzed) vs mesh (stl/obj/ply — analyzable)
+  const pending3mfFiles = pendingFiles.filter((f) => is3mf(f.path))
+  const pendingMeshFiles = pendingFiles.filter((f) => !is3mf(f.path))
 
   // For sliced 3MFs handled in the file tree, also count unsliced 3MFs
   const slicedCount = item.files.filter(
@@ -252,11 +387,27 @@ export function ObjectBreakdownSection({ item }: ObjectBreakdownProps) {
     )
   }
 
+  // No analyzed or sliced files yet — render per-type pending messages
   if (analyzedFiles.length === 0 && slicedCount === 0) {
     return (
-      <p style={{ fontSize: 12, color: 'var(--aurora-muted)', fontStyle: 'italic', margin: 0 }}>
-        Analysis pending — will appear after the background worker runs.
-      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* 3MF pending: not mesh-analyzed by design */}
+        {pending3mfFiles.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <p style={{ fontSize: 12, color: 'var(--aurora-muted)', fontStyle: 'italic', margin: 0 }}>
+              {pending3mfFiles.length === 1
+                ? `${pending3mfFiles[0].path} is`
+                : `${pending3mfFiles.length} .3mf files are`}{' '}
+              read, not mesh-analyzed — slice details (if any) appear inline in{' '}
+              <strong style={{ fontStyle: 'normal' }}>Files &amp; Downloads</strong> above.
+            </p>
+          </div>
+        )}
+        {/* Mesh pending: show job status */}
+        {pendingMeshFiles.length > 0 && (
+          <MeshPendingStatus jobs={jobs} />
+        )}
+      </div>
     )
   }
 

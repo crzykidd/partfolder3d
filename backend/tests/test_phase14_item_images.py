@@ -262,6 +262,42 @@ async def test_upload_image_creates_row_and_file(
 
 
 @pytest.mark.asyncio
+async def test_upload_image_captured_source(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+) -> None:
+    """POST /api/items/{key}/images?source=captured creates an Image row with source=captured."""
+    csrf = await _setup_and_login(client, tmp_path)
+    _, item = await _create_library_and_item(client, tmp_path, csrf, item_title="Capture Test")
+    item_key = item["key"]
+
+    png_bytes = (
+        b"\x89PNG\r\n\x1a\n"
+        b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
+        b"\x00\x11\x00\x07\x18\xd8N\xd3\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+    resp = await client.post(
+        f"/api/items/{item_key}/images?source=captured",
+        files={"file": ("capture.png", io.BytesIO(png_bytes), "image/png")},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert data["source"] == "captured"
+    assert data["path"].startswith("images/capture_")
+
+    # Verify DB row has source=captured
+    result = await db_session.execute(
+        select(Image).where(Image.item_id == item["id"], Image.source == ImageSource.captured)
+    )
+    rows = result.scalars().all()
+    assert len(rows) == 1
+
+
+@pytest.mark.asyncio
 async def test_upload_image_rejects_non_image(
     client: AsyncClient,
     tmp_path: Path,

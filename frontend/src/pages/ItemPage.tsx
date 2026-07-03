@@ -13,7 +13,7 @@
  * Styling: Aurora aesthetic — glass cards, teal accent (#0FA4AB), --aurora-* CSS vars.
  */
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Trash2, Upload } from 'lucide-react'
@@ -46,6 +46,24 @@ export function ItemPage() {
     enabled: !!key,
   })
 
+  // Single source of the item's jobs (active queued/running + recent failed) —
+  // drives BOTH the ObjectBreakdown status and the file-list auto-refresh.
+  // Poll every 3 s only while there's active work.
+  const { data: itemJobs } = useQuery({
+    queryKey: ['item-jobs', key],
+    queryFn: () => api.listItemJobs(key!),
+    enabled: !!key,
+    refetchInterval: (query) =>
+      query.state.data?.some((j) => j.status === 'queued' || j.status === 'running')
+        ? 3000
+        : false,
+  })
+  // Active (in-progress) jobs only — a failed job must not keep this non-empty
+  // forever (that would break the "refresh when work finishes" effect below).
+  const activeJobs = itemJobs?.filter(
+    (j) => j.status === 'queued' || j.status === 'running',
+  )
+
   const setDefaultMutation = useMutation({
     mutationFn: (imageId: number) => api.setDefaultImage(key!, imageId),
     onSuccess: (updatedItem) => {
@@ -70,6 +88,66 @@ export function ItemPage() {
       void queryClient.invalidateQueries({ queryKey: ['item', key] })
     },
   })
+
+  // ---- File management mutations (issues #18/#19) ----
+  const [deletingFileId, setDeletingFileId] = useState<number | null>(null)
+  const [renamingFileId, setRenamingFileId] = useState<number | null>(null)
+  const [uploadFileError, setUploadFileError] = useState<string | null>(null)
+
+  const deleteFileMutation = useMutation({
+    mutationFn: async (fileId: number) => {
+      setDeletingFileId(fileId)
+      await api.deleteItemFile(key!, fileId)
+    },
+    onSuccess: () => {
+      setDeletingFileId(null)
+      void queryClient.invalidateQueries({ queryKey: ['item', key] })
+    },
+    onError: () => {
+      setDeletingFileId(null)
+    },
+  })
+
+  const renameFileMutation = useMutation({
+    mutationFn: ({ fileId, name }: { fileId: number; name: string }) => {
+      setRenamingFileId(fileId)
+      return api.renameItemFile(key!, fileId, name)
+    },
+    onSettled: () => {
+      setRenamingFileId(null)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['item', key] })
+    },
+  })
+
+  const uploadFileMutation = useMutation({
+    mutationFn: (file: File) => api.uploadItemFile(key!, file),
+    onSuccess: () => {
+      setUploadFileError(null)
+      void queryClient.invalidateQueries({ queryKey: ['item', key] })
+    },
+    onError: (e) => {
+      setUploadFileError(e instanceof Error ? e.message : 'Upload failed.')
+    },
+  })
+
+  const rescanMutation = useMutation({
+    mutationFn: () => api.rescanItem(key!),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['item', key] })
+      void queryClient.invalidateQueries({ queryKey: ['item-jobs', key] })
+    },
+  })
+
+  const prevActiveJobCount = useRef(0)
+  useEffect(() => {
+    const current = activeJobs?.length ?? 0
+    if (prevActiveJobCount.current > 0 && current === 0) {
+      void queryClient.invalidateQueries({ queryKey: ['item', key] })
+    }
+    prevActiveJobCount.current = current
+  }, [activeJobs, key, queryClient])
 
   // Delete item (moves the directory to trash server-side, removes the DB row)
   const [confirmDeleteItem, setConfirmDeleteItem] = useState(false)
@@ -116,7 +194,7 @@ export function ItemPage() {
         display: 'flex',
         flexDirection: 'column',
         gap: 16,
-        maxWidth: 900,
+        maxWidth: 'min(1280px, 94vw)',
         margin: '0 auto',
         color: 'var(--aurora-text)',
       }}
@@ -263,14 +341,32 @@ export function ItemPage() {
       </AuroraSection>
 
       {/* Downloads — file tree with type-aware affordances and inline 3MF panels */}
-      <AuroraSection title="Files &amp; Downloads">
-        <DownloadsSection itemKey={item.key} files={item.files} />
+      <AuroraSection
+        title="Files &amp; Downloads"
+        collapsible
+        storageKey="partfolder3d-files-collapsed"
+        headerRight={`${item.files.length} file${item.files.length === 1 ? '' : 's'}`}
+      >
+        <DownloadsSection
+          itemKey={item.key}
+          files={item.files}
+          isOwner={isOwnerOrAdmin}
+          onDeleteFile={(fileId) => deleteFileMutation.mutate(fileId)}
+          onRenameFile={(fileId, name) => renameFileMutation.mutate({ fileId, name })}
+          onUploadFile={(file) => uploadFileMutation.mutate(file)}
+          onRescan={() => rescanMutation.mutate()}
+          isDeletingFileId={deletingFileId}
+          isRenamingFileId={renamingFileId}
+          isUploadingFile={uploadFileMutation.isPending}
+          isRescanning={rescanMutation.isPending}
+          uploadFileError={uploadFileError}
+        />
       </AuroraSection>
 
       {/* Object breakdown (Phase 16) — show when item has model files */}
       {item.files.some((f) => f.role === 'model') && (
         <AuroraSection title="Object Breakdown">
-          <ObjectBreakdownSection item={item} />
+          <ObjectBreakdownSection item={item} jobs={itemJobs ?? []} />
         </AuroraSection>
       )}
 

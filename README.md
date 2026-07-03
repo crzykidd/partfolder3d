@@ -11,7 +11,7 @@
 </div>
 
 > [!WARNING]
-> **Early alpha (v0.2.5) — under active development.** This is an early release: expect rough
+> **Early alpha (v0.3.0) — under active development.** This is an early release: expect rough
 > edges, and **breaking changes can land between releases** (database schema, config, or API).
 > It's usable and published — pull the images and follow [Getting started](#getting-started) — but
 > **pin a specific version, back up your data, and read the release notes before upgrading.**
@@ -19,7 +19,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.2.5-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.3.0-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![Stage](https://img.shields.io/badge/stage-alpha-orange)
 ![Code](https://img.shields.io/badge/code-yes-brightgreen)
@@ -31,6 +31,21 @@
 ---
 
 ## What's New
+
+### v0.3.0 (2026-07-03)
+
+Big feature + polish release. **Bulk import** — commit many pending imports at once, with a
+configurable default library and inbox auto-resolution. **Item file management** — upload,
+rename, and delete individual files right from the item page, plus a **Rescan disk** button.
+**3D viewer** — capture a snapshot of the current view as an item image (great for 3MF, which
+has no server render), and the viewer now opens as a proper centered overlay with
+expand-to-full-window and zoom-to-cursor. **Catalog** — the grid adapts its columns to your
+window, a **Compact / Full** toggle switches between dense and whole-image views, and page size
+is configurable. **Object Breakdown** shows real analysis job status (running %/queued/failed)
+instead of a vague "pending" and is honest about 3MF. **Worker resource limits** — new `.env`
+settings + docker CPU/memory caps so a big import can't overrun a small host. Plus a
+release-notes popup, an app-wide error boundary, wider item pages, collapsible/scrollable file
+lists, and import-wizard AI fixes. See [CHANGELOG.md](CHANGELOG.md) for the full list.
 
 ### v0.2.5 (2026-07-02)
 
@@ -125,7 +140,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.2.5 alpha) — see the
+> The full feature set below is **built and released** (v0.3.0 alpha) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -389,7 +404,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is at the **alpha** stage (v0.2.5).
+Honest snapshot — this project is at the **alpha** stage (v0.3.0).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -554,6 +569,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — alpha (v0.2.5) · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — alpha (v0.3.0) · built by <code>crzykidd</code></sub>
 
 </div>

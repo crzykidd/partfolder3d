@@ -252,6 +252,43 @@ async def _inbox_scan_core(ctx: dict) -> None:
                 log.warning("inbox_scan: no admin user found; cannot create sessions")
                 break
 
+            # Resolve default import library for this session.
+            # Order: import.default_library_id setting → sole enabled library → None.
+            import json as _json  # noqa: PLC0415
+
+            from app.models.library import Library  # noqa: PLC0415
+            from app.models.setting import Setting  # noqa: PLC0415
+
+            resolved_library_id: int | None = None
+
+            # (a) default-library setting
+            setting_res = await db.execute(
+                sa.select(Setting).where(Setting.key == "import.default_library_id")
+            )
+            setting_row = setting_res.scalar_one_or_none()
+            if setting_row is not None:
+                try:
+                    raw_id = _json.loads(setting_row.value)
+                    if isinstance(raw_id, int):
+                        lib_chk = await db.execute(
+                            sa.select(Library).where(
+                                Library.id == raw_id, Library.enabled.is_(True)
+                            )
+                        )
+                        if lib_chk.scalar_one_or_none() is not None:
+                            resolved_library_id = raw_id
+                except Exception:
+                    pass
+
+            # (b) sole enabled library
+            if resolved_library_id is None:
+                all_libs_res = await db.execute(
+                    sa.select(Library).where(Library.enabled.is_(True))
+                )
+                all_libs = all_libs_res.scalars().all()
+                if len(all_libs) == 1:
+                    resolved_library_id = all_libs[0].id
+
             # Create an ImportSession for this inbox folder
             session = ImportSession(
                 status=ImportSessionStatus.draft,
@@ -260,6 +297,7 @@ async def _inbox_scan_core(ctx: dict) -> None:
                 inbox_folder=folder_str,
                 suggested_title=entry.name,
                 confirmed_title=entry.name,
+                library_id=resolved_library_id,
                 created_by_id=admin.id,
             )
             db.add(session)

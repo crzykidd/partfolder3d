@@ -15,6 +15,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { ThemeProvider } from '@/components/ThemeProvider'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { AuthProvider } from '@/context/AuthContext'
 import { AuthGuard, AdminGuard } from '@/components/AuthGuard'
 import { AuroraShell } from '@/components/shell/AuroraShell'
@@ -111,6 +112,7 @@ const queryClient = new QueryClient({
 function App() {
   return (
     <ThemeProvider defaultTheme="system" storageKey="partfolder3d-theme">
+      <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <AuthProvider>
@@ -256,6 +258,7 @@ function App() {
           </AuthProvider>
         </BrowserRouter>
       </QueryClientProvider>
+      </ErrorBoundary>
     </ThemeProvider>
   )
 }

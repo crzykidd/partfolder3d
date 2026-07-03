@@ -64,7 +64,27 @@ export function buildFileTree(files: FileOut[]): FileTreeNode[] {
     current.push({ type: 'file', name: parts[parts.length - 1], file })
   }
 
+  // Float 3D-renderable model files (stl/obj/3mf/ply) to the top of each level.
+  sortModelsFirst(root)
   return root
+}
+
+/** Extensions treated as 3D model files, shown first in the file tree. */
+const MODEL_EXTS = ['.stl', '.obj', '.3mf', '.ply']
+
+export function isModelFile(name: string): boolean {
+  const lower = name.toLowerCase()
+  return MODEL_EXTS.some((ext) => lower.endsWith(ext))
+}
+
+/** Stable sort: model files rank first; folders + other files keep their order. */
+function sortModelsFirst(nodes: FileTreeNode[]): void {
+  const rank = (n: FileTreeNode): number =>
+    n.type === 'file' && isModelFile(n.name) ? 0 : 1
+  nodes.sort((a, b) => rank(a) - rank(b))
+  for (const n of nodes) {
+    if (n.type === 'folder') sortModelsFirst(n.children)
+  }
 }
 
 // ---------------------------------------------------------------------------

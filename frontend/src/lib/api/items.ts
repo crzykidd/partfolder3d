@@ -342,6 +342,10 @@ export const listItems = (params: ItemListParams = {}): Promise<PaginatedItems> 
 export const getItem = (key: string): Promise<ItemDetail> =>
   apiFetch<ItemDetail>(`/api/items/${key}`)
 
+/** Re-inventory the item's folder on disk + resync the sidecar (per-item rescan). */
+export const rescanItem = (key: string): Promise<ItemDetail> =>
+  apiFetch<ItemDetail>(`/api/items/${key}/rescan`, { method: 'POST' })
+
 export const favoriteItem = (key: string): Promise<FavoriteOut> =>
   apiFetch<FavoriteOut>(`/api/items/${key}/favorite`, { method: 'POST' })
 
@@ -354,10 +358,15 @@ export const setDefaultImage = (key: string, imageId: number): Promise<ItemDetai
     body: JSON.stringify({ image_id: imageId }),
   })
 
-export const uploadItemImage = (key: string, file: File): Promise<ImageOut> => {
+export const uploadItemImage = (
+  key: string,
+  file: File,
+  source: 'uploaded' | 'captured' = 'uploaded',
+): Promise<ImageOut> => {
   const form = new FormData()
   form.append('file', file)
-  return apiFetchForm<ImageOut>(`/api/items/${key}/images`, form)
+  const qs = source !== 'uploaded' ? `?source=${source}` : ''
+  return apiFetchForm<ImageOut>(`/api/items/${key}/images${qs}`, form)
 }
 
 // Delete an item from the catalog. The server moves its directory to
@@ -491,6 +500,41 @@ export const pollZip = (key: string, bundleId: string): Promise<BundleOut> =>
 export const fileDownloadUrl = (key: string, filePath: string): string =>
   `/api/items/${key}/files/${filePath}`
 
+export const uploadItemFile = (key: string, file: File): Promise<FileOut> => {
+  const form = new FormData()
+  form.append('file', file)
+  return apiFetchForm<FileOut>(`/api/items/${key}/files`, form)
+}
+
+export const deleteItemFile = (key: string, fileId: number): Promise<void> =>
+  apiFetch<void>(`/api/items/${key}/files/${fileId}`, { method: 'DELETE' })
+
+export const renameItemFile = (
+  key: string,
+  fileId: number,
+  name: string,
+): Promise<FileOut> =>
+  apiFetch<FileOut>(`/api/items/${key}/files/${fileId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  })
+
+/** Slim job record from GET /api/items/{key}/jobs — active or recent failed. */
+export interface ItemJobSummary {
+  id: string
+  type: string
+  status: string
+  progress: number
+  error: string | null
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+
+/** Return active (queued/running) + recent non-archived failed jobs for an item. */
+export const listItemJobs = (key: string): Promise<ItemJobSummary[]> =>
+  apiFetch<ItemJobSummary[]>(`/api/items/${key}/jobs`)
+
 /** URL for streaming the ready ZIP bundle (use as href or window.open). */
 export const zipDownloadUrl = (key: string, bundleId: string): string =>
   `/api/items/${key}/zip/${bundleId}?download=true`
@@ -519,6 +563,10 @@ export const approvePendingTag = (id: number): Promise<TagApproveOut> =>
   apiFetch<TagApproveOut>(`/api/tags/${id}/approve`, {
     method: 'POST',
   })
+
+// ---------------------------------------------------------------------------
+// Item jobs (for ObjectBreakdown analysis status)
+// ---------------------------------------------------------------------------
 
 export const listAllTags = (params: {
   q?: string

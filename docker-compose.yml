@@ -100,6 +100,12 @@ services:
     user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped
     command: ["python", "worker.py"]
+    # Hard resource ceiling so a bulk-import job flood can't overrun the host.
+    # WORKER_CPUS confines the worker to N cores (leaving the rest for the API +
+    # OS); WORKER_MEM_LIMIT OOM-kills the worker if it exceeds this, rather than
+    # letting the whole machine run out of RAM. Tune both in .env.
+    cpus: ${WORKER_CPUS:-2}
+    mem_limit: ${WORKER_MEM_LIMIT:-3g}
     env_file:
       - path: .env
         required: false

@@ -1,5 +1,8 @@
+import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Maximize2, X } from 'lucide-react'
 
 import * as api from '@/lib/api'
 
@@ -19,6 +22,9 @@ export interface ItemMetadataProps {
 
 export function ItemMetadata({ item, itemKey, isOwnerOrAdmin }: ItemMetadataProps) {
   const queryClient = useQueryClient()
+  const [descExpanded, setDescExpanded] = useState(false)
+  // A long description gets a capped, scrollable box + an "Expand" modal.
+  const descLong = (item.description?.length ?? 0) > 280
 
   // Phase 15: manual modified-override mutation
   const overrideMutation = useMutation({
@@ -229,11 +235,44 @@ export function ItemMetadata({ item, itemKey, isOwnerOrAdmin }: ItemMetadataProp
         </div>
       )}
 
-      {/* Description */}
+      {/* Description — capped + scrollable when long, with an Expand modal */}
       {item.description && (
-        <p style={{ fontSize: 12, color: 'var(--aurora-text-dim)', lineHeight: 1.6, whiteSpace: 'pre-wrap', margin: 0 }}>
-          {item.description}
-        </p>
+        <div>
+          <div
+            style={{
+              fontSize: 12,
+              color: 'var(--aurora-text-dim)',
+              lineHeight: 1.6,
+              whiteSpace: 'pre-wrap',
+              maxHeight: descLong ? 220 : undefined,
+              overflowY: descLong ? 'auto' : undefined,
+              paddingRight: descLong ? 6 : undefined,
+            }}
+          >
+            {item.description}
+          </div>
+          {descLong && (
+            <button
+              onClick={() => setDescExpanded(true)}
+              style={{
+                marginTop: 8,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--aurora-accent)',
+                fontSize: 11,
+                fontWeight: 600,
+                padding: 0,
+              }}
+            >
+              <Maximize2 size={11} />
+              Expand
+            </button>
+          )}
+        </div>
       )}
 
       {/* Timestamps */}
@@ -243,6 +282,82 @@ export function ItemMetadata({ item, itemKey, isOwnerOrAdmin }: ItemMetadataProp
           <> · Updated {formatDate(item.updated_at)}</>
         )}
       </div>
+
+      {/* Expanded description modal — portaled so the card's backdrop-filter can't trap it */}
+      {descExpanded && item.description &&
+        createPortal(
+          <div
+            onClick={() => setDescExpanded(false)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 9999,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(5,13,28,0.80)',
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+              padding: 16,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: 'var(--aurora-card)',
+                border: '1px solid var(--aurora-card-border)',
+                borderRadius: 14,
+                width: '100%',
+                maxWidth: 720,
+                maxHeight: '85vh',
+                display: 'flex',
+                flexDirection: 'column',
+                color: 'var(--aurora-text)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  padding: '16px 20px',
+                  borderBottom: '1px solid var(--aurora-divider)',
+                }}
+              >
+                <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>{item.title}</h2>
+                <button
+                  onClick={() => setDescExpanded(false)}
+                  aria-label="Close description"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--aurora-muted)',
+                    padding: 4,
+                    display: 'flex',
+                    flexShrink: 0,
+                  }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div
+                style={{
+                  padding: '16px 20px',
+                  overflowY: 'auto',
+                  fontSize: 13,
+                  lineHeight: 1.65,
+                  color: 'var(--aurora-text-dim)',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {item.description}
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }

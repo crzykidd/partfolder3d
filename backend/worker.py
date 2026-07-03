@@ -69,6 +69,7 @@ SCHEDULED_JOB_REGISTRY: dict[str, tuple[str, str]] = {
 # ---------------------------------------------------------------------------
 # Task imports (from app.worker.tasks.*)
 # ---------------------------------------------------------------------------
+from app.config import settings  # noqa: E402
 from app.worker.tasks.analysis import analyze_item  # noqa: E402
 from app.worker.tasks.archive import extract_archives  # noqa: E402
 from app.worker.tasks.bundles import build_zip_bundle  # noqa: E402
@@ -254,7 +255,7 @@ class WorkerSettings:
     on_startup = startup
 
     redis_settings = get_redis_settings()
-    max_jobs = 10
+    max_jobs = settings.WORKER_MAX_JOBS
     job_timeout = 600  # 10 minutes (render can be slow)
 
 

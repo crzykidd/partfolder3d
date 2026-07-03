@@ -20,6 +20,162 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-07-03
+
+### Added
+
+- **Worker resource limits (env-configurable, small defaults)** — the background worker no
+  longer runs a fixed 10 jobs at once, so a bulk import (or a big startup backlog) can't
+  overrun the host. New settings bound how hard it hits the machine: `WORKER_MAX_JOBS`
+  (default **2**), `RENDER_CONCURRENCY` (default **1** — renders are the heaviest job, mesh +
+  vtk-osmesa subprocess), `ANALYZE_CONCURRENCY` (default **2**), plus **hard docker-compose
+  caps** `WORKER_CPUS` (default 2) and `WORKER_MEM_LIMIT` (default 3g) that confine the worker
+  container so it gets OOM-/CPU-limited instead of taking down the whole box. All documented
+  with per-setting risk notes in `.env.example`. (Closes #29)
+- **Item page uses more of a wide screen** — the detail page cap widened from 900px to
+  `min(1280px, 94vw)` so the image + metadata columns scale up on larger displays.
+- **Long descriptions no longer dominate the item page** — a long description is shown in a
+  capped, scrollable box with an **Expand** button that opens the full text in a modal.
+- **Responsive catalog grid** — the grid column count now adapts to the window width
+  (ResizeObserver): narrowing removes columns, widening adds them (min card width 220px
+  compact / 340px full), instead of a hardcoded 3 columns.
+- **Compact / Full catalog grid mode** — a toggle in the catalog toolbar (grid view). Compact
+  is the dense cropped layout; Full shows uncropped images (~260px, contain fit). Persisted to
+  localStorage (`pf3d-catalog-grid-mode`).
+- **Configurable catalog page size** — a "Per page: 20 / 40 / 60 / 100" selector replaces the
+  hardcoded 20; changing it resets to page 1. Persisted to localStorage (`pf3d-catalog-per-page`).
+- **Image carousel "Renders" filter** — when an item has a mix of images, a **Renders**
+  toggle next to the image counter filters the carousel to app-generated renders
+  (`source === 'render'`) so you can quickly page through just the renders.
+- **3D viewer "expand to full window"** — a maximize button (top-right, next to Close) grows
+  the "View in 3D" viewer to fill the whole browser window; the same button restores it.
+- **Files & Downloads is collapsible + scrollable** — the section header now toggles the
+  panel open/closed, and the collapsed state is remembered in the browser (localStorage) so
+  it stays that way across item pages until you change it. The file list also scrolls
+  (capped height) so items with many files no longer run off the section. The header shows
+  the **file count**, model files (**stl/obj/3mf/ply**) sort to the **top** of each folder,
+  and the **`images` folder starts collapsed** (its contents already show in the carousel).
+- **"Rescan disk" button on the item page** — the Files & Downloads panel now has a Rescan
+  button (owner-only) that re-inventories the item's folder on disk and resyncs the sidecar
+  via the reconcile engine, then refreshes the page. Per-item rescans always apply changes
+  automatically (no review queue), so on-disk edits show up immediately without waiting for
+  the daily scan.
+- **App-wide error boundary** — a component crash now shows a readable "Something went wrong"
+  screen (with Reload and "Reset app data & reload" actions) instead of blanking the entire
+  app. Also fixed a crash where the release-notes popup shared a React Query cache key with the
+  version page (object vs string), which blanked the app on load after an upgrade.
+- **Hard-delete empty library + re-enable disabled library** (issue #11) — two new admin
+  actions fill the soft-delete gap.  A disabled library row in the admin Libraries page now
+  shows **Re-enable** (restores `enabled = true` instantly) and **Delete permanently**.
+  Delete permanently is guarded: if the library still has assets the UI shows the count and
+  a message directing the user to issue #25 (move-assets-between-libraries, coming later);
+  if the library is empty a confirmation dialog is shown and the row is hard-deleted from
+  the database.  The `GET /api/libraries` response now includes `item_count` per library
+  so the frontend always knows the count without an extra fetch.
+  New endpoints: `POST /api/libraries/{id}/enable` (re-enable) and
+  `DELETE /api/libraries/{id}/purge` (hard-delete, guarded).
+
+- **Release-notes popup** (issue #24) — after an upgrade, authenticated users
+  see a dismissible "What's New" modal once on their first app load at the new
+  version.  The modal is skipped on first-ever use (no prior seen-version) and
+  does not reappear until the next upgrade.  The last-seen version is stored in
+  browser localStorage (`partfolder3d-seen-version`).  Release blurbs live in
+  `frontend/src/lib/releaseNotes.ts`; the release-prep process should add a
+  new entry there when bumping the version.  The modal includes a "View full
+  release notes" link to the GitHub release page.
+- **3D viewer capture** — owners can now save a snapshot of the current 3D viewer
+  viewpoint as an item image.  A camera-icon "Save view" button appears in the top-left
+  of the viewer overlay (gated on ownership); each click captures the WebGL canvas frame
+  and saves it as a new `Image` row with `source=captured` — multiple captures per item
+  are supported, and any can be promoted to the default thumbnail via the existing
+  set-default flow.  Especially useful for 3MF files, which have no server-side render and
+  may lack an embedded thumbnail.  A new `ImageSource.captured` enum value and Alembic
+  migration 0022 back the provenance.  (Closes #21)
+- **Item file management** — owners can now upload, rename, and delete individual files
+  from the "Files & Downloads" panel on any item page without a full re-scan.  Each file
+  row gains a rename button (inline edit, Enter to confirm, Escape to cancel) and a
+  two-step trash-can delete.  An "Upload file" control at the bottom of the panel accepts
+  model files, archives, G-code, and documents; the backend sanitizes the filename,
+  resolves collisions with a counter suffix, infers file role from the extension, and
+  enqueues the standard analyze + render pipeline.  PATCH enforces path-traversal and
+  collision guards; DELETE is best-effort on disk.  All three operations sync the item
+  sidecar.  (Closes #19, part of #18)
+- **Extraction progress reflected without a manual reload** — `extract_archives` now
+  creates a Job row at the start of the task (type `"extract_archives"`, linked to the
+  item) and marks it succeeded or failed when done.  The item page polls
+  `GET /api/items/{key}/jobs` and auto-invalidates the item query when active jobs
+  drop to zero, so the file list updates as soon as extraction finishes.  (Part of #18)
+- **`render` preference on import-session commit paths** — `POST /api/import-sessions/{id}/commit`
+  now accepts an optional JSON body (`CommitOptions`) with `render: "auto" | "off"` (default
+  `"auto"`); `POST /api/import-sessions/bulk-commit` gains the same field on `BulkCommitRequest`.
+  `"off"` suppresses server-side render enqueueing for the session/batch entirely — useful for
+  scripted bulk migrations where renders are deferred or triggered later via browser capture.
+  `"auto"` preserves existing behaviour (still gated by the instance `render.mode` setting).
+  Omitting the body/field is fully backward-compatible. (Closes #15)
+- **Bulk commit endpoint** (`POST /api/import-sessions/bulk-commit`) — commits
+  multiple pending-wizard import sessions in one call.  Pass `session_ids` (list
+  of UUIDs) or `null` to target all visible pending-wizard sessions.  An optional
+  `library_id` override applies to every session in the batch.  Library resolution
+  per session: (a) request override, (b) session's own `library_id`, (c) new
+  `import.default_library_id` instance setting, (d) sole enabled library, (e) skip
+  with reason.  Each session runs in its own isolated transaction — one failure does
+  not roll back others.  Returns `{ total, committed, skipped, errors }` for
+  full partial-success reporting.  (Issue #15)
+- **Default import library setting** (`import.default_library_id`) — admin can
+  configure a default library via Settings.  Used by bulk commit and the inbox
+  scanner when a session has no explicit library set.  Validates that the referenced
+  library exists and is enabled; accepts null to clear.
+- **"Commit ready" button on `/imports`** — one-click bulk commit for all pending
+  inbox sessions visible to the current user.  If multiple libraries exist and no
+  default is configured, a library-picker modal appears before submitting.  Shows a
+  partial-success summary (committed N/M; reasons for skips/errors).
+
+### Changed
+
+- `GET /api/items/{key}/jobs` (new endpoint) returns active (queued/running) plus
+  non-archived failed jobs for an item. `ItemJobOut` includes `progress` and `error`.
+  `ItemPage` polls this endpoint every 3 s and threads the results into
+  `ObjectBreakdownSection`.
+
+### Fixed
+
+- **3D viewer overlay, sizing, close, and zoom** — the "View in 3D" window now
+  renders through a portal to `document.body`, so it's a true centered overlay
+  instead of being trapped inline at the bottom of the page by an Aurora card's
+  `backdrop-filter` (which also pushed its top controls under the nav bar). It's
+  capped (`min(90vw,1100px)` × `min(82vh,760px)`) so it no longer dominates large
+  displays, the close control is a clear **X** (top-right; Esc/backdrop also close),
+  and OrbitControls now uses **zoom-to-cursor** + faster pan so you can zoom in on
+  one side/object to frame a clean capture. Owner-only **Save view** is unchanged.
+- **Import wizard AI buttons now use the typed-but-unsaved description** (issue
+  #16) — clicking "Clean up (AI)" or "Summarize scrape (AI)" before advancing
+  the step previously sent only the session ID; the backend cleaned the already-
+  persisted `session.description`, which was empty/stale. Both cleanup and
+  summarize endpoints now accept `description` and `title` in the request body
+  and prefer those values over the persisted session. The wizard buttons pass the
+  current component state so the AI always sees what is visible in the form.
+- **AI provider calls no longer block the event loop** (issue #17) — `_dispatch`
+  (and its callers `suggest_tags`, `cleanup_description`, `summarize_scrape`) is
+  a synchronous function that was called inline inside async route handlers,
+  freezing the single Uvicorn event loop for as long as the AI provider took to
+  respond. All call sites now use `asyncio.to_thread` so a slow or stuck provider
+  only stalls the one request that triggered it. An explicit timeout (10 s for the
+  connectivity test, 60 s for inference calls) is passed to the SDK so the call
+  fails fast rather than hanging indefinitely.
+- **Object Breakdown reports real analysis status instead of a blanket "Analysis
+  pending."** 3MF files are read, not mesh-analyzed, so they now say so plainly (slice
+  details appear inline in Files & Downloads) rather than implying a job is coming. For
+  mesh files (STL/OBJ/PLY) awaiting analysis the section shows the actual job state:
+  *Running* ("Analyzing… N%" with a progress bar + "View in Jobs" link), *Queued*,
+  *Failed* (with the error text + a hint to use Rescan disk), or *No job* ("hasn't run
+  yet — use Rescan disk to queue it").
+
+### Security
+
+- Sanitize CR/LF before logging the user-provided session id in the bulk-commit handler
+  (CodeQL `py/log-injection`), matching the escaping used elsewhere in the import-sessions
+  package.
+
 ## [0.2.5] — 2026-07-02
 
 ### Added

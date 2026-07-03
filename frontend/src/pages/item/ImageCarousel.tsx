@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Trash2, X as XIcon } from 'lucide-react'
+import { Filter, Trash2, X as XIcon } from 'lucide-react'
 
 import * as api from '@/lib/api'
 import { buildCarouselPagerItems } from '@/lib/carousel-utils'
@@ -24,7 +24,7 @@ export interface ImageCarouselProps {
 }
 
 export function ImageCarousel({
-  images,
+  images: allImages,
   itemKey,
   onSetDefault,
   onDeleteImage,
@@ -37,6 +37,14 @@ export function ImageCarousel({
   const [thumbOffset, setThumbOffset] = useState(0)
   const [lightbox, setLightbox] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null)
+  const [rendersOnly, setRendersOnly] = useState(false)
+
+  // "Renders only" filter — app-generated renders (source === 'render').
+  const renderImages = allImages.filter((img) => img.source === 'render')
+  // Only worth offering the toggle when there is a mix to filter.
+  const canFilterRenders =
+    renderImages.length > 0 && renderImages.length < allImages.length
+  const images = rendersOnly && canFilterRenders ? renderImages : allImages
 
   // Keep activeIdx in bounds when images list changes
   const clampedIdx = Math.min(activeIdx, Math.max(0, images.length - 1))
@@ -260,22 +268,60 @@ export function ImageCarousel({
           </div>
         )}
 
-        {/* Bottom-right: image counter */}
-        {images.length > 1 && (
+        {/* Bottom-right: renders filter + image counter */}
+        {(canFilterRenders || images.length > 1) && (
           <div
             style={{
               position: 'absolute',
               bottom: 8,
               right: 8,
-              background: 'rgba(0,0,0,0.45)',
-              color: '#fff',
-              borderRadius: 20,
-              fontSize: 11,
-              padding: '2px 8px',
-              lineHeight: 1.4,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
             }}
           >
-            {clampedIdx + 1} / {images.length}
+            {canFilterRenders && (
+              <button
+                onClick={() => {
+                  setRendersOnly((v) => !v)
+                  setActiveIdx(0)
+                  setThumbOffset(0)
+                }}
+                title={rendersOnly ? 'Show all images' : 'Show only app renders'}
+                aria-pressed={rendersOnly}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  background: rendersOnly ? 'rgba(139,92,246,0.85)' : 'rgba(0,0,0,0.45)',
+                  color: '#fff',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  borderRadius: 20,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: '2px 9px',
+                  cursor: 'pointer',
+                  lineHeight: 1.4,
+                }}
+              >
+                <Filter size={11} />
+                Renders
+              </button>
+            )}
+            {images.length > 1 && (
+              <span
+                style={{
+                  background: 'rgba(0,0,0,0.45)',
+                  color: '#fff',
+                  borderRadius: 20,
+                  fontSize: 11,
+                  padding: '2px 8px',
+                  lineHeight: 1.4,
+                }}
+              >
+                {clampedIdx + 1} / {images.length}
+              </span>
+            )}
           </div>
         )}
       </div>

@@ -1,6 +1,7 @@
 """Analysis task — per-object mesh analysis + 3MF embedded thumbnail extraction."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from datetime import UTC, datetime
@@ -185,7 +186,27 @@ def _build_sliced_analysis(
     }
 
 
+# Cap concurrent mesh analyses (loads meshes into RAM via trimesh).  Lazy so the
+# settings import stays deferred and the semaphore binds to the worker loop.
+_analyze_sem: asyncio.Semaphore | None = None
+
+
+def _get_analyze_sem() -> asyncio.Semaphore:
+    global _analyze_sem
+    if _analyze_sem is None:
+        from app.config import settings  # noqa: PLC0415
+
+        _analyze_sem = asyncio.Semaphore(max(1, settings.ANALYZE_CONCURRENCY))
+    return _analyze_sem
+
+
 async def analyze_item(ctx: dict, item_id: int) -> None:
+    """Arq entrypoint — throttle concurrent analyses (ANALYZE_CONCURRENCY), then analyze."""
+    async with _get_analyze_sem():
+        await _analyze_item_inner(ctx, item_id)
+
+
+async def _analyze_item_inner(ctx: dict, item_id: int) -> None:
     """Analyze model files for an item: colors + estimated filament grams.
 
     For 3MF files: extracts embedded thumbnail AND uses slicer metadata when

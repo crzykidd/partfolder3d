@@ -2,6 +2,244 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-03 — Merge fallout: duplicate `/{key}/jobs` endpoint (#18 vs object-breakdown)
+
+Two parallel worktree branches both built the item-jobs feature: **#18** added
+`GET /api/items/{key}/jobs` returning **active-only** jobs (`started_at`/`finished_at`, for
+the file-list "poll until done" refresh); the **object-breakdown** branch added its own
+returning **active + recent failed** with `progress`/`error` (for the analysis-status UI).
+The text merge did NOT conflict (they landed in different parts of the files) → the tree had
+**two `ItemJobOut` classes + two `list_item_jobs` endpoints** (backend) and **two
+`ItemJobSummary`/`listItemJobs`** + **two `['item-jobs']` queries** (frontend). ruff's
+`Lint (dev)` (F811) caught the backend dup; the frontend dup only surfaced on a fresh full
+build (worktree `tsc -b` incremental cache had hidden it). **Resolution:** one `ItemJobOut`
+with all fields (progress, error, started_at, finished_at); one endpoint (active + failed);
+one frontend query, with `activeJobs = itemJobs.filter(queued|running)` driving the
+file-refresh effect (a failed job must not keep it "active" forever). **Lesson:** when two
+branches touch the same new feature, a clean text-merge is NOT enough — grep for duplicate
+symbols/routes after merging, and always run a FRESH full build (not the worktree's cached one).
+
+## 2026-07-03 — Catalog grid: responsive cols, compact/full mode, page-size selector
+
+- **Column count** = `floor((W + gap) / (minCard + gap))` (N cards + N−1 gaps in width W),
+  extracted as `computeCols` in `catalog-utils.ts` + unit-tested. Min card widths 220px
+  (compact) / 340px (full).
+- **Virtual scroll container height** changed from a fixed 640px to `calc(100vh - 320px)`
+  clamped 480–900px — fixed height under/over-shot on different screens; viewport-relative
+  self-adjusts (320px accounts for the chrome above the grid).
+- **`gridMode` + `perPage` stored in localStorage, not URL** — they're UI-density
+  preferences, not navigation state; keeping them out of the URL avoids polluting
+  shared/bookmarked links (URL still carries q/tags/sort/page/view).
+
+## 2026-07-03 — Black-screen on load: React Query key collision (#24 popup)
+
+The #24 release-notes hook used `useQuery({ queryKey: ['version'] })` returning a **bare
+string**, but `VersionPage` and both nav shells already use `['version']` returning a
+`{ version }` **object**. React Query shares one cache entry per key, so the hook's
+`currentVersion` (and the value it wrote to `localStorage`) could be an object. On the next
+load `compareSemver` did `v.split(...)` on that object → `TypeError` thrown inside
+`AuroraShell` (a shell-level component) with **no error boundary** → the whole React tree
+unmounted → blank/black page after ~1s (once `/api/version` resolved). **Fix:** gave the hook
+a distinct key `['release-notes-version']`, and guarded both `currentVersion` and `lastSeen`
+to strings (so an already-poisoned localStorage value self-heals instead of crashing), plus
+made `compareSemver` never throw on a non-string. **Lessons:** (1) never reuse a React Query
+key with a different result shape; (2) the app has NO top-level error boundary — a follow-up
+should add one so a single component crash can't blank the entire app.
+
+## 2026-07-03 — v0.3.0 full-suite gate: one real regression + a test-hermeticity fix
+
+Running the full backend suite after the overnight batch surfaced two issues:
+
+1. **Real regression (fixed):** the issue-#14 commit-side default-image fallback (honor
+   `session.default_image_path` when no `ImportSessionImage.is_default` is set) was **dropped**
+   when `commit_import_session` was refactored into `_commit_session_inner` (by the bulk-import
+   work, then the render-param change). The agents that touched the commit path only ran
+   `test_bulk_import`/`test_phase5_import`, not `test_import_management`, so the #14 test never
+   re-ran — the full suite is what caught it. Restored the fallback just before the image loop in
+   `_commit_session_inner`. **Lesson:** when refactoring a shared function, run the tests of ALL
+   callers/features that depend on it, not just the new feature's tests.
+
+2. **Test hermeticity (fixed):** `test_clear_jobs_by_status_{succeeded,failed,cancelled}` asserted
+   an EXACT global archived count (`== 2`). Under xdist, other tests in the same worker DB leave
+   committed `Job` rows (notably #18's `extract_archives`, which now commits a Job row via
+   `job_tracker` outside the per-test rollback), so the global "clear all of status X" endpoint
+   correctly archives more than 2. Relaxed to `>= 2`; the per-job assertions already prove only the
+   right jobs are touched. The endpoint is correct — the test over-specified.
+
+Also noted: the local serial `:5433` test DB is NOT reset by conftest between runs (only xdist
+workers drop+create), so a long-lived container accumulates committed rows and produces spurious
+count failures in serial runs. Validate with xdist (`-n N`, fresh per-worker DBs) — that's how CI runs.
+
+## 2026-07-03 — #11 library purge: no on-disk directory removal
+
+`DELETE /api/libraries/{id}/purge` hard-deletes the `libraries` row but does not remove
+the on-disk directory.  The existing `disable_library` endpoint never touched the
+filesystem either, so there is no existing directory-management pattern to follow.
+The library directory is a host-mounted volume; deleting it from inside the container
+would be destructive and surprising.  Operators who want to reclaim the disk space can
+unmount and remove the volume on the host after deleting the library through the UI.
+
+## 2026-07-03 — #11 library purge: item_count added to LibraryOut (not a separate endpoint)
+
+The frontend needs the asset count before deciding whether to show the delete-blocked
+message.  Two options: (a) a separate count endpoint called on demand, or (b) include
+`item_count` in the `GET /api/libraries` list response.  Chose (b): the count is a
+correlated subquery on an indexed FK column — cheap at small library counts — and it
+eliminates a round-trip on every library page load.  The field defaults to `0` so
+callers that don't use it are unaffected.
+
+## 2026-07-03 — #11 purge endpoint: allow purge of enabled library
+
+The purge endpoint (`DELETE /api/libraries/{id}/purge`) does not require the library to
+be disabled first.  An operator might want to create-and-immediately-delete an empty
+library without the extra disable step.  The only guard is the item count check.
+
+## 2026-07-03 — #24 release-notes popup: localStorage over per-user DB column
+
+The issue proposed two options for persisting last-seen version: a `last_seen_version`
+DB column (syncs across devices) or the existing `useLocalStorage` hook (per-browser).
+
+Chose **localStorage** for v1:
+- Zero backend changes — no migration, no PATCH endpoint, no round-trip latency.
+- The app is already using localStorage for theme and nav-layout preferences.
+- The modal's "once per upgrade" goal is satisfied per browser; the per-device gap is
+  an acceptable v1 trade-off (worst case: user sees the modal again on a second device,
+  which is harmless).
+- Promoted to DB storage if per-device annoyance proves significant in practice.
+
+## 2026-07-03 — #24 release-notes popup: frontend blurb module over served CHANGELOG
+
+The CHANGELOG.md is not bundled into the frontend build or served by the backend.
+Parsing it would require either:
+(a) a new backend endpoint that slices the file, or
+(b) bundling a markdown renderer + the full changelog into the frontend.
+
+Chose a **small frontend module** (`frontend/src/lib/releaseNotes.ts`) that maps
+version strings to curated "What's New" bullet arrays.  This is:
+- Dependency-free (no markdown renderer)
+- Bundle-minimal (one TS module, a few hundred bytes)
+- Author-friendly: the release-prep process already writes README "What's New" and
+  CHANGELOG entries; adding a `releaseNotes.ts` entry is one more step of the same kind.
+
+The release-prep skill/process should update `releaseNotes.ts` alongside the version
+bump (noted in decisions.md as a reminder and in the CHANGELOG entry).
+
+## 2026-07-03 — #21 viewer capture: ImageSource.captured as native PG enum value
+
+`ImageSource` is a native PG enum (`Enum(ImageSource, name="imagesource")`). Added
+`captured` via migration 0022 using `ALTER TYPE imagesource ADD VALUE IF NOT EXISTS 'captured'`
+outside a transaction (`autocommit_block()`), matching the existing 0021 pattern for
+`embedded`.
+
+The `POST /api/items/{key}/images` endpoint gains a `?source=captured` query param
+(default: `"uploaded"`). The frontend passes `source=captured` when uploading a canvas
+screenshot so captured images carry distinct provenance in the DB and sidecar.
+
+Filenames use a `capture_` prefix (vs. `upload_`) to make the origin visible on disk.
+
+## 2026-07-03 — #21 viewer capture: wizard ImagesStep capture deferred
+
+The issue owner requested a "Try to render file" action in the import wizard
+(`ImagesStep.tsx`) that captures a browser render during import. During the wizard, items
+don't exist yet — images are `ImportSessionImage` rows — so the upload path is different.
+This is more involved and was deferred as a follow-up rather than risk rework of the
+wizard flow. The item-page capture (the core request) ships in this commit.
+
+## 2026-07-03 — #18/#19 file management: upload extension allowlist, rename-in-dir-only
+
+`upload_file` (`POST /api/items/{key}/files`) rejects extensions not in
+`_ALLOWED_FILE_EXTENSIONS`. The allowlist is explicit rather than a blocklist — unknown
+extensions from future formats won't silently pass through. Extensions match those already
+handled by `infer_role` / `inventory_item`.
+
+`rename_file` (`PATCH /api/items/{key}/files/{file_id}`) accepts a `name` (basename only)
+and keeps the file in its current directory. Cross-directory moves are not supported: the
+rename target is always `parent(current_path) / new_name`. The path traversal guard
+(`resolve().relative_to(item_dir.resolve())`) runs after deriving the target to catch any
+edge cases the `/../` check misses.
+
+Role is re-inferred on every rename via `infer_role(new_rel)` — if the extension changes
+(e.g. `.stl` → `.gcode`) the role column is updated to match.
+
+## 2026-07-03 — #18 extract_archives Job row: separate session, failure-safe
+
+`extract_archives` now creates a Job row at task start using its own `async with
+SessionLocal()` block (not the caller's) so that if the job creation itself fails the task
+still proceeds — the log warns but extraction continues. The `_finish` helper follows the
+same pattern: a fresh session that commits independently. This means Job lifecycle is
+best-effort: if the DB is unavailable during a task, the task result (files extracted) is
+still preserved.
+
+`arq_job_id` is set from `ctx.get("job_id")` — present when arq calls the task but `None`
+in tests / CLI invocations.
+
+## 2026-07-03 — #15 render preference: caller-side gate vs. instance-side gate
+
+The `render` parameter (`"auto"` | `"off"`) is a **caller-side gate**: when `"off"`,
+`_enqueue_render` is never called at all. This is layered on top of the existing
+**instance-side gate** inside `_enqueue_render` (`settings.RENDER_MODE == "off"`),
+which already short-circuits when the operator has disabled rendering globally.
+
+The two are intentionally independent:
+- Instance `render.mode = "off"` means the server can't render at all (no worker, no GPU).
+- Request `render = "off"` means the caller doesn't want a render now (e.g. bulk migration
+  deferred to browser capture later), even if the server is capable.
+
+Neither gate can be used to *force* rendering past the other: `render="auto"` still
+goes through the instance check; `render.mode="off"` still blocks even if `render="auto"`.
+
+`"auto"` was chosen as the default (not `"on"`) so the value is meaningful as "use the
+instance default policy" rather than "always render", keeping the option additive.
+
+## 2026-07-03 — #17 asyncio.to_thread placement and timeout strategy
+
+**Why `asyncio.to_thread` at the router level, not inside client.py:** the public
+functions `suggest_tags`, `cleanup_description`, `summarize_scrape` are designed to be
+pure sync (they never raise). Making them async internally would couple client.py to the
+event loop and complicate unit tests that call them directly. Wrapping at the call site
+in routers keeps concerns separated — client.py stays sync and testable in isolation,
+routers own the async offload.
+
+**Injectable test callers do NOT receive the timeout argument** even though `_dispatch`
+now accepts one. Existing test lambdas use `lambda *a: "text"` which absorbs extra args,
+but the injectable caller is only for tests — it makes no real network call and needs no
+timeout. Keeping the injectable signature stable meant zero test changes were required
+for #17.
+
+**Timeout values chosen:** 10 s for `test_ai_connection` (explicitly a connectivity
+ping; a provider that can't respond in 10 s is broken), 60 s default for all inference
+calls (generous for slow local Ollama models; still protects the event loop from a
+permanently-hung provider).
+
+## 2026-07-03 — #16 body-override approach (not auto-save on blur)
+
+Issue #16 offered two fix options: (1) auto-save on blur before the AI button fires,
+or (2) pass current values in the request body. Chose option 2 because it requires no
+extra PATCH round-trip, works even for a brand-new session (session id just created,
+no title/description ever saved), and keeps the "save only on Next" contract intact.
+The body fields are all optional so existing call sites that send no body continue to
+work (the backend falls back to session values).
+## 2026-07-03 — Object Breakdown job-status fix (feat/object-breakdown-jobs)
+
+**"Recent failed jobs" scope for `GET /api/items/{key}/jobs`:** The endpoint returns
+non-archived failed jobs with no time cap (i.e., any non-archived failed row).
+Alternatives considered: (a) last-24h cap — rejected because a job that failed yesterday
+and hasn't been retried is still actionable; (b) all failed rows ever — same as chosen
+since archiving is the explicit cleanup action. The safe minimal choice is: failed +
+non-archived = still needs attention.
+
+**3MF files are excluded from "pending mesh analysis":** A 3MF file with no
+`object_analysis` is NOT pending mesh analysis — it may have embedded slice metadata
+(shown in the ThreeMfPanel) or nothing at all. Saying "Analysis pending" implies a worker
+will run and produce results, which is false for 3MF. The new message correctly states
+"read, not mesh-analyzed."
+
+**Job polling in ItemPage (3 s interval):** The `['item-jobs', key]` query polls every
+3 s. This matches the DownloadsSection ZIP poll cadence and is short enough to feel
+responsive while the analyze job runs. The endpoint is cheap (a single indexed SELECT on
+`item_id` + `status` + `archived_at`). A future optimization could use server-sent events
+or WebSockets, but polling is sufficient at this scale.
+
 ## 2026-07-02 — CodeQL log-injection fix in import-session PATCH (v0.2.5 PR)
 
 CodeQL (`py/log-injection`, Medium) flagged the #14 code on the v0.2.5 release PR:
@@ -13,6 +251,37 @@ if low-severity, log-forging vector. Escaped CR/LF before logging
 earlier `fs_browse` CR/LF fix). Not the strip-style used in `fs_browse.py:161` — escaping
 preserves the value for debugging while neutralizing newlines. CodeQL is not a required
 check on `main`, but the finding was fixed pre-merge rather than carried into the release.
+
+## 2026-07-02 — Bulk commit design (issue #15)
+
+**Deferred**: CLI option (issue #15 option 3) was explicitly excluded from scope;
+only the endpoint + UI button were shipped.
+
+**Per-session isolated transactions**: `bulk_commit_import_sessions` creates a new
+`SessionLocal()` per session so a failure in one session's commit does not roll back
+others.  The request-scoped `db` is used only to enumerate target session IDs; all
+actual commit work runs in isolated connections.
+
+**Library resolution order** (decided with owner, baked into both bulk-commit and
+inbox-scan): (a) request body `library_id` override, (b) session's own `library_id`,
+(c) `import.default_library_id` instance setting, (d) sole enabled library, (e) skip
+with `no_library` reason.  The same helper `_resolve_import_library` is used by all
+code paths.
+
+**`bool` rejected from `import.default_library_id`**: Python's `bool` is a subclass of
+`int`, so `isinstance(True, int)` is `True`.  Added an explicit `isinstance(body.value,
+bool)` guard to prevent `true`/`false` from being accepted as library IDs.
+
+**No migration needed**: `import.default_library_id` is stored in the existing `Settings`
+generic key-value table.  No schema change required.
+
+**Monkeypatch approach for bulk-commit tests**: the bulk-commit endpoint creates
+`SessionLocal()` per session (a new DB connection) which cannot see uncommitted test
+transaction data.  Tests that exercise the commit path monkeypatch `app.db.SessionLocal`
+to return a context manager yielding the test's `db_session` (backed by the outer
+transaction).  Since `db_session` uses `bind=conn` with `expire_on_commit=False`, the
+`session.commit()` call within the inner context manager uses savepoint semantics and
+does not escape the test transaction.
 
 ## 2026-07-02 — Auto-login race fix and confirm-password field (issue #13)
 

@@ -27,6 +27,7 @@ POST /api/import-sessions/{id}/ai/summarize
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from typing import Annotated
@@ -82,6 +83,19 @@ class AiTextOut(BaseModel):
 
     provider_available: bool = False
     error: str | None = None
+
+
+class AiDescriptionRequest(BaseModel):
+    """Optional description/title overrides for AI cleanup and summarize.
+
+    When the user has typed text in the wizard but not yet saved (Next), the
+    persisted session values are stale.  Passing the current values here lets the
+    AI operate on what is actually visible in the form.  All fields are optional:
+    omitting them falls back to the persisted session values.
+    """
+
+    description: str | None = None
+    title: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +240,9 @@ async def ai_suggest_tags(
     )
     existing_tags = [row[0] for row in tags_result.all()]
 
-    ai_result = suggest_tags(
+    # Run in a thread so a slow provider only blocks this request, not the event loop.
+    ai_result = await asyncio.to_thread(
+        suggest_tags,
         provider=provider,
         title=title,
         description=description,
@@ -267,12 +283,17 @@ async def ai_cleanup_description(
     user: Annotated[User, Depends(get_current_user)],
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    body: AiDescriptionRequest | None = None,
 ) -> AiTextOut:
     """Return an AI-cleaned version of the session's description.
 
     The result is a **suggestion** only — the user must explicitly accept it
     via PATCH /api/import-sessions/{id} (setting description to the returned text).
     Nothing is auto-applied.
+
+    ``body.description`` and ``body.title`` (when provided) take precedence over
+    the persisted session values.  This lets the wizard send the user's current
+    typed-but-not-yet-saved text without a prior PATCH round-trip (fixes #16).
     """
     from ..ai.client import cleanup_description, get_enabled_provider  # noqa: PLC0415
 
@@ -281,8 +302,18 @@ async def ai_cleanup_description(
         return AiTextOut(provider_available=False)
 
     session = await _load_session_owned(session_id, db, user)
-    description = session.description or ""
-    title = session.confirmed_title or session.suggested_title or ""
+
+    # Prefer body values — the user may have typed text not yet saved to the session.
+    description = (
+        body.description
+        if body is not None and body.description is not None
+        else (session.description or "")
+    )
+    title = (
+        body.title
+        if body is not None and body.title is not None
+        else (session.confirmed_title or session.suggested_title or "")
+    )
 
     if not description.strip():
         return AiTextOut(
@@ -290,7 +321,9 @@ async def ai_cleanup_description(
             error="Session has no description to clean up",
         )
 
-    ai_result = cleanup_description(
+    # Run in a thread so a slow provider only blocks this request, not the event loop.
+    ai_result = await asyncio.to_thread(
+        cleanup_description,
         provider=provider,
         description=description,
         title=title,
@@ -327,12 +360,17 @@ async def ai_summarize_scrape(
     user: Annotated[User, Depends(get_current_user)],
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    body: AiDescriptionRequest | None = None,
 ) -> AiTextOut:
     """Summarize the session's scraped content into a description draft.
 
     Uses the session's current description (populated by the scraper worker)
     as the source text. Returns a short draft — never auto-applied. The user
     must accept via PATCH /api/import-sessions/{id}.
+
+    ``body.description`` and ``body.title`` (when provided) take precedence over
+    the persisted session values.  This lets the wizard send the user's current
+    typed-but-not-yet-saved text without a prior PATCH round-trip (fixes #16).
     """
     from ..ai.client import get_enabled_provider, summarize_scrape  # noqa: PLC0415
 
@@ -341,12 +379,22 @@ async def ai_summarize_scrape(
         return AiTextOut(provider_available=False)
 
     session = await _load_session_owned(session_id, db, user)
-    title = session.confirmed_title or session.suggested_title or ""
 
-    # Use description as the scraped content source (filled by the import worker).
-    scraped_text = session.description or ""
-    if not scraped_text.strip() and session.source_url:
-        scraped_text = f"Source URL: {session.source_url}"
+    # Prefer body values — the user may have typed text not yet saved to the session.
+    title = (
+        body.title
+        if body is not None and body.title is not None
+        else (session.confirmed_title or session.suggested_title or "")
+    )
+
+    # Use body description when provided; otherwise fall back to persisted session
+    # description (filled by the import worker) with a URL fallback.
+    if body is not None and body.description is not None:
+        scraped_text = body.description
+    else:
+        scraped_text = session.description or ""
+        if not scraped_text.strip() and session.source_url:
+            scraped_text = f"Source URL: {session.source_url}"
 
     if not scraped_text.strip():
         return AiTextOut(
@@ -354,7 +402,9 @@ async def ai_summarize_scrape(
             error="No scraped content available to summarize",
         )
 
-    ai_result = summarize_scrape(
+    # Run in a thread so a slow provider only blocks this request, not the event loop.
+    ai_result = await asyncio.to_thread(
+        summarize_scrape,
         provider=provider,
         scraped_text=scraped_text,
         title=title,

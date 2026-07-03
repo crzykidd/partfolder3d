@@ -17,7 +17,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/context/AuthContext'
 import { useTheme } from '@/components/ThemeProvider'
 import * as api from '@/lib/api'
-import { type RenderMode, RENDER_MODE_LABELS, setRenderMode } from '@/lib/api/settings'
+import {
+  type RenderMode,
+  RENDER_MODE_LABELS,
+  IMPORT_DEFAULT_LIBRARY_KEY,
+  setRenderMode,
+  setDefaultImportLibrary,
+} from '@/lib/api/settings'
 import { detectOS, rewriteLocalPath } from '@/lib/catalog-utils'
 import {
   AdminPage, PageHeader,
@@ -457,6 +463,95 @@ function RenderModeRow({ currentValue }: { currentValue: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Default import library setting (select + clear, admin only)
+// ---------------------------------------------------------------------------
+
+function DefaultImportLibraryRow({ currentValue }: { currentValue: string }) {
+  const queryClient = useQueryClient()
+  const [saved, setSaved] = useState(false)
+
+  const { data: libraries = [] } = useQuery({
+    queryKey: ['libraries'],
+    queryFn: api.listLibraries,
+    staleTime: 60_000,
+  })
+
+  const enabledLibraries = (libraries as api.LibraryOut[]).filter((l) => l.enabled)
+
+  const mutation = useMutation({
+    mutationFn: (libId: number | null) => setDefaultImportLibrary(libId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['settings'] })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    },
+  })
+
+  // Parse the stored value (JSON-encoded int or null)
+  const currentLibId = currentValue !== '' ? Number(currentValue) : null
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        paddingTop: 14,
+        paddingBottom: 14,
+        borderTop: '1px solid var(--aurora-divider)',
+      }}
+      className="first-of-type:border-t-0"
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--aurora-text)', marginBottom: 2 }}>
+            Default import library
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--aurora-muted)', lineHeight: 1.5 }}>
+            Library used automatically during bulk commit and inbox scanning when a session
+            has no explicit library set.  When unset, the sole enabled library is used
+            (if only one exists).
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+          {saved && (
+            <span style={{ fontSize: 12, color: 'var(--aurora-accent)' }}>Saved</span>
+          )}
+          {mutation.isError && (
+            <span style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>Save failed</span>
+          )}
+          <select
+            value={currentLibId ?? ''}
+            disabled={mutation.isPending}
+            onChange={(e) => {
+              const val = e.target.value === '' ? null : Number(e.target.value)
+              mutation.mutate(val)
+            }}
+            style={{
+              fontSize: 13,
+              padding: '4px 8px',
+              borderRadius: 6,
+              border: '1px solid var(--aurora-glass-border)',
+              background: 'var(--aurora-glass)',
+              color: 'var(--aurora-text)',
+              cursor: 'pointer',
+              minWidth: 160,
+            }}
+          >
+            <option value="">— None (auto) —</option>
+            {enabledLibraries.map((lib) => (
+              <option key={lib.id} value={lib.id}>
+                {lib.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Known instance settings
 // ---------------------------------------------------------------------------
 
@@ -650,6 +745,9 @@ export function SettingsPage() {
               ))}
               <RenderModeRow
                 currentValue={settingMap.get(RENDER_MODE_SETTING_KEY) ?? ''}
+              />
+              <DefaultImportLibraryRow
+                currentValue={settingMap.get(IMPORT_DEFAULT_LIBRARY_KEY) ?? ''}
               />
             </Card>
           )}

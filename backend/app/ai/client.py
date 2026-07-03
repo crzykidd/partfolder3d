@@ -211,6 +211,7 @@ def _call_anthropic_real(
     system: str,
     user_msg: str,
     max_tokens: int,
+    timeout: float = 60.0,
 ) -> AiCallResult | None:
     """Invoke the Anthropic SDK.  Returns AiCallResult (with token counts) or None on error."""
     if not api_key:
@@ -227,6 +228,7 @@ def _call_anthropic_real(
             max_tokens=max_tokens,
             system=system,
             messages=[{"role": "user", "content": user_msg}],
+            timeout=timeout,
         )
         text: str | None = None
         if response.content and hasattr(response.content[0], "text"):
@@ -246,6 +248,7 @@ def _call_openai_real(
     system: str,
     user_msg: str,
     max_tokens: int,
+    timeout: float = 60.0,
 ) -> AiCallResult | None:
     """Invoke the OpenAI SDK (also used for Ollama via base_url).  Returns AiCallResult or None."""
     try:
@@ -262,6 +265,7 @@ def _call_openai_real(
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_msg},
             ],
+            timeout=timeout,
         )
         text: str | None = None
         if response.choices:
@@ -305,8 +309,18 @@ def _dispatch(
     system: str,
     user_msg: str,
     max_tokens: int = 1024,
+    timeout: float = 60.0,
 ) -> AiCallResult | None:
-    """Dispatch a call to the configured provider. Returns AiCallResult or None."""
+    """Dispatch a call to the configured provider. Returns AiCallResult or None.
+
+    ``timeout`` is passed to the real SDK caller so a slow provider fails fast
+    rather than hanging indefinitely.  Injectable test callers do NOT receive the
+    timeout argument — their signatures stay unchanged and they never make real
+    network calls.
+
+    Call sites MUST run this via ``asyncio.to_thread`` so a slow provider only
+    blocks the thread that asked for it and never stalls the event loop.
+    """
     # Decrypt key at call time only; never stored in cleartext.
     api_key = ""
     if provider.api_key_encrypted:
@@ -323,9 +337,10 @@ def _dispatch(
             model = _DEFAULT_CLAUDE_MODEL
         caller = _anthropic_caller
         if caller is not None:
+            # Injectable caller — no timeout (it never makes real network calls).
             raw = caller(api_key, model, system, user_msg, max_tokens)  # type: ignore[operator]
             return _normalize_caller_result(raw)
-        return _call_anthropic_real(api_key, model, system, user_msg, max_tokens)
+        return _call_anthropic_real(api_key, model, system, user_msg, max_tokens, timeout=timeout)
 
     # OpenAI or Ollama — both use the openai SDK; Ollama sets base_url.
     if not model:
@@ -333,9 +348,12 @@ def _dispatch(
     base_url = provider.endpoint  # None for OpenAI; endpoint for Ollama
     caller = _openai_caller
     if caller is not None:
+        # Injectable caller — no timeout (it never makes real network calls).
         raw = caller(api_key, base_url, model, system, user_msg, max_tokens)  # type: ignore[operator]
         return _normalize_caller_result(raw)
-    return _call_openai_real(api_key, base_url, model, system, user_msg, max_tokens)
+    return _call_openai_real(
+        api_key, base_url, model, system, user_msg, max_tokens, timeout=timeout
+    )
 
 
 # ---------------------------------------------------------------------------

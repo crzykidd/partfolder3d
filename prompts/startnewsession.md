@@ -8,12 +8,28 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-07-02 (v0.2.4 released on `main` — production-deploy hardening batch; release
-PRs merge clean; no open release gate; `dev` == `main`)
+**Last updated:** 2026-07-03 (v0.2.5 on `main`; **`dev` is FAR AHEAD** — the whole **v0.3.0 batch**
+landed on `dev` overnight: #15 bulk import + #15 render param + #16 #17 #18 #19 #21 #24 #11, all
+`closes #N`, unreleased. New issues #25/#26 (deferred scope), #23 planned, #20 still open.)
 
-> ## CURRENT STATE (2026-07-02) — v0.2.4 released; production-deploy hardening
-> **Latest release: `v0.2.4`** on `main` (merge `b2a8419`, tag `v0.2.4`). `dev` == `main` (nothing
-> queued). Release history since v0.1.1:
+> ## CURRENT STATE (2026-07-03) — v0.2.5 on `main`; full v0.3.0 batch queued on `dev`
+> **`dev` overnight batch (unreleased, all `closes #N`, verify at `/release-prep 0.3.0`):**
+> `7dcf024` #16/#17 AI (wizard buttons use typed description; async-offload `_dispatch` + timeouts so a
+> slow provider no longer freezes the backend) · `9e4b769` #15 `render:auto|off` commit param ·
+> `91b780e` #18/#19 item file upload/delete/rename + `extract_archives` Job-row visibility + item-page
+> job-poll auto-refresh · `716a66f` #21 3D-viewer capture→item image (multiple captures, new
+> `ImageSource.captured` + **migration 0022**) · `e8d893c` #24 release-notes popup (localStorage
+> last-seen + frontend blurb module) · `377d39e` #11 guarded empty-library hard-delete + re-enable.
+> Also: #23 FlareSolverr planned (`prompts/2026-07-03-23-flaresolverr.md`), #25 (move-assets) + #26
+> (wizard capture) + #20 (queued-job visibility) remain open. **Migrations now at 0022.**
+>
+> ## PRIOR STATE (2026-07-02) — v0.2.5 released
+> **Latest release: `v0.2.5`** on `main` (merge `569d5e1`, tag `v0.2.5`). **`dev` is AHEAD of `main`**:
+> the #15 bulk-import feature is merged to `dev` (merge `0952358`) and awaits the next release —
+> **next release is `v0.3.0`** (minor bump — large feature batch: #15 bulk import + the overnight
+> batch #16/#17/#18/#19/#21/#24/#11 + #15 render param; a minor triggers the 0.2.x changelog archive
+> at `/release-prep`). As each issue is fixed on `dev`, comment it "fixed on dev → shipping in v0.3.0".
+> Release history since v0.1.1:
 > - **v0.2.0** — "read-don't-render" asset-detail rework: 3MF READ not rendered (embedded slicer
 >   thumbnail `ImageSource.embedded` + slice metadata, migration **0021**), bounded STL/OBJ/PLY render
 >   on the **`vtk-osmesa`** wheel (+`libosmesa6`; stock PyPI `vtk` is X11-only, can't render headless),
@@ -40,6 +56,16 @@ PRs merge clean; no open release gate; `dev` == `main`)
 >     libraries filtered from the add-item picker, #7 version-page nav link → **Admin → Content**,
 >     #6/#10 dark-mode `<select>` option popups (opaque `option` bg — the semi-transparent input bg is
 >     ~white over a native popup's light base; `color-scheme` alone insufficient on Chrome/Windows).
+> - **v0.2.5** — setup/import bug fixes + hardening: **#13** first-run auto-login (await the `/me`
+>   refetch before `navigate` so completing the wizard lands you in the app, not `/login`; fix on
+>   Setup **and** Login; + a confirm-password field; defensive `await db.commit()` in `run_setup`),
+>   **#14** import "set default image" not applied on commit (PATCH now syncs
+>   `ImportSessionImage.is_default` + a commit-side fallback), and a CodeQL `py/log-injection` fix
+>   (escape CR/LF before logging user-supplied `default_image_path`). Release verify: 607 backend
+>   pass on ephemeral PG (2 `test_run_db_backup_*` fail ONLY locally — they read `settings.DATABASE_URL`
+>   =:5432 default while the suite runs on :5433; CI has DATABASE_URL set, so it covers them) + 286 vitest.
+>   **Gotcha:** #13's commit said "(issue #13)" not "closes #13" → didn't auto-close on merge; closed
+>   manually. Use `closes #N` going forward (see memory).
 >
 > ### 🏭 Production-deploy operational knowledge (learned bringing up the owner's prod stack)
 > - **`frontend` is a ONE-TIME-RUN container** (`restart: "no"`): copies the built UI into the shared
@@ -58,7 +84,7 @@ PRs merge clean; no open release gate; `dev` == `main`)
 > `pull_request:[main]` only (the required gate); **`dev-checks.yml`** `push:[dev]` (fast, non-required,
 > jobs suffixed "(dev)"); **`publish.yml`** 3-image matrix (backend/frontend/nginx) on push:main +
 > release; **`codeql.yml`** PR + push:main (green, **NOT required** — doesn't block merge). Releases:
-> `/release-prep <v>` → merge PR (clean) → `:latest` publishes → `/release-cut <v>`. Worked for 0.2.3 + 0.2.4.
+> `/release-prep <v>` → merge PR (clean) → `:latest` publishes → `/release-cut <v>`. Worked for 0.2.3–0.2.5.
 >
 > ---
 >
@@ -142,15 +168,25 @@ PRs merge clean; no open release gate; `dev` == `main`)
 
 ## Current status
 
-- **v0.2.4 is the latest release on `main`** (see the CURRENT STATE block above for full detail).
-  `dev` == `main`, no release gate open. The full stack (Phases 0–10 + Aurora UI + issue-resolution
-  + render rework + v0.2.x production-deploy hardening) has shipped.
-- **NEXT ACTIONS:** none blocking. Known open GitHub issues to tackle when the owner wants:
-  **#11** library hard-delete + move-assets-between-libraries (future), **#13** post-setup
-  auto-login not sticking (may have been a not-logged-in mixup — verify/close), **#14**
-  import-from-URL "set default image" not applied. Next release: `/release-prep <version>` →
-  merge PR (clean) → `:latest` publishes → `/release-cut <version>` (never re-tag). Optional:
-  make the 2 CodeQL checks required on `main` branch protection (still not required).
+- **v0.2.5 is the latest release on `main`**; **`dev` is FAR ahead** — it carries the entire
+  **v0.3.0 batch** (see the CURRENT STATE block: #15 bulk import + render param, #16/#17 AI,
+  #18/#19 item files, #21 capture, #24 popup, #11 library delete). All committed+pushed on `dev`,
+  each with `closes #N` (they auto-close when v0.3.0 merges to `main`; **until then the issues stay
+  OPEN with a "fixed on dev → shipping in v0.3.0" comment** — that's expected, not a miss).
+- **NEXT ACTIONS:** ship it. `/release-prep 0.3.0` (minor — confirm the warn prompt; it archives the
+  0.2.x changelog series) → merge PR → `:latest` publishes → `/release-cut 0.3.0` (never re-tag).
+  **Still-open backlog (NOT in v0.3.0):** **#20** queued worker jobs invisible in the Jobs monitor
+  (create the Job row at enqueue as `queued`); **#23** FlareSolverr fallback scraper (planned —
+  `prompts/2026-07-03-23-flaresolverr.md`, owner Qs in the issue comment); **#25** move assets between
+  libraries (cross-mount copy→verify→delete); **#26** wizard "Try to render file" capture (deferred
+  from #21 — needs a session-image upload path).
+- **🎨 Render direction (shaped this session, see #21 + #15 comments):** server auto-render stays for
+  STL/OBJ/PLY (unchanged); 3MF (often no embedded thumb) → **browser viewport capture** is the answer,
+  supporting **multiple captures**; offer capture **in the Add Asset wizard** ("Try to render file",
+  browser render = preferred method, server-render/embedded as fallbacks); headless paths (bulk import
+  #15, API) get a `render: auto|off` preference param instead (browser capture can't run headless).
+  All layer via the existing `Image` + `set_default_image` model. Next: turn #21 into a build plan.
+- Optional: make the 2 CodeQL checks required on `main` branch protection (still not required).
 - **Deploy-readiness fix (committed):** scaffolding gap (since Phase 0) — nothing ran migrations
   on startup, so a fresh stack came up on an empty DB and the wizard failed. Fixed by **bundling
   migrations into the backend's image entrypoint** (`backend/docker-entrypoint.sh`:
@@ -277,12 +313,20 @@ PRs merge clean; no open release gate; `dev` == `main`)
 - [x] **Render / asset-detail rework landed on `dev`** (2026-07-02, 5 commits `247dfa6`→`5797b0c`) —
       3MF read-not-render, ZIP auto-extract, file-tree + 3MF collapsible UI, in-browser three.js
       viewer, vtk-osmesa render fix. Verified against a rebuilt image (see CURRENT STATE).
-- [x] **All v0.2.x work shipped** through v0.2.4 — `dev` == `main`, nothing queued for release.
-- [ ] **Open GitHub issues** (owner will look at later): **#11** library hard-delete + move-assets
-      between libraries (future), **#13** post-setup auto-login not sticking (verify/close), **#14**
-      import-from-URL "set default image" not applied.
-- [ ] **Re-verify on the owner's prod deploy after the 0.2.4 pull:** dark-mode dropdowns (#6/#10)
-      render dark, and the original NFS "images don't display" problem is resolved by the nginx `^~` fix.
+- [x] **v0.2.5 released** (2026-07-02) — #13 auto-login + #14 default-image + CodeQL log-injection fix.
+      Both #13 and #14 CLOSED. **#15 bulk import merged to `dev`** (merge `0952358`) — queued for v0.3.0.
+- [x] **v0.3.0 batch built on `dev`** (2026-07-03 overnight) — #16/#17/#18/#19/#21/#24/#11 + #15
+      render param, 8 commits `7af000d`→`377d39e`, each `closes #N`. Migrations now at **0022** (#21).
+      A **UI test plan** for all touched behaviors was produced (ask if not carried forward).
+- [ ] **Ship `dev` as v0.3.0** — `/release-prep 0.3.0` (minor; confirm warn; archives 0.2.x) → merge →
+      `:latest` → `/release-cut 0.3.0`. This is what auto-closes #11/#15/#16/#17/#18/#19/#21/#24.
+- [ ] **Still-open backlog** (NOT in v0.3.0): **#20** queued jobs invisible in the Jobs monitor;
+      **#23** FlareSolverr fallback scraper (planned — `prompts/2026-07-03-23-flaresolverr.md`, owner
+      Qs pending in the issue comment); **#25** move assets between libraries; **#26** wizard
+      "Try to render file" capture (deferred from #21).
+- [ ] **Re-verify on the owner's prod deploy after upgrading to 0.2.5:** first-run auto-login (#13)
+      lands you in the app; import "set default image" (#14) sticks. (0.2.4: dark-mode dropdowns +
+      NFS image display already confirmed.)
 - [ ] **Rotate the AgentQL API key** (owner pasted it in chat during earlier testing).
 - [ ] **PRD §18 remaining notes** to honor when relevant: move journaling/crash recovery,
       real slicing for filament estimates, trash purge UI (see OPEN ITEMS above for detail).
