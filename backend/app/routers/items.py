@@ -53,6 +53,7 @@ from ..models.favorite import Favorite
 from ..models.file import File
 from ..models.image import Image, ImageSource
 from ..models.item import Item
+from ..models.job import Job
 from ..models.library import Library
 from ..models.tag import ItemTag, Tag
 from ..models.user import User
@@ -215,6 +216,18 @@ class ItemDetail(BaseModel):
 
 class PatchModifiedOverrideRequest(BaseModel):
     override: str | None = None  # 'modified' | 'original' | null
+
+
+class ItemJobOut(BaseModel):
+    """Slim job record surfaced on the item detail page (active + recent failed)."""
+    id: str
+    type: str
+    status: str
+    progress: int
+    error: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": False}
 
 
 class PaginatedItems(BaseModel):
@@ -1015,6 +1028,55 @@ async def patch_modified_override(
     images = list(img_result.scalars().all())
 
     return _build_item_detail(item, tags, files, images)
+
+
+@router.get("/{key}/jobs", response_model=list[ItemJobOut])
+async def list_item_jobs(
+    key: str,
+    _user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[ItemJobOut]:
+    """Return active (queued/running) + recent non-archived failed jobs for an item.
+
+    Used by the Object Breakdown section to show per-file analysis status
+    (running progress %, queued, or failure error) instead of a generic
+    "Analysis pending" message.
+
+    Decision: "recent failed" = non-archived failed rows (no time cap).  A failed
+    job stays relevant until the user archives it or until a retry/rescan
+    produces a new succeeded row (which supersedes and auto-archives the old one).
+    Archived jobs are excluded.
+    """
+    # Resolve item
+    result = await db.execute(select(Item).where(Item.key == key))
+    item = result.scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found.")
+
+    job_result = await db.execute(
+        select(Job)
+        .where(
+            Job.item_id == item.id,
+            Job.archived_at.is_(None),
+            sa.or_(
+                Job.status.in_(["queued", "running"]),
+                Job.status == "failed",
+            ),
+        )
+        .order_by(Job.created_at.desc())
+    )
+    jobs = list(job_result.scalars().all())
+    return [
+        ItemJobOut(
+            id=str(j.id),
+            type=j.type,
+            status=j.status,
+            progress=j.progress,
+            error=j.error,
+            created_at=j.created_at,
+        )
+        for j in jobs
+    ]
 
 
 # ---------------------------------------------------------------------------

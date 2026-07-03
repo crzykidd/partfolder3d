@@ -190,6 +190,26 @@ extra PATCH round-trip, works even for a brand-new session (session id just crea
 no title/description ever saved), and keeps the "save only on Next" contract intact.
 The body fields are all optional so existing call sites that send no body continue to
 work (the backend falls back to session values).
+## 2026-07-03 — Object Breakdown job-status fix (feat/object-breakdown-jobs)
+
+**"Recent failed jobs" scope for `GET /api/items/{key}/jobs`:** The endpoint returns
+non-archived failed jobs with no time cap (i.e., any non-archived failed row).
+Alternatives considered: (a) last-24h cap — rejected because a job that failed yesterday
+and hasn't been retried is still actionable; (b) all failed rows ever — same as chosen
+since archiving is the explicit cleanup action. The safe minimal choice is: failed +
+non-archived = still needs attention.
+
+**3MF files are excluded from "pending mesh analysis":** A 3MF file with no
+`object_analysis` is NOT pending mesh analysis — it may have embedded slice metadata
+(shown in the ThreeMfPanel) or nothing at all. Saying "Analysis pending" implies a worker
+will run and produce results, which is false for 3MF. The new message correctly states
+"read, not mesh-analyzed."
+
+**Job polling in ItemPage (3 s interval):** The `['item-jobs', key]` query polls every
+3 s. This matches the DownloadsSection ZIP poll cadence and is short enough to feel
+responsive while the analyze job runs. The endpoint is cheap (a single indexed SELECT on
+`item_id` + `status` + `archived_at`). A future optimization could use server-sent events
+or WebSockets, but polling is sufficient at this scale.
 
 ## 2026-07-02 — CodeQL log-injection fix in import-session PATCH (v0.2.5 PR)
 
