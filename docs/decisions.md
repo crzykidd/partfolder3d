@@ -2,6 +2,33 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-03 — Audit remediation round 2 (security + sweep + refactors): what shipped, what's deferred
+
+Worked `docs/audit-2026-07-03.md` §A/§E/§D end to end (round 1 covered §B/§C/§D-ergonomics). 13
+commits on `dev`; backend suite 720 green, frontend 342 green. **Shipped:** SSRF guard,
+`javascript:` XSS, authz hardening, Redis auth + nginx headers + DB-fail-fast + CORS + CI
+pinning, arq shared-pool + JSON serializer, global exception handler + `{exc}` scrub, zip byte
+budget + 3MF XXE parser + backup perms, generalized crash recovery + reclamation cron, and the
+four file-split refactors (items→package, catalog/imports pages, commit.py, issue_action).
+
+**Deliberately deferred (owner decision — not blockers):**
+- **Login rate-limiting + per-user AI spend cap** (§A low) — the real issue (login-timing
+  enumeration oracle) is fixed; throttling is low-value for a single trusted household behind
+  the owner's proxy and needs a Redis limiter. Revisit if exposed to untrusted users.
+- **List pagination + paginated-envelope field-name unification** (§E, print-records/shares/
+  users/etc.) — these return bare lists the frontend consumes; paginating is a **breaking API
+  shape change** not worth doing autonomously at household scale. Batch with a frontend update
+  when convenient.
+- **Test login/setup-helper consolidation into conftest** (§E med) — 29 files; high churn, no
+  behavior/security impact. Do opportunistically, not as a big-bang.
+- **`docs/decisions.md` split, 4× `/api/version` fetch dedup** (§E low/nit) — cosmetic.
+- **Image-digest pinning** (§A low) — churny; action SHA-pinning (the real supply-chain win)
+  shipped. **X-Forwarded-Proto** verified safe (backend keys secure-cookie off `COOKIE_SECURE`,
+  not the header).
+- **DNS-rebinding TOCTOU** in the SSRF guard — accepted residual (see the set-1 entry below).
+- **PRD §C "assorted"** — feature-catalog-altitude items belong in `features-overview.md`, not
+  the intent-level PRD.
+
 ## 2026-07-03 — Operational: generalized crash recovery + conservative reclamation cron
 
 Audit §E remediation (set 8). **Crash recovery** at worker startup now reaps ALL jobs stuck in

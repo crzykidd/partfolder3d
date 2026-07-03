@@ -6,21 +6,27 @@ to. It is NOT a full reference: durable rules live in `CLAUDE.md`, the module ma
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
 "Current state" before every `/clear`.
 
-**Last updated:** 2026-07-03 — **v0.3.0 released** on `main`; `dev` == `main`, no release gate open.
+**Last updated:** 2026-07-03 — **v0.3.0 released** on `main`; audit-remediation batch landed on `dev` (unreleased).
 
 ## Current state
 
-- **Latest release: `v0.3.0`** (tagged, GitHub release live). `dev` == `main`, nothing queued.
-  The full app is built and shipping (identity, libraries + atomic-move storage, import wizard +
-  bulk import, catalog, item pages with 3D viewer + object breakdown, reconcile, print history +
-  sharing, AI tagging, admin, worker resource limits). Feature detail: `CHANGELOG.md`.
-- **In progress THIS session:** working the **repository audit** —
-  **`docs/audit-2026-07-03.md` is the active worklist** (docs accuracy · security · Claude-ergonomics ·
-  code sweep). The **docs + Claude-ergonomics batch is underway now** (verify scripts, `Makefile`,
-  `docs/architecture.md`, CLAUDE.md verify block, doc-drift fixes). Tick items in the audit as done and
-  record non-obvious calls in `docs/decisions.md`.
+- **Latest release: `v0.3.0`** (tagged, GitHub release live). The full app is built and shipping
+  (identity, libraries + atomic-move storage, import wizard + bulk import, catalog, item pages with
+  3D viewer + object breakdown, reconcile, print history + sharing, AI tagging, admin, worker
+  resource limits). Feature detail: `CHANGELOG.md`.
+- **`dev` is now AHEAD of `main`:** a two-round **audit-remediation** batch shipped on `dev`
+  (`docs/audit-2026-07-03.md` is the worklist, ~83/93 done). Round 1 = docs/PRD/Claude-ergonomics;
+  round 2 = the security cluster (SSRF, XSS, authz, Redis auth + nginx headers + DB-fail-fast + CORS +
+  CI pinning, exception hygiene, data-safety), operational hygiene (crash recovery + reclamation cron),
+  and the file-split refactors (items→package, catalog/imports pages, commit.py, issue_action).
+  Deferred items + rationale are in `docs/decisions.md`.
+- **`[Unreleased]` has a batch of Security/Fixed entries** ready for the next release. ⚠️ **Release
+  deploy note:** the arq job serializer changed pickle→JSON — **drain the worker queue across that
+  upgrade** (in-flight pickled jobs won't deserialize; queue is normally empty). Also new opt-in knobs
+  to surface in release notes: `REDIS_PASSWORD`, `TRASH_RETENTION_DAYS`, `ORPHAN_PRINTS_DELETE`,
+  `SCRAPE_IMAGE_MAX_MB`/`SCRAPE_HTML_MAX_MB`; and prod now **fails fast on a `changeme` DB password**.
 - **Next release:** `/release-prep <next>` → merge PR (clean) → `:latest` publishes → `/release-cut <next>`.
-  Likely a patch unless scope grows. **We do NOT archive old changelog series** (owner preference).
+  Likely a minor (broad security batch) — owner's call. **We do NOT archive old changelog series** (owner preference).
 
 ## How we work (recap — full rules in `CLAUDE.md`)
 
