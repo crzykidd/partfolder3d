@@ -37,6 +37,15 @@ prefix appears only on git tags and GitHub releases.
   import-session create/PATCH → **422**) and silently drops them on scraper/share-import
   ingestion; the frontend gained a `safeHref()` helper applied to every external link so a
   stored bad value still can't navigate.
+- **Authorization hardening on print records, first-run setup, sessions, and login.**
+  Print-record **edit / delete / gcode / photo** endpoints now require the record's owner or
+  an admin — previously any authenticated user could modify another member's records
+  (→ **403**); read access stays shared within the household. First-run **setup** serializes
+  its check-then-insert with a Postgres advisory lock, closing a TOCTOU window in which two
+  concurrent requests could each mint an admin. Consuming a **password-reset** token now
+  deactivates all of that user's existing sessions. **Login** runs a dummy argon2 verify on
+  unknown emails so a missing account no longer responds measurably faster (removes the
+  user-enumeration timing oracle).
 
 ## [0.3.0] — 2026-07-03
 

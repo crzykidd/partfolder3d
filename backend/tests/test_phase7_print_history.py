@@ -503,3 +503,145 @@ async def test_print_stats_unauthenticated_denied(
     # No setup / login — hitting the endpoint cold
     resp = await client.get("/api/print-stats")
     assert resp.status_code in (401, 403)
+
+
+# ---------------------------------------------------------------------------
+# 5. SECURITY: cross-user write authorization on print records
+# ---------------------------------------------------------------------------
+
+
+async def _create_user_and_login(
+    client: AsyncClient, admin_csrf: str, email: str, password: str
+) -> str:
+    """Invite + accept a regular household user, then log in as them.
+
+    Leaves the shared cookie jar authenticated as the new user; returns their
+    CSRF token.
+    """
+    invite = await client.post(
+        "/api/invites",
+        json={"email": email},
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert invite.status_code == 201, invite.text
+    token = invite.json()["token"]
+
+    accept = await client.post(
+        f"/api/invites/{token}/accept",
+        json={"name": "Regular User", "password": password},
+    )
+    assert accept.status_code in (200, 201), accept.text
+
+    login = await client.post(
+        "/api/auth/login",
+        json={"email": email, "password": password},
+    )
+    assert login.status_code == 200, login.text
+    return client.cookies.get("pf3d_csrf", "")
+
+
+@pytest.mark.asyncio
+async def test_print_record_cross_user_write_forbidden(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """A non-owner cannot edit/delete another user's record, but can read it."""
+    admin_csrf = await _setup_admin(client)
+    _, key = await _create_item(client, admin_csrf, db_session)
+
+    # Admin logs a record (owned by admin).
+    admin_rec = await client.post(
+        f"/api/items/{key}/print-records",
+        json={"note": "admin record"},
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert admin_rec.status_code == 201
+    admin_rec_id = admin_rec.json()["id"]
+
+    # A second household member logs in.
+    user_csrf = await _create_user_and_login(
+        client, admin_csrf, "user@test.com", "userpass1234"
+    )
+
+    # READ is shared within the household — the non-owner still sees the record.
+    listed = await client.get(f"/api/items/{key}/print-records")
+    assert listed.status_code == 200
+    assert any(r["id"] == admin_rec_id for r in listed.json())
+
+    # WRITE is owner-only: PATCH by a non-owner is forbidden.
+    patch = await client.patch(
+        f"/api/items/{key}/print-records/{admin_rec_id}",
+        json={"note": "hijacked"},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert patch.status_code == 403, patch.text
+
+    # DELETE by a non-owner is forbidden too.
+    delete = await client.delete(
+        f"/api/items/{key}/print-records/{admin_rec_id}",
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert delete.status_code == 403, delete.text
+
+    # The record is untouched.
+    still = await client.get(f"/api/items/{key}/print-records/{admin_rec_id}")
+    assert still.status_code == 200
+    assert still.json()["note"] == "admin record"
+
+    # The user CAN edit their own record.
+    own = await client.post(
+        f"/api/items/{key}/print-records",
+        json={"note": "my record"},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert own.status_code == 201
+    own_id = own.json()["id"]
+    own_patch = await client.patch(
+        f"/api/items/{key}/print-records/{own_id}",
+        json={"note": "edited mine"},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert own_patch.status_code == 200
+    assert own_patch.json()["note"] == "edited mine"
+
+
+@pytest.mark.asyncio
+async def test_print_record_admin_can_edit_others(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """An admin may edit/delete any user's print record."""
+    admin_csrf = await _setup_admin(client)
+    _, key = await _create_item(client, admin_csrf, db_session)
+
+    # A regular user logs a record.
+    user_csrf = await _create_user_and_login(
+        client, admin_csrf, "user@test.com", "userpass1234"
+    )
+    user_rec = await client.post(
+        f"/api/items/{key}/print-records",
+        json={"note": "user record"},
+        headers={"X-CSRF-Token": user_csrf},
+    )
+    assert user_rec.status_code == 201
+    rec_id = user_rec.json()["id"]
+
+    # Admin logs back in and can edit + delete the user's record.
+    admin_login = await client.post(
+        "/api/auth/login",
+        json={"email": "admin@test.com", "password": "password1234"},
+    )
+    assert admin_login.status_code == 200
+    admin_csrf = client.cookies.get("pf3d_csrf", "")
+
+    patch = await client.patch(
+        f"/api/items/{key}/print-records/{rec_id}",
+        json={"note": "admin fixed"},
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert patch.status_code == 200
+    assert patch.json()["note"] == "admin fixed"
+
+    delete = await client.delete(
+        f"/api/items/{key}/print-records/{rec_id}",
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert delete.status_code == 204

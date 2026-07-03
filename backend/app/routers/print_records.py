@@ -38,7 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth.deps import csrf_protect, get_current_user, get_db
 from ..models.item import Item
 from ..models.print_record import PrintRecord
-from ..models.user import User
+from ..models.user import User, UserRole
 from ..storage.gcode_parser import parse_gcode_file
 
 log = logging.getLogger(__name__)
@@ -171,6 +171,22 @@ def _record_to_out(rec: PrintRecord, item: Item) -> PrintRecordOut:
     )
 
 
+def _require_record_owner_or_admin(rec: PrintRecord, user: User) -> None:
+    """Reject writes to a print record not owned by *user* (admins exempt).
+
+    Read access is intentionally NOT gated per-user: within an authenticated
+    household everyone shares an item's print history (the "private" visibility
+    only hides a record from anonymous public-share viewers, filtered in
+    shares.py). Write access, however, is restricted to the record's owner or an
+    admin so one household member cannot edit/delete another's records.
+    """
+    if rec.logged_by_id != user.id and user.role != UserRole.admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only modify your own print records.",
+        )
+
+
 def _validate_visibility(v: str) -> None:
     if v not in ("private", "public"):
         raise HTTPException(
@@ -270,6 +286,7 @@ async def update_print_record(
     """Update a print record (partial update)."""
     item = await _get_item_or_404(key, db)
     rec = await _get_record_or_404(record_id, item.id, db)
+    _require_record_owner_or_admin(rec, user)
 
     if body.note is not None:
         rec.note = body.note
@@ -312,6 +329,7 @@ async def delete_print_record(
     """Delete a print record (does NOT delete attached files from disk)."""
     item = await _get_item_or_404(key, db)
     rec = await _get_record_or_404(record_id, item.id, db)
+    _require_record_owner_or_admin(rec, user)
     await db.delete(rec)
     await db.flush()
 
@@ -341,6 +359,7 @@ async def upload_gcode(
     """
     item = await _get_item_or_404(key, db)
     rec = await _get_record_or_404(record_id, item.id, db)
+    _require_record_owner_or_admin(rec, user)
 
     # Build destination path
     item_dir = Path(item.dir_path)
@@ -402,6 +421,7 @@ async def upload_print_photo(
     """
     item = await _get_item_or_404(key, db)
     rec = await _get_record_or_404(record_id, item.id, db)
+    _require_record_owner_or_admin(rec, user)
 
     item_dir = Path(item.dir_path)
     prints_dir = item_dir / "prints"

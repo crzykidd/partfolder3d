@@ -2,6 +2,28 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-03 — Authz model: trusted household; per-record write-ownership only
+
+Audit §A remediation (set 3). Two related decisions:
+
+**"All authenticated users are trusted" is the deliberate model — recorded, not fixed.** The
+core catalog has no per-item ownership or role gate on mutations, and a Bearer API key resolves
+to the full user with no per-key scope. For the single-household deployment this is intended:
+every authenticated member may edit/delete/share any item, and an API key is a full-power
+credential. This is NOT a bug to fix now — it's the accepted design. If the instance ever hosts
+less-trusted users, revisit: add an ownership/role gate on item mutations + public-share minting,
+and a `scope` column on `ApiKey`.
+
+**Print-record `visibility="private"` means "hidden from anonymous share viewers," not
+"per-user private."** The model/router docstrings and the item Print-History UI all treat
+private records as visible to every authenticated household member (only the public share path
+filters to `public`). So we enforced **write-ownership** (edit/delete/gcode/photo require the
+record's owner or an admin — closing real cross-user tampering) but left **read shared** within
+the household. Setup TOCTOU closed with a `pg_advisory_xact_lock`; password-reset now
+deactivates the user's sessions; login runs a dummy argon2 verify on unknown emails to kill the
+enumeration timing oracle. (No self-service logged-in password-change endpoint exists, so
+reset-kills-all-sessions has no "current session to preserve" case.)
+
 ## 2026-07-03 — SSRF: one guarded-fetch chokepoint; DNS-rebinding accepted as residual
 
 Audit §A remediation (set 1). All user-influenced outbound HTTP now goes through

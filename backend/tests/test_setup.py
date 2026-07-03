@@ -1,7 +1,10 @@
 """Tests for first-run setup: create admin + lock."""
 
+from typing import Any
+
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.mark.asyncio
@@ -50,6 +53,37 @@ async def test_setup_locks_after_first_run(client: AsyncClient) -> None:
         },
     )
     assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_setup_acquires_advisory_lock(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: Any
+) -> None:
+    """First-run setup serializes its check+insert with a pg advisory lock.
+
+    TOCTOU guard: two concurrent POST /api/setup could both pass count()==0 and
+    each mint an admin. We can't unit-test a true race, but we can assert the
+    DB-level lock (pg_advisory_xact_lock) is acquired on the setup path.
+    """
+    seen: list[str] = []
+    orig_execute = db_session.execute
+
+    async def spy(statement: Any, *args: Any, **kwargs: Any) -> Any:
+        seen.append(str(statement))
+        return await orig_execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "execute", spy)
+
+    resp = await client.post(
+        "/api/setup",
+        json={
+            "admin_email": "admin@example.com",
+            "admin_name": "Admin",
+            "admin_password": "securepassword1",
+        },
+    )
+    assert resp.status_code == 201
+    assert any("pg_advisory_xact_lock" in s for s in seen), seen
 
 
 @pytest.mark.asyncio

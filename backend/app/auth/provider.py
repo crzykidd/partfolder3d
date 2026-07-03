@@ -9,6 +9,14 @@ The interface is kept deliberately minimal: only what Phase 1 needs.
 
 from abc import ABC, abstractmethod
 
+from .password import hash_password, verify_password
+
+# Precomputed argon2id hash of a throwaway password. When authentication fails
+# because the email is unknown, we still run one verify against this hash so the
+# unknown-email path costs the same as the wrong-password path — closing the
+# timing side channel that would otherwise let an attacker enumerate accounts.
+_DUMMY_PASSWORD_HASH = hash_password("pf3d-timing-equalizer")
+
 
 class AuthProvider(ABC):
     """Abstract interface for an authentication backend."""
@@ -34,13 +42,15 @@ class PasswordAuthProvider(AuthProvider):
         from sqlalchemy import select
 
         from ..models.user import User
-        from .password import verify_password
 
         result = await self._db.execute(
             select(User).where(User.email == email, User.is_active.is_(True))
         )
         user = result.scalar_one_or_none()
         if user is None:
+            # Run a dummy verify so a missing email takes the same time as a
+            # wrong password (no early-return timing oracle for enumeration).
+            verify_password(password, _DUMMY_PASSWORD_HASH)
             return None
         if not verify_password(password, user.password_hash):
             return None
