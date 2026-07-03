@@ -47,10 +47,14 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    # Password-protect Redis: arq deserializes job bodies, so write access to
+    # the queue is code-execution in the worker. Not network-published today,
+    # but requirepass is cheap defense-in-depth. Set REDIS_PASSWORD in .env.
+    command: redis-server --requirepass "${REDIS_PASSWORD:-changeme}"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -68,7 +72,7 @@ services:
         required: false   # .env is optional; env vars can be set directly
     environment:
       DATABASE_URL: "postgresql+asyncpg://partfolder3d:${POSTGRES_PASSWORD:-changeme}@db:5432/partfolder3d"
-      REDIS_URL: "redis://redis:6379"
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
       DATA_DIR: /data
       RUN_MIGRATIONS: "true"
     volumes:
@@ -111,7 +115,7 @@ services:
         required: false
     environment:
       DATABASE_URL: "postgresql+asyncpg://partfolder3d:${POSTGRES_PASSWORD:-changeme}@db:5432/partfolder3d"
-      REDIS_URL: "redis://redis:6379"
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
       DATA_DIR: /data
       # Render thread caps — override the Dockerfile defaults from RENDER_CPU_THREADS.
       # All six vars must be set so every numeric-thread library sees the cap.

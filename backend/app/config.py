@@ -6,7 +6,7 @@ See .env.example for documentation of every variable.
 
 from typing import Annotated
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -24,7 +24,11 @@ class Settings(BaseSettings):
     )
 
     # ---- Redis / job queue ----
-    REDIS_URL: str = "redis://localhost:6379"
+    # Password-authenticated by default (Redis runs with --requirepass). The
+    # password is normally injected by compose via REDIS_PASSWORD; this default
+    # is the bare-metal fallback. Every arq connection derives from this URL, so
+    # the password propagates automatically through RedisSettings.from_dsn().
+    REDIS_URL: str = "redis://:changeme@localhost:6379/0"
 
     # ---- App paths ----
     DATA_DIR: str = "/data"
@@ -51,9 +55,22 @@ class Settings(BaseSettings):
             if s.startswith("["):  # explicit JSON array
                 import json
 
-                return json.loads(s)
-            return [part.strip() for part in s.split(",") if part.strip()]
-        return v
+                result: object = json.loads(s)
+            else:
+                result = [part.strip() for part in s.split(",") if part.strip()]
+        else:
+            result = v
+        # Reject the CORS wildcard: main.py mounts CORSMiddleware with
+        # allow_credentials=True, and the CORS spec forbids "*" together with
+        # credentials — browsers silently reject the response, so the operator
+        # sees a broken config with no error. Fail loud at startup instead.
+        if isinstance(result, list) and any(str(o).strip() == "*" for o in result):
+            raise ValueError(
+                'ALLOWED_ORIGINS may not be "*": the API sends credentials '
+                "(cookies), and browsers reject a wildcard CORS origin when "
+                "credentials are enabled. List explicit origins instead."
+            )
+        return result
 
     # ---- Session cookies ----
     # Set to False for local http:// dev (Docker or plain uvicorn).
@@ -171,6 +188,22 @@ class Settings(BaseSettings):
                 return json.loads(s)
             return [part.strip() for part in s.split(",") if part.strip()]
         return v
+
+    @model_validator(mode="after")
+    def _reject_weak_db_password(self) -> "Settings":
+        # Fail fast if the weak default password ("changeme") reaches a
+        # non-dev deployment — don't let production silently run with it.
+        # DEBUG=true (the dev compose stack) is allowed to keep using it.
+        if not self.DEBUG:
+            from urllib.parse import urlsplit  # noqa: PLC0415
+
+            if urlsplit(self.DATABASE_URL).password == "changeme":
+                raise ValueError(
+                    "DATABASE_URL is using the insecure default password "
+                    "'changeme'. Set a strong POSTGRES_PASSWORD in .env before "
+                    "running in production (or set DEBUG=true for local dev)."
+                )
+        return self
 
 
 settings = Settings()

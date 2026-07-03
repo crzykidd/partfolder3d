@@ -46,6 +46,25 @@ prefix appears only on git tags and GitHub releases.
   deactivates all of that user's existing sessions. **Login** runs a dummy argon2 verify on
   unknown emails so a missing account no longer responds measurably faster (removes the
   user-enumeration timing oracle).
+- **Redis now requires a password** — the broker runs with `--requirepass` and both the
+  backend and worker authenticate via `REDIS_URL` (`redis://:<pw>@redis:6379/0`), injected by
+  compose from the new `REDIS_PASSWORD` env var. arq deserializes job bodies, so queue write
+  access is code execution in the worker; this is defense-in-depth even though Redis is not
+  network-published. Set a strong `REDIS_PASSWORD` in `.env` for production.
+- **nginx sends security headers** — the reverse proxy now emits `X-Frame-Options: DENY`,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and a conservative
+  `Content-Security-Policy` (`default-src 'self'`; same-origin scripts, no `eval`; `data:`/
+  `blob:` images; inline styles only) on the served SPA — mitigating clickjacking and
+  MIME-sniffing. Don't assume the outer TLS proxy adds these.
+- **Fail-fast on the default DB password** — the backend refuses to start if `DATABASE_URL`
+  still uses the placeholder `changeme` password while `DEBUG` is not `true`, so a production
+  deploy can't silently run with the weak default (dev keeps working with `DEBUG=true`).
+- **CORS wildcard rejected with credentials** — `ALLOWED_ORIGINS` now raises a clear startup
+  error if set to `*`, since the API sends credentials and browsers reject a wildcard CORS
+  origin when credentials are enabled (previously it produced a silently broken config).
+- **CI/CD supply-chain hardening** — all third-party GitHub Actions are pinned to a full
+  commit SHA (checkout, setup-python/node, docker/*, codeql-action), and `ci.yml` /
+  `dev-checks.yml` gained a top-level least-privilege `permissions: contents: read` block.
 
 ## [0.3.0] — 2026-07-03
 
