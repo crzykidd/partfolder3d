@@ -342,6 +342,10 @@ export const listItems = (params: ItemListParams = {}): Promise<PaginatedItems> 
 export const getItem = (key: string): Promise<ItemDetail> =>
   apiFetch<ItemDetail>(`/api/items/${key}`)
 
+/** Re-inventory the item's folder on disk + resync the sidecar (per-item rescan). */
+export const rescanItem = (key: string): Promise<ItemDetail> =>
+  apiFetch<ItemDetail>(`/api/items/${key}/rescan`, { method: 'POST' })
+
 export const favoriteItem = (key: string): Promise<FavoriteOut> =>
   apiFetch<FavoriteOut>(`/api/items/${key}/favorite`, { method: 'POST' })
 

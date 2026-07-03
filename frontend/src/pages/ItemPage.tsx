@@ -114,6 +114,14 @@ export function ItemPage() {
     },
   })
 
+  const rescanMutation = useMutation({
+    mutationFn: () => api.rescanItem(key!),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['item', key] })
+      void queryClient.invalidateQueries({ queryKey: ['item-jobs', key] })
+    },
+  })
+
   // Poll for active jobs on this item; auto-refresh file list when they clear.
   const { data: activeJobs } = useQuery({
     queryKey: ['item-jobs', key],
@@ -334,9 +342,11 @@ export function ItemPage() {
           onDeleteFile={(fileId) => deleteFileMutation.mutate(fileId)}
           onRenameFile={(fileId, name) => renameFileMutation.mutate({ fileId, name })}
           onUploadFile={(file) => uploadFileMutation.mutate(file)}
+          onRescan={() => rescanMutation.mutate()}
           isDeletingFileId={deletingFileId}
           isRenamingFileId={renamingFileId}
           isUploadingFile={uploadFileMutation.isPending}
+          isRescanning={rescanMutation.isPending}
           uploadFileError={uploadFileError}
         />
       </AuroraSection>

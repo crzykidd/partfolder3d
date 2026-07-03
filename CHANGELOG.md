@@ -27,6 +27,11 @@ prefix appears only on git tags and GitHub releases.
   (`source === 'render'`) so you can quickly page through just the renders.
 - **3D viewer "expand to full window"** — a maximize button (top-right, next to Close) grows
   the "View in 3D" viewer to fill the whole browser window; the same button restores it.
+- **"Rescan disk" button on the item page** — the Files & Downloads panel now has a Rescan
+  button (owner-only) that re-inventories the item's folder on disk and resyncs the sidecar
+  via the reconcile engine, then refreshes the page. Per-item rescans always apply changes
+  automatically (no review queue), so on-disk edits show up immediately without waiting for
+  the daily scan.
 - **App-wide error boundary** — a component crash now shows a readable "Something went wrong"
   screen (with Reload and "Reset app data & reload" actions) instead of blanking the entire
   app. Also fixed a crash where the release-notes popup shared a React Query cache key with the

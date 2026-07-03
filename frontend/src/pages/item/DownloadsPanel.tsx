@@ -16,7 +16,7 @@
 
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, Download, Box, Trash2, Pencil, Upload } from 'lucide-react'
+import { ChevronDown, ChevronRight, Download, Box, Trash2, Pencil, Upload, RefreshCw } from 'lucide-react'
 
 import * as api from '@/lib/api'
 import { mapBundleStatus, shouldContinuePolling, type ZipPollStatus } from '@/lib/catalog-utils'
@@ -512,16 +512,18 @@ export interface DownloadsSectionProps {
   onDeleteFile?: (fileId: number) => void
   onRenameFile?: (fileId: number, newName: string) => void
   onUploadFile?: (file: File) => void
+  onRescan?: () => void
   isDeletingFileId?: number | null
   isRenamingFileId?: number | null
   isUploadingFile?: boolean
+  isRescanning?: boolean
   uploadFileError?: string | null
 }
 
 export function DownloadsSection({
   itemKey, files,
-  isOwner, onDeleteFile, onRenameFile, onUploadFile,
-  isDeletingFileId, isRenamingFileId, isUploadingFile, uploadFileError,
+  isOwner, onDeleteFile, onRenameFile, onUploadFile, onRescan,
+  isDeletingFileId, isRenamingFileId, isUploadingFile, isRescanning, uploadFileError,
 }: DownloadsSectionProps) {
   const queryClient = useQueryClient()
   const [bundleId, setBundleId] = useState<string | null>(null)
@@ -712,6 +714,29 @@ export function DownloadsSection({
             <span style={{ fontSize: 11, color: 'var(--aurora-danger)' }}>{uploadFileError}</span>
           )}
         </div>
+      )}
+
+      {/* Rescan disk (owners only) — re-inventory the folder + resync sidecar */}
+      {isOwner && onRescan && (
+        <button
+          onClick={onRescan}
+          disabled={isRescanning}
+          title="Re-scan this item's folder on disk and apply any file/metadata changes"
+          style={{
+            ...AURORA_BTN_GHOST,
+            fontSize: 12,
+            padding: '6px 14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            opacity: isRescanning ? 0.5 : 1,
+            alignSelf: 'flex-start',
+            cursor: isRescanning ? 'not-allowed' : 'pointer',
+          }}
+        >
+          <RefreshCw size={13} />
+          {isRescanning ? 'Rescanning…' : 'Rescan disk'}
+        </button>
       )}
 
       {/* ZIP download */}
