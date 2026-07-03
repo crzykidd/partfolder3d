@@ -22,6 +22,11 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **Image carousel "Renders" filter** — when an item has a mix of images, a **Renders**
+  toggle next to the image counter filters the carousel to app-generated renders
+  (`source === 'render'`) so you can quickly page through just the renders.
+- **3D viewer "expand to full window"** — a maximize button (top-right, next to Close) grows
+  the "View in 3D" viewer to fill the whole browser window; the same button restores it.
 - **App-wide error boundary** — a component crash now shows a readable "Something went wrong"
   screen (with Reload and "Reset app data & reload" actions) instead of blanking the entire
   app. Also fixed a crash where the release-notes popup shared a React Query cache key with the

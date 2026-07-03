@@ -32,7 +32,7 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { ThreeMFLoader } from 'three/examples/jsm/loaders/3MFLoader.js'
 import * as THREE from 'three'
-import { Camera, X } from 'lucide-react'
+import { Camera, Maximize2, Minimize2, X } from 'lucide-react'
 
 // ---------------------------------------------------------------------------
 // Error boundary — catches loader failures (bad mesh, 404, etc.)
@@ -233,6 +233,7 @@ export default function ModelViewer({
   const [loadError, setLoadError] = useState<Error | null>(null)
   const glRef = useRef<HTMLCanvasElement | null>(null)
   const [captureMsg, setCaptureMsg] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
 
   // Normalise extension to include leading dot
   const normExt = (ext.startsWith('.') ? ext : '.' + ext).toLowerCase() as SupportedExt
@@ -287,18 +288,44 @@ export default function ModelViewer({
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      {/* Viewer card — capped so it doesn't dominate large displays */}
+      {/* Viewer card — capped by default; fills the browser window when expanded */}
       <div
         style={{
           position: 'relative',
-          width: 'min(90vw, 1100px)',
-          height: 'min(82vh, 760px)',
-          borderRadius: 12,
+          width: expanded ? '100vw' : 'min(90vw, 1100px)',
+          height: expanded ? '100vh' : 'min(82vh, 760px)',
+          borderRadius: expanded ? 0 : 12,
           overflow: 'hidden',
-          boxShadow: '0 25px 60px rgba(0,0,0,0.55)',
+          boxShadow: expanded ? 'none' : '0 25px 60px rgba(0,0,0,0.55)',
           background: isDark ? '#18181b' : '#f0f0f0',
         }}
       >
+        {/* Expand / restore button — fills the browser window */}
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          aria-label={expanded ? 'Restore viewer size' : 'Expand to full window'}
+          title={expanded ? 'Restore' : 'Expand to full window'}
+          style={{
+            position: 'absolute',
+            top: 10,
+            right: 50,
+            zIndex: 20,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 32,
+            height: 32,
+            padding: 0,
+            background: 'rgba(0,0,0,0.6)',
+            color: '#fff',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 8,
+            cursor: 'pointer',
+          }}
+        >
+          {expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+        </button>
+
         {/* Close button — X icon, always visible top-right */}
         <button
           onClick={onClose}
