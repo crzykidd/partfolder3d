@@ -2,6 +2,23 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-02 — CodeQL triage for the FS browser endpoint (issue #8, PR #12)
+
+CodeQL flagged 5 alerts on `backend/app/routers/fs_browse.py`:
+
+- **`py/log-injection` (1)** — **fixed in code.** The `except OSError` handler logged the
+  resolved (user-influenced) path via `%s`; a directory name can technically contain
+  CR/LF. Now strips `\r`/`\n` before logging.
+- **`py/path-injection` (4)** — **dismissed as false positives** (won't-fix). The endpoint
+  is admin-only (`require_admin`) and every request path is `Path(path).resolve()`-d and
+  then containment-checked against the `FS_BROWSE_ROOTS` allowlist via `is_relative_to`
+  before any filesystem access; paths outside all roots are rejected with 400. CodeQL does
+  not recognise the multi-root allowlist helper (`_inside_any_root`, an `any(...)` over
+  `is_relative_to`) as a taint barrier, so it reports the constrained `resolve()`/`scandir`
+  calls. Traversal to `/`, `/etc`, `/proc`, `..`, and symlink escapes is prevented and
+  covered by 14 tests in `tests/test_fs_browse.py`. Dismissed via the code-scanning API
+  with this justification. (Same precedent as the earlier `downloads.py` path triage.)
+
 ## 2026-07-02 — FS browser allowlist-root design (issue #8)
 
 **Problem:** The library mount-path field is free text, forcing operators to guess

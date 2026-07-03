@@ -156,7 +156,10 @@ async def browse_directory(
             detail="Permission denied reading directory.",
         ) from exc
     except OSError as exc:
-        log.warning("fs_browse: OS error reading %s: %s", resolved, exc)
+        # Strip CR/LF from the (user-influenced) path before logging to avoid
+        # log injection — a directory name can technically contain newlines.
+        safe_path = str(resolved).replace("\r", "").replace("\n", "")
+        log.warning("fs_browse: OS error reading %s: %s", safe_path, exc)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot read directory.",
