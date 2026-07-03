@@ -8,12 +8,13 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-07-02 (v0.2.4 released on `main` — production-deploy hardening batch; release
-PRs merge clean; no open release gate; `dev` == `main`)
+**Last updated:** 2026-07-02 (v0.2.5 released on `main`; **`dev` is AHEAD of `main`** — #15 bulk import
+merged to `dev`, unreleased. New backlog issues #16/#20/#21/#24 filed; render-capture direction shaped)
 
-> ## CURRENT STATE (2026-07-02) — v0.2.4 released; production-deploy hardening
-> **Latest release: `v0.2.4`** on `main` (merge `b2a8419`, tag `v0.2.4`). `dev` == `main` (nothing
-> queued). Release history since v0.1.1:
+> ## CURRENT STATE (2026-07-02) — v0.2.5 released; #15 bulk import queued on `dev`
+> **Latest release: `v0.2.5`** on `main` (merge `569d5e1`, tag `v0.2.5`). **`dev` is AHEAD of `main`**:
+> the #15 bulk-import feature is merged to `dev` (merge `0952358`) and awaits the next release —
+> **next `/release-prep` will be `0.2.6`** (or a minor if scope grows). Release history since v0.1.1:
 > - **v0.2.0** — "read-don't-render" asset-detail rework: 3MF READ not rendered (embedded slicer
 >   thumbnail `ImageSource.embedded` + slice metadata, migration **0021**), bounded STL/OBJ/PLY render
 >   on the **`vtk-osmesa`** wheel (+`libosmesa6`; stock PyPI `vtk` is X11-only, can't render headless),
@@ -40,6 +41,16 @@ PRs merge clean; no open release gate; `dev` == `main`)
 >     libraries filtered from the add-item picker, #7 version-page nav link → **Admin → Content**,
 >     #6/#10 dark-mode `<select>` option popups (opaque `option` bg — the semi-transparent input bg is
 >     ~white over a native popup's light base; `color-scheme` alone insufficient on Chrome/Windows).
+> - **v0.2.5** — setup/import bug fixes + hardening: **#13** first-run auto-login (await the `/me`
+>   refetch before `navigate` so completing the wizard lands you in the app, not `/login`; fix on
+>   Setup **and** Login; + a confirm-password field; defensive `await db.commit()` in `run_setup`),
+>   **#14** import "set default image" not applied on commit (PATCH now syncs
+>   `ImportSessionImage.is_default` + a commit-side fallback), and a CodeQL `py/log-injection` fix
+>   (escape CR/LF before logging user-supplied `default_image_path`). Release verify: 607 backend
+>   pass on ephemeral PG (2 `test_run_db_backup_*` fail ONLY locally — they read `settings.DATABASE_URL`
+>   =:5432 default while the suite runs on :5433; CI has DATABASE_URL set, so it covers them) + 286 vitest.
+>   **Gotcha:** #13's commit said "(issue #13)" not "closes #13" → didn't auto-close on merge; closed
+>   manually. Use `closes #N` going forward (see memory).
 >
 > ### 🏭 Production-deploy operational knowledge (learned bringing up the owner's prod stack)
 > - **`frontend` is a ONE-TIME-RUN container** (`restart: "no"`): copies the built UI into the shared
@@ -58,7 +69,7 @@ PRs merge clean; no open release gate; `dev` == `main`)
 > `pull_request:[main]` only (the required gate); **`dev-checks.yml`** `push:[dev]` (fast, non-required,
 > jobs suffixed "(dev)"); **`publish.yml`** 3-image matrix (backend/frontend/nginx) on push:main +
 > release; **`codeql.yml`** PR + push:main (green, **NOT required** — doesn't block merge). Releases:
-> `/release-prep <v>` → merge PR (clean) → `:latest` publishes → `/release-cut <v>`. Worked for 0.2.3 + 0.2.4.
+> `/release-prep <v>` → merge PR (clean) → `:latest` publishes → `/release-cut <v>`. Worked for 0.2.3–0.2.5.
 >
 > ---
 >
@@ -142,15 +153,26 @@ PRs merge clean; no open release gate; `dev` == `main`)
 
 ## Current status
 
-- **v0.2.4 is the latest release on `main`** (see the CURRENT STATE block above for full detail).
-  `dev` == `main`, no release gate open. The full stack (Phases 0–10 + Aurora UI + issue-resolution
-  + render rework + v0.2.x production-deploy hardening) has shipped.
-- **NEXT ACTIONS:** none blocking. Known open GitHub issues to tackle when the owner wants:
-  **#11** library hard-delete + move-assets-between-libraries (future), **#13** post-setup
-  auto-login not sticking (may have been a not-logged-in mixup — verify/close), **#14**
-  import-from-URL "set default image" not applied. Next release: `/release-prep <version>` →
-  merge PR (clean) → `:latest` publishes → `/release-cut <version>` (never re-tag). Optional:
-  make the 2 CodeQL checks required on `main` branch protection (still not required).
+- **v0.2.5 is the latest release on `main`** (see the CURRENT STATE block above). **`dev` is AHEAD
+  of `main`** — the **#15 bulk-import** feature is merged to `dev` (bulk-commit endpoint +
+  `import.default_library_id` setting + inbox auto-resolution + "Commit ready" UI on `/imports`),
+  unreleased. The full stack (Phases 0–10 + Aurora UI + render rework + v0.2.x hardening + #15) has shipped/queued.
+- **NEXT ACTIONS:** none blocking. When the owner wants to ship what's on `dev`: `/release-prep 0.2.6`
+  → merge PR → `:latest` publishes → `/release-cut 0.2.6` (never re-tag). **Open GitHub issues**
+  (backlog): **#11** library hard-delete + move-assets-between-libraries (future); **#16** import
+  wizard "Clean up (AI)" ignores a typed-but-unsaved description (frontend must PATCH the description
+  before calling, or the endpoint should accept it in the body); **#20** queued worker jobs are
+  invisible in the Jobs monitor (Job row only created at run-time as `running` — create it at enqueue
+  as `queued`); **#21** capture the in-browser 3D viewer view as an item image (multiple captures for
+  multi-part 3MF; offered in the Add Asset wizard "Try to render file", browser render preferred);
+  **#24** release-notes popup on first load after upgrade. (#13 and #14 shipped in v0.2.5 and are CLOSED.)
+- **🎨 Render direction (shaped this session, see #21 + #15 comments):** server auto-render stays for
+  STL/OBJ/PLY (unchanged); 3MF (often no embedded thumb) → **browser viewport capture** is the answer,
+  supporting **multiple captures**; offer capture **in the Add Asset wizard** ("Try to render file",
+  browser render = preferred method, server-render/embedded as fallbacks); headless paths (bulk import
+  #15, API) get a `render: auto|off` preference param instead (browser capture can't run headless).
+  All layer via the existing `Image` + `set_default_image` model. Next: turn #21 into a build plan.
+- Optional: make the 2 CodeQL checks required on `main` branch protection (still not required).
 - **Deploy-readiness fix (committed):** scaffolding gap (since Phase 0) — nothing ran migrations
   on startup, so a fresh stack came up on an empty DB and the wizard failed. Fixed by **bundling
   migrations into the backend's image entrypoint** (`backend/docker-entrypoint.sh`:
@@ -277,12 +299,18 @@ PRs merge clean; no open release gate; `dev` == `main`)
 - [x] **Render / asset-detail rework landed on `dev`** (2026-07-02, 5 commits `247dfa6`→`5797b0c`) —
       3MF read-not-render, ZIP auto-extract, file-tree + 3MF collapsible UI, in-browser three.js
       viewer, vtk-osmesa render fix. Verified against a rebuilt image (see CURRENT STATE).
-- [x] **All v0.2.x work shipped** through v0.2.4 — `dev` == `main`, nothing queued for release.
-- [ ] **Open GitHub issues** (owner will look at later): **#11** library hard-delete + move-assets
-      between libraries (future), **#13** post-setup auto-login not sticking (verify/close), **#14**
-      import-from-URL "set default image" not applied.
-- [ ] **Re-verify on the owner's prod deploy after the 0.2.4 pull:** dark-mode dropdowns (#6/#10)
-      render dark, and the original NFS "images don't display" problem is resolved by the nginx `^~` fix.
+- [x] **v0.2.5 released** (2026-07-02) — #13 auto-login + #14 default-image + CodeQL log-injection fix.
+      Both #13 and #14 CLOSED. **#15 bulk import merged to `dev`** (merge `0952358`) — queued for 0.2.6.
+- [ ] **Ship what's on `dev` (0.2.6)** when the owner wants — `dev` is ahead of `main` by the #15 work.
+- [ ] **Open GitHub issues** (backlog): **#11** library hard-delete + move-assets (future); **#16**
+      import "Clean up (AI)" ignores typed-but-unsaved description; **#20** queued jobs invisible in the
+      monitor; **#21** capture 3D viewer view → item image (multi-capture; wizard "Try to render file",
+      browser preferred); **#24** release-notes popup after upgrade. Render direction shaped — see the
+      Current-status "🎨 Render direction" note; **next: turn #21 into a build plan** + add the #15
+      `render` param.
+- [ ] **Re-verify on the owner's prod deploy after upgrading to 0.2.5:** first-run auto-login (#13)
+      lands you in the app; import "set default image" (#14) sticks. (0.2.4: dark-mode dropdowns +
+      NFS image display already confirmed.)
 - [ ] **Rotate the AgentQL API key** (owner pasted it in chat during earlier testing).
 - [ ] **PRD §18 remaining notes** to honor when relevant: move journaling/crash recovery,
       real slicing for filament estimates, trash purge UI (see OPEN ITEMS above for detail).
