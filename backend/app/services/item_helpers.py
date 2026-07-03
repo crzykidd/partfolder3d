@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 
 import sqlalchemy as sa
+from arq.connections import ArqRedis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -155,7 +156,12 @@ async def _write_item_sidecar(db: AsyncSession, item: Item) -> None:
     write_sidecar(item_dir, data, item.title, item.key)
 
 
-async def _enqueue_render(item_id: int, model_extensions: list[str] | None = None) -> None:
+async def _enqueue_render(
+    item_id: int,
+    *,
+    pool: ArqRedis,
+    model_extensions: list[str] | None = None,
+) -> None:
     """Fire-and-forget: enqueue a render_item arq task for an item.
 
     Failure to enqueue (e.g. Redis not available) is logged but does NOT
@@ -189,48 +195,33 @@ async def _enqueue_render(item_id: int, model_extensions: list[str] | None = Non
             return
 
     try:
-        from arq import create_pool  # noqa: PLC0415
-        from arq.connections import RedisSettings  # noqa: PLC0415
-
-        redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-        await redis.enqueue_job("render_item", item_id)
-        await redis.aclose()
+        await pool.enqueue_job("render_item", item_id)
         log.debug("_enqueue_render: render_item enqueued for item %s", item_id)
     except Exception:
         log.exception("_enqueue_render: failed to enqueue render for item %s", item_id)
 
 
-async def _enqueue_analyze(item_id: int) -> None:
+async def _enqueue_analyze(item_id: int, *, pool: ArqRedis) -> None:
     """Fire-and-forget: enqueue analyze_item alongside render on item events.
 
     Phase 16: called on item create / file change / per-item Rescan.
     Never blocks item creation.
     """
     try:
-        from arq import create_pool  # noqa: PLC0415
-        from arq.connections import RedisSettings  # noqa: PLC0415
-
-        redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-        await redis.enqueue_job("analyze_item", item_id)
-        await redis.aclose()
+        await pool.enqueue_job("analyze_item", item_id)
         log.debug("_enqueue_analyze: analyze_item enqueued for item %s", item_id)
     except Exception:
         log.exception("_enqueue_analyze: failed to enqueue analysis for item %s", item_id)
 
 
-async def _enqueue_extract_archives(item_id: int) -> None:
+async def _enqueue_extract_archives(item_id: int, *, pool: ArqRedis) -> None:
     """Fire-and-forget: enqueue extract_archives for an item that contains ZIPs.
 
     Phase B (render-rework-B): called on import-session commit when the item
     contains at least one role=zip file.  Never blocks item creation.
     """
     try:
-        from arq import create_pool  # noqa: PLC0415
-        from arq.connections import RedisSettings  # noqa: PLC0415
-
-        redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-        await redis.enqueue_job("extract_archives", item_id)
-        await redis.aclose()
+        await pool.enqueue_job("extract_archives", item_id)
         log.debug(
             "_enqueue_extract_archives: extract_archives enqueued for item %s", item_id
         )

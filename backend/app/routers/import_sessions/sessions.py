@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
+from arq.connections import ArqRedis
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -53,6 +54,7 @@ from ...storage.ssrf_guard import (
     guarded_fetch,
     sanitize_for_log,
 )
+from ...worker.arq_pool import get_arq_pool
 from .helpers import (
     _enqueue_import_job,
     _ensure_creator,
@@ -116,6 +118,7 @@ async def create_import_session(
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
     background_tasks: BackgroundTasks,
+    arq: Annotated[ArqRedis, Depends(get_arq_pool)],
 ) -> ImportSessionOut:
     """Create an import session from a URL or prepare for file upload.
 
@@ -189,7 +192,7 @@ async def create_import_session(
         session.status = ImportSessionStatus.processing
         await db.flush()
         session_id_str = str(session.id)
-        background_tasks.add_task(_enqueue_import_job, session_id_str)
+        background_tasks.add_task(_enqueue_import_job, session_id_str, arq)
 
     # Reload with relationships
     from sqlalchemy.orm import selectinload  # noqa: PLC0415
@@ -289,6 +292,7 @@ async def process_session(
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
     background_tasks: BackgroundTasks,
+    arq: Annotated[ArqRedis, Depends(get_arq_pool)],
 ) -> ImportSessionOut:
     """Kick off the import processing job for a draft session.
 
@@ -307,7 +311,7 @@ async def process_session(
     session.updated_at = datetime.now(UTC)
     await db.flush()
 
-    background_tasks.add_task(_enqueue_import_job, session_id)
+    background_tasks.add_task(_enqueue_import_job, session_id, arq)
 
     from sqlalchemy.orm import selectinload  # noqa: PLC0415
 
@@ -554,6 +558,7 @@ async def _commit_session_inner(
     library: Library,
     user: User,
     db: AsyncSession,
+    pool: ArqRedis,
     render: str = "auto",
 ) -> CommitResponse:
     """Core commit logic shared by single-commit and bulk-commit paths.
@@ -789,13 +794,13 @@ async def _commit_session_inner(
 
     # ---- 13. Enqueue render (fire-and-forget) ----
     if render != "off":
-        await _enqueue_render(item.id)
+        await _enqueue_render(item.id, pool=pool)
 
     # ---- 14. Enqueue ZIP extraction when the item contains any ZIP ----
     from ...models.file import FileRole as _FileRole  # noqa: PLC0415
     has_zip = any(rec.role == _FileRole.zip for rec in records)
     if has_zip:
-        await _enqueue_extract_archives(item.id)
+        await _enqueue_extract_archives(item.id, pool=pool)
 
     return CommitResponse(
         item_key=item.key,
@@ -810,6 +815,7 @@ async def commit_import_session(
     user: Annotated[User, Depends(get_current_user)],
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    arq: Annotated[ArqRedis, Depends(get_arq_pool)],
     body: CommitOptions | None = None,
 ) -> CommitResponse:
     """Finalize an import session into a real Item.
@@ -857,7 +863,7 @@ async def commit_import_session(
     render_pref = body.render if body else "auto"
 
     try:
-        return await _commit_session_inner(session, library, user, db, render=render_pref)
+        return await _commit_session_inner(session, library, user, db, arq, render=render_pref)
 
     except HTTPException:
         raise
@@ -882,6 +888,7 @@ async def bulk_commit_import_sessions(
     user: Annotated[User, Depends(get_current_user)],
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    arq: Annotated[ArqRedis, Depends(get_arq_pool)],
 ) -> BulkCommitResponse:
     """Commit multiple pending_wizard import sessions in one call.
 
@@ -979,7 +986,9 @@ async def bulk_commit_import_sessions(
                     skipped.append(BulkCommitSkipped(session_id=sid, reason="no_library"))
                     continue
 
-                await _commit_session_inner(session_obj, library, user, iso_db, render=body.render)
+                await _commit_session_inner(
+                    session_obj, library, user, iso_db, arq, render=body.render
+                )
                 await iso_db.commit()
                 committed_count += 1
 

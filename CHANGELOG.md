@@ -51,6 +51,16 @@ prefix appears only on git tags and GitHub releases.
   compose from the new `REDIS_PASSWORD` env var. arq deserializes job bodies, so queue write
   access is code execution in the worker; this is defense-in-depth even though Redis is not
   network-published. Set a strong `REDIS_PASSWORD` in `.env` for production.
+- **arq jobs are JSON-serialized, not pickled** — the worker previously used arq's default
+  `pickle` (de)serializer for job bodies, so any write to the Redis queue key was arbitrary
+  code execution in the worker (which can write the whole library + `secret.key`). Both the
+  enqueue side (the API's shared pool) and the dequeue side (`WorkerSettings`) now use a JSON
+  (de)serializer; all job args are ints/strings. The worker's `REDIS_URL` fallback also now
+  comes from the same password-bearing `settings.REDIS_URL` default as the API instead of a
+  bare `redis://localhost:6379`, so a bare-metal worker run can't silently bypass Redis auth.
+  **Upgrade note:** any pickled jobs still sitting in the Redis queue at upgrade time will
+  fail to deserialize under JSON — **drain the worker queue across this upgrade** (jobs are
+  short-lived and the queue is normally empty, so this is a non-event in practice).
 - **nginx sends security headers** — the reverse proxy now emits `X-Frame-Options: DENY`,
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and a conservative
   `Content-Security-Policy` (`default-src 'self'`; same-origin scripts, no `eval`; `data:`/
@@ -65,6 +75,17 @@ prefix appears only on git tags and GitHub releases.
 - **CI/CD supply-chain hardening** — all third-party GitHub Actions are pinned to a full
   commit SHA (checkout, setup-python/node, docker/*, codeql-action), and `ci.yml` /
   `dev-checks.yml` gained a top-level least-privilege `permissions: contents: read` block.
+
+### Changed
+
+- **One shared arq Redis pool instead of ~32 per-request pools** — routers and services that
+  enqueue background jobs (render, analyze, extract-archives, ZIP bundle, import-session,
+  review-apply, scheduled-job run, backup, job retry/cancel/restart) used to open a fresh
+  `create_pool()` and `aclose()` it per request; if `enqueue_job()` raised, the `aclose()` was
+  skipped and the connection leaked. The API now creates a single pool at app startup
+  (`app.state.arq_pool`) and injects it via a `get_arq_pool` dependency, closing it once at
+  shutdown; job names and args are unchanged. The two worker-internal enqueue sites still open
+  a short-lived pool but now wrap it in `try/finally`. (audit §A / §E)
 
 ## [0.3.0] — 2026-07-03
 

@@ -161,18 +161,40 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 # ---------------------------------------------------------------------------
+# Shared arq pool stand-in
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def arq_pool() -> Any:
+    """Stand-in for the process-wide arq pool (``app.state.arq_pool``).
+
+    The real pool is created at app lifespan against Redis; the ASGI test
+    transport never runs lifespan and there is no Redis in tests, so every
+    enqueue path is routed through this AsyncMock via a ``get_arq_pool``
+    dependency override installed by the ``client`` fixture below.  Tests that
+    assert enqueue behaviour request this fixture and inspect ``.enqueue_job``.
+    """
+    from unittest.mock import AsyncMock
+
+    return AsyncMock()
+
+
+# ---------------------------------------------------------------------------
 # ASGI test client pointing at the real app, wired to the test session
 # ---------------------------------------------------------------------------
 @pytest_asyncio.fixture
-async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+async def client(
+    db_session: AsyncSession, arq_pool: Any
+) -> AsyncGenerator[AsyncClient, None]:
     """AsyncClient using the app's ASGI interface.
 
     The app's get_db dependency is overridden to yield the per-test session
-    (which will be rolled back after the test).
+    (which will be rolled back after the test).  get_arq_pool is overridden to
+    return the shared-pool stand-in (no Redis in tests / lifespan not run).
     """
     from app.auth.deps import get_db
     from app.crypto import ensure_key
     from app.main import app
+    from app.worker.arq_pool import get_arq_pool
 
     # Ensure key exists in the temp data dir
     ensure_key()
@@ -181,6 +203,7 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_arq_pool] = lambda: arq_pool
 
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"

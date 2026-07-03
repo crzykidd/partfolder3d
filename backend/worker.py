@@ -25,9 +25,15 @@ log = logging.getLogger(__name__)
 
 
 def get_redis_settings() -> RedisSettings:
-    """Parse REDIS_URL into arq RedisSettings."""
-    url = os.environ.get("REDIS_URL", "redis://localhost:6379")
-    return RedisSettings.from_dsn(url)
+    """Parse the configured REDIS_URL into arq RedisSettings.
+
+    Uses ``settings.REDIS_URL`` (same source and password-bearing default as the
+    API) rather than a bare ``os.environ`` fallback, so a bare-metal worker run
+    never silently drops the Redis password / requirepass.
+    """
+    from app.config import settings  # noqa: PLC0415
+
+    return RedisSettings.from_dsn(settings.REDIS_URL)
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +76,7 @@ SCHEDULED_JOB_REGISTRY: dict[str, tuple[str, str]] = {
 # Task imports (from app.worker.tasks.*)
 # ---------------------------------------------------------------------------
 from app.config import settings  # noqa: E402
+from app.worker.arq_pool import job_deserializer, job_serializer  # noqa: E402
 from app.worker.tasks.analysis import analyze_item  # noqa: E402
 from app.worker.tasks.archive import extract_archives  # noqa: E402
 from app.worker.tasks.bundles import build_zip_bundle  # noqa: E402
@@ -255,6 +262,11 @@ class WorkerSettings:
     on_startup = startup
 
     redis_settings = get_redis_settings()
+    # JSON job bodies instead of arq's pickle default (latent worker RCE via a
+    # Redis-write primitive).  MUST match the enqueue side (app.worker.arq_pool)
+    # or jobs won't deserialize.
+    job_serializer = staticmethod(job_serializer)
+    job_deserializer = staticmethod(job_deserializer)
     max_jobs = settings.WORKER_MAX_JOBS
     job_timeout = 600  # 10 minutes (render can be slow)
 

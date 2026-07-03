@@ -2,6 +2,39 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-03 — Shared arq pool + JSON job serializer (audit §A/§E remediation, set 5)
+
+**One process-wide arq pool, injected — not a module singleton.** The ~32 per-request
+`create_pool()`/`aclose()` sites (fresh pool per request; `aclose()` skipped and leaked when
+`enqueue_job()` raised) were consolidated into a single pool created at app lifespan startup
+(`app.state.arq_pool`) and injected via a `get_arq_pool` FastAPI dependency
+(`app/worker/arq_pool.py`), closed once at shutdown. Fire-and-forget service helpers
+(`_enqueue_render/_analyze/_extract_archives`, `_enqueue_import_job`) take the pool as a
+parameter so both their router callers (inject the shared pool) and their one worker-task caller
+(`extract_archives` passes `ctx.get("redis")`) reuse an existing pool. **Consequence:** the app
+now opens Redis at startup rather than lazily — a hard Redis dependency at boot (compose already
+`depends_on` Redis; arq's `create_pool` retries).
+
+**Two worker-internal enqueue sites kept their own short-lived pool (with `try/finally`).**
+`reconcile.py` (`_behavior_re_render`, `apply_review_item_action`) don't take `ctx`, and threading
+it down their call chains was more invasive than the leak was worth; they call the shared
+`create_arq_pool()` factory (same JSON serializer) wrapped in `try/finally`. The inbox-scan site
+in `scheduled.py` *does* have `ctx`, so it uses `ctx["redis"]` directly.
+
+**arq switched from pickle to JSON on BOTH ends.** Serializer + deserializer live in
+`arq_pool.py` and are set on the shared pool (enqueue side) AND `WorkerSettings` (dequeue side) —
+they must match. All job args are ints/strings; arq stores args as a tuple and JSON restores a
+list, which unpacks identically via `*args`. **Deploy note (also in CHANGELOG):** pickled jobs
+already queued at upgrade time won't deserialize under JSON — drain the worker queue across the
+upgrade (jobs are short-lived, queue normally empty). Also fixed `worker.py`'s `REDIS_URL`
+fallback to use the password-bearing `settings.REDIS_URL` default instead of a bare
+`redis://localhost:6379`.
+
+**Test seam:** the ASGI transport never runs lifespan, so `app.state.arq_pool` is never set and
+there's no Redis in tests. The `client` conftest fixture overrides `get_arq_pool` to return a
+shared-pool `AsyncMock` (`arq_pool` fixture); enqueue-asserting tests inspect its `.enqueue_job`
+instead of patching `arq.create_pool`.
+
 ## 2026-07-03 — Authz model: trusted household; per-record write-ownership only
 
 Audit §A remediation (set 3). Two related decisions:

@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import sqlalchemy as sa
+from arq.connections import ArqRedis
 from fastapi import (
     APIRouter,
     Depends,
@@ -69,6 +70,7 @@ from ..storage.journal import MoveError, atomic_rename, move_to_trash
 from ..storage.keys import generate_unique_key
 from ..storage.link_url import validate_link_url
 from ..storage.paths import item_dir_path, item_slug, sidecar_name
+from ..worker.arq_pool import get_arq_pool
 
 log = logging.getLogger(__name__)
 
@@ -383,6 +385,7 @@ async def create_item(
     _user: Annotated[User, Depends(get_current_user)],
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    arq: Annotated[ArqRedis, Depends(get_arq_pool)],
 ) -> dict[str, Any]:
     """Create a new item: assign key, create dir, write sidecar, inventory files."""
     # Validate library
@@ -483,9 +486,9 @@ async def create_item(
     )
 
     # Phase 4: enqueue render job (fire-and-forget; never blocks item creation)
-    await _enqueue_render(item.id)
+    await _enqueue_render(item.id, pool=arq)
     # Phase 16: enqueue mesh analysis alongside render
-    await _enqueue_analyze(item.id)
+    await _enqueue_analyze(item.id, pool=arq)
 
     return _build_item_detail(item, tags, file_objs, images)
 
@@ -862,6 +865,7 @@ async def rescan_item(
     _user: Annotated[User, Depends(get_current_user)],
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    arq: Annotated[ArqRedis, Depends(get_arq_pool)],
 ) -> dict[str, Any]:
     """Per-item rescan (PRD §8.6): re-inventory + sidecar resync via the reconcile engine.
 
@@ -914,7 +918,7 @@ async def rescan_item(
         item.creator = creator_result.scalar_one_or_none()
 
     # Phase 16: re-enqueue analysis on rescan (fire-and-forget)
-    await _enqueue_analyze(item.id)
+    await _enqueue_analyze(item.id, pool=arq)
 
     return _build_item_detail(item, tags, files, images)
 
@@ -1311,6 +1315,7 @@ async def upload_file(
     _user: Annotated[User, Depends(get_current_user)],
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    arq: Annotated[ArqRedis, Depends(get_arq_pool)],
 ) -> FileOut:
     """Upload an additional file to an existing item.
 
@@ -1386,8 +1391,8 @@ async def upload_file(
 
     await _write_item_sidecar(db, item)
 
-    await _enqueue_analyze(item.id)
-    await _enqueue_render(item.id, model_extensions=[suffix])
+    await _enqueue_analyze(item.id, pool=arq)
+    await _enqueue_render(item.id, pool=arq, model_extensions=[suffix])
 
     return FileOut(
         id=f.id,

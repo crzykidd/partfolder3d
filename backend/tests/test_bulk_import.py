@@ -778,7 +778,7 @@ async def test_bulk_commit_render_off_skips_enqueue(
 
     render_calls: list[int] = []
 
-    async def fake_enqueue_render(item_id: int, model_extensions=None) -> None:
+    async def fake_enqueue_render(item_id: int, *, pool=None, model_extensions=None) -> None:
         render_calls.append(item_id)
 
     monkeypatch.setattr(sessions_mod, "_enqueue_render", fake_enqueue_render)
@@ -814,7 +814,7 @@ async def test_bulk_commit_render_auto_enqueues(
 
     render_calls: list[int] = []
 
-    async def fake_enqueue_render(item_id: int, model_extensions=None) -> None:
+    async def fake_enqueue_render(item_id: int, *, pool=None, model_extensions=None) -> None:
         render_calls.append(item_id)
 
     monkeypatch.setattr(sessions_mod, "_enqueue_render", fake_enqueue_render)

@@ -318,16 +318,12 @@ async def _inbox_scan_core(ctx: dict) -> None:
             session.status = ImportSessionStatus.processing
             await db.commit()
 
-            # Enqueue the processing job
+            # Enqueue the processing job via the worker's own arq pool (ctx),
+            # which is already wired to the JSON job serializer.
             try:
-                from arq import create_pool  # noqa: PLC0415
-                from arq.connections import RedisSettings  # noqa: PLC0415
-
-                redis = await create_pool(
-                    RedisSettings.from_dsn(_settings.REDIS_URL)
+                await ctx["redis"].enqueue_job(
+                    "process_import_session", str(session.id)
                 )
-                await redis.enqueue_job("process_import_session", str(session.id))
-                await redis.aclose()
                 enqueued += 1
             except Exception:
                 log.exception(

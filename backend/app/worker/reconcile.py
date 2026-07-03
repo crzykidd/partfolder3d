@@ -556,13 +556,13 @@ async def _behavior_re_render(
     if modes.get("re_render") == "auto":
         # Enqueue render (fire-and-forget)
         try:
-            from arq import create_pool  # noqa: I001,PLC0415
-            from arq.connections import RedisSettings  # noqa: PLC0415
-            from ..config import settings  # noqa: PLC0415
+            from .arq_pool import create_arq_pool  # noqa: I001,PLC0415
 
-            redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-            await redis.enqueue_job("render_item", item.id)
-            await redis.aclose()
+            redis = await create_arq_pool()
+            try:
+                await redis.enqueue_job("render_item", item.id)
+            finally:
+                await redis.aclose()
         except Exception:
             log.exception("reconcile re_render: failed to enqueue render for item %s", item.id)
 
@@ -1061,13 +1061,13 @@ async def apply_review_item_action(
 
     elif act == "enqueue_render" and item_id:
         try:
-            from arq import create_pool  # noqa: I001,PLC0415
-            from arq.connections import RedisSettings  # noqa: PLC0415
-            from app.config import settings  # noqa: PLC0415
+            from .arq_pool import create_arq_pool  # noqa: I001,PLC0415
 
-            redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-            await redis.enqueue_job("render_item", item_id)
-            await redis.aclose()
+            redis = await create_arq_pool()
+            try:
+                await redis.enqueue_job("render_item", item_id)
+            finally:
+                await redis.aclose()
             summary = f"Render enqueued for item {item_id}."
         except Exception:
             log.exception("apply_review_item_action: failed to enqueue render for item %s", item_id)

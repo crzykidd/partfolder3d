@@ -65,7 +65,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "Startup: could not create inbox dir %s (non-fatal)", settings.INBOX_DIR
         )
 
-    yield
+    # One shared arq Redis pool for the whole process, injected via get_arq_pool.
+    # Replaces the old per-request create_pool/aclose pattern (leaked on error).
+    from .worker.arq_pool import create_arq_pool  # noqa: PLC0415
+
+    app.state.arq_pool = await create_arq_pool()
+    log.info("Startup: arq Redis pool created")
+
+    try:
+        yield
+    finally:
+        pool = getattr(app.state, "arq_pool", None)
+        if pool is not None:
+            await pool.aclose()
+            log.info("Shutdown: arq Redis pool closed")
 
 
 # ---------------------------------------------------------------------------

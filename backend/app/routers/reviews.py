@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 import sqlalchemy as sa
+from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth.deps import csrf_protect, get_db, require_admin
 from ..models.review_item import ReviewItem, ReviewStatus
 from ..models.user import User
+from ..worker.arq_pool import get_arq_pool
 
 router = APIRouter(prefix="/api/reviews", tags=["reviews"])
 
@@ -97,6 +99,7 @@ async def approve_review(
     admin: Annotated[User, Depends(require_admin)],
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    arq: Annotated[ArqRedis, Depends(get_arq_pool)],
 ) -> ReviewItemOut:
     """Approve a pending review item.
 
@@ -122,13 +125,7 @@ async def approve_review(
 
     # Enqueue the apply task
     try:
-        from arq import create_pool  # noqa: I001,PLC0415
-        from arq.connections import RedisSettings  # noqa: PLC0415
-        from ..config import settings  # noqa: PLC0415
-
-        redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-        await redis.enqueue_job("apply_review_item", rv.id)
-        await redis.aclose()
+        await arq.enqueue_job("apply_review_item", rv.id)
     except Exception:
         import logging  # noqa: PLC0415
         logging.getLogger(__name__).exception(
