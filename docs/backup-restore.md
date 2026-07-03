@@ -32,8 +32,10 @@ decrypts all of them. **One leaked backup = full secret disclosure for the insta
 
 - Store backups somewhere access-controlled and encrypted at rest.
 - Do not commit them to a repo, drop them in a shared folder, or email them.
-- The download endpoint is admin-only, and `./data/backups/` inherits your
-  `PUID:PGID`/host permissions — keep that directory tightly permissioned.
+- The download endpoint is admin-only. The backup job also writes each archive
+  `0600` (owner read/write only) and the `./data/backups/` directory `0700`, so
+  other local users on the host cannot read them. Preserve those restrictive
+  permissions when you copy an archive elsewhere.
 
 ---
 

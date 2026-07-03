@@ -29,6 +29,7 @@ from __future__ import annotations
 import gzip
 import json
 import logging
+import stat
 import tarfile
 import tempfile
 from datetime import UTC, datetime
@@ -101,6 +102,13 @@ async def run_db_backup(data_dir: str) -> Path:
 
     backup_dir = Path(data_dir) / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
+    # A backup bundles the Fernet key with every encrypted secret it protects
+    # (see docs/backup-restore.md). Keep the directory owner-only so other local
+    # users on the host cannot read the archives.
+    try:
+        backup_dir.chmod(stat.S_IRWXU)  # 0700
+    except OSError as exc:
+        log.warning("backup: could not chmod %s to 0700: %s", backup_dir, exc)
 
     ts = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%S")
     filename = f"backup_{ts}.tar.gz"
@@ -168,6 +176,13 @@ async def run_db_backup(data_dir: str) -> Path:
                 if child.is_file():
                     arcname = child.relative_to(tmp_path)
                     tf.add(child, arcname=str(arcname))
+
+    # Restrict the finished archive to owner read/write only — it contains the
+    # encryption key plus all encrypted secrets (mirrors secret.key in crypto.py).
+    try:
+        archive_path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
+    except OSError as exc:
+        log.warning("backup: could not chmod %s to 0600: %s", archive_path, exc)
 
     log.info("backup: archive created at %s (%d bytes)", archive_path, archive_path.stat().st_size)
     return archive_path

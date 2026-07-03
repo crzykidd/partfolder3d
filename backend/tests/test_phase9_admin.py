@@ -208,6 +208,30 @@ async def test_run_db_backup_includes_secret_key(tmp_path: Path) -> None:
     assert "config/secret.key" in members, "secret.key must be included in archive"
 
 
+@pytest.mark.asyncio
+async def test_run_db_backup_restrictive_perms(tmp_path: Path) -> None:
+    """The archive is 0600 and the backups directory is 0700 (owner-only).
+
+    A backup bundles the Fernet key with every encrypted secret, so it must not
+    be readable by other local users on the host.
+    """
+    import stat
+
+    from app.crypto import ensure_key
+    from app.worker.backup import run_db_backup
+
+    ensure_key()
+
+    archive_path = await run_db_backup(str(tmp_path))
+
+    archive_mode = stat.S_IMODE(archive_path.stat().st_mode)
+    assert archive_mode == 0o600, f"archive mode {oct(archive_mode)} != 0o600"
+
+    backup_dir = tmp_path / "backups"
+    dir_mode = stat.S_IMODE(backup_dir.stat().st_mode)
+    assert dir_mode == 0o700, f"backups dir mode {oct(dir_mode)} != 0o700"
+
+
 # ---------------------------------------------------------------------------
 # JSON export
 # ---------------------------------------------------------------------------

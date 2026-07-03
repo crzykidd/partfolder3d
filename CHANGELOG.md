@@ -22,6 +22,18 @@ prefix appears only on git tags and GitHub releases.
 
 ### Security
 
+- **Data-safety hardening: ZIP runtime byte budget, 3MF XXE-hardened parser, and backup-at-rest
+  permissions.** ZIP extraction (`storage/archive.py`) now enforces a *running* byte budget while
+  decompressing — counting real bytes per entry and across the archive — so a crafted ZIP that
+  under-declares its central-directory sizes to slip past the pre-scan caps is aborted mid-extraction
+  (all in-flight files are written to a temp dir and only moved into place once every entry is within
+  budget, so nothing partial is left behind). Untrusted `.3mf` XML (`worker/threemf.py`) is now parsed
+  with an explicit hardened lxml parser (`resolve_entities=False`, `no_network=True`, `load_dtd=False`,
+  `dtd_validation=False`, `huge_tree=False`) at every parse site, making XXE/entity-expansion
+  mitigation explicit and fail-closed. Backup archives (`worker/backup.py`) — which bundle the Fernet
+  key with all encrypted secrets — are now written `0600` in a `0700` `/data/backups` directory so
+  other local host users can't read them; the sensitivity note in `docs/backup-restore.md` documents
+  the enforced permissions.
 - **Error responses no longer leak raw exception text; added a global exception handler.**
   A catch-all handler now turns any *unhandled* server error into a fixed generic
   `500 {"detail": "Internal server error"}` and logs the full traceback server-side, so

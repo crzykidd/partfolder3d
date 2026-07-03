@@ -88,6 +88,23 @@ PlateEntry = dict[str, Any]
 # ---------------------------------------------------------------------------
 
 
+def _hardened_parser(etree: Any) -> Any:
+    """Return an lxml parser hardened for untrusted 3MF XML.
+
+    .3mf payloads are user-supplied, so entity resolution, network access, DTD
+    loading/validation, and huge-tree parsing are all disabled to neutralise
+    XXE / entity-expansion / SSRF-via-DTD vectors. lxml's defaults already
+    block most of these; this makes the intent explicit and fail-closed.
+    """
+    return etree.XMLParser(
+        resolve_entities=False,
+        no_network=True,
+        load_dtd=False,
+        dtd_validation=False,
+        huge_tree=False,
+    )
+
+
 def _best_thumbnail(zf: zipfile.ZipFile) -> tuple[bytes | None, str | None]:
     """Return (raw_bytes, entry_name) for the best available thumbnail in zf."""
     names_lower: dict[str, str] = {n.lower(): n for n in zf.namelist()}
@@ -131,7 +148,7 @@ def _parse_slice_info(zf: zipfile.ZipFile) -> tuple[list[PlateEntry], list[Filam
 
     try:
         data = zf.read(entry)
-        root = etree.fromstring(data)  # type: ignore[attr-defined]
+        root = etree.fromstring(data, _hardened_parser(etree))  # type: ignore[attr-defined]
     except Exception as exc:
         log.debug("threemf: could not parse slice_info.config: %s", exc)
         return [], []
@@ -295,7 +312,7 @@ def _count_objects_from_model(zf: zipfile.ZipFile) -> int:
 
     try:
         data = zf.read(entry)
-        root = etree.fromstring(data)  # type: ignore[attr-defined]
+        root = etree.fromstring(data, _hardened_parser(etree))  # type: ignore[attr-defined]
     except Exception:
         return 0
 
@@ -332,7 +349,7 @@ def _parse_model_settings(zf: zipfile.ZipFile) -> int:
 
     try:
         data = zf.read(entry)
-        root = etree.fromstring(data)  # type: ignore[attr-defined]
+        root = etree.fromstring(data, _hardened_parser(etree))  # type: ignore[attr-defined]
     except Exception:
         return 0
 
@@ -421,7 +438,7 @@ def read_3mf(path: Path) -> dict[str, Any]:
                     ms_entry = names_lower.get("metadata/model_settings.config")
                     if ms_entry:
                         ms_data = zf.read(ms_entry)
-                        ms_root = etree.fromstring(ms_data)  # type: ignore[attr-defined]
+                        ms_root = etree.fromstring(ms_data, _hardened_parser(etree))  # type: ignore[attr-defined]
                         for meta in ms_root.findall(".//metadata"):
                             if meta.get("key") == "gcode_file" and meta.get("value"):
                                 sliced = True

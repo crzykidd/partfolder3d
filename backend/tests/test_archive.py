@@ -399,6 +399,37 @@ def test_per_entry_size_cap_skips_entry(dest: Path, zip_file: Path) -> None:
         _arch._PER_ENTRY_MAX_MB = original
 
 
+def test_runtime_budget_aborts_underdeclared_entry(
+    dest: Path, zip_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ZIP that DECLARES small but decompresses beyond the cap is aborted.
+
+    The pre-scan caps read the central-directory declared sizes, so a crafted
+    archive that under-declares its ``file_size`` passes them. We simulate that
+    by leaving the declared size tiny (real 1-byte entry) but making the actual
+    decompression stream 5 MB. The running byte budget must catch this at
+    extraction time, raise ArchiveError, and leave no partial output behind.
+    """
+    # Declared file_size == 1 byte → sails through the pre-scan (cap 2 MB).
+    _write_zip(zip_file, {"payload.bin": b"x"})
+
+    real_bytes = b"A" * (5 * 1024 * 1024)  # 5 MB actually produced at runtime
+
+    def fake_open(self: zipfile.ZipFile, name: object, *a: object, **k: object) -> io.BytesIO:
+        return io.BytesIO(real_bytes)
+
+    monkeypatch.setattr(zipfile.ZipFile, "open", fake_open)
+
+    with pytest.raises(ArchiveError, match="uncompressed cap"):
+        extract_zip(zip_file, dest, max_uncompressed_mb=2)
+
+    # No partial output in dest, and the temp scratch dir is cleaned up.
+    assert list(dest.iterdir()) == []
+    assert not any(
+        p.name.startswith(".pf3d_extract_") for p in dest.parent.iterdir()
+    )
+
+
 # ---------------------------------------------------------------------------
 # Malformed archive
 # ---------------------------------------------------------------------------
