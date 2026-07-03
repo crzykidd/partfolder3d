@@ -20,7 +20,28 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Added
+
+- **Confirm-password field on the setup wizard** — the first-run setup form now
+  requires the admin to re-enter their password before proceeding. Mismatched
+  passwords are caught client-side with an inline error; the confirm value is
+  never sent to the backend (API contract unchanged).
+
 ### Fixed
+
+- **First-run setup wizard now auto-logs in correctly** (issue #13) — completing
+  the wizard previously dropped the user on the login screen instead of navigating
+  into the app. Root cause: `SetupPage.onSuccess` called
+  `queryClient.invalidateQueries({queryKey:['me']})` (fire-and-forget) then
+  `navigate('/')` synchronously. `AuthGuard` rendered before the background
+  refetch resolved (`user===null`, `isLoading===false`) and immediately redirected
+  to `/login`. Fix: `onSuccess` is now `async` and `await`s
+  `queryClient.refetchQueries({queryKey:['me']})` before calling `navigate`,
+  ensuring `AuthContext.user` is populated before `AuthGuard` evaluates. Same
+  fix applied to `LoginPage.onSuccess` (identical latent race). Belt-and-suspenders
+  backend change: `run_setup` now calls `await db.commit()` explicitly before
+  returning so the session row is guaranteed durable regardless of FastAPI
+  version commit-ordering behaviour.
 
 - Import wizard "set default image" not applied on commit (issue #14). PATCH
   `default_image_path` now syncs `ImportSessionImage.is_default` flags so the

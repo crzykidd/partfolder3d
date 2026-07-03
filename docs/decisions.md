@@ -2,6 +2,47 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-02 — Auto-login race fix and confirm-password field (issue #13)
+
+**Root cause confirmed: Suspect B (frontend navigation race).**
+
+Two suspects were analysed before fixing:
+
+**Suspect A — backend commit ordering:** `run_setup` only called `db.flush()` before
+returning; the real `COMMIT` happened in `get_db`'s post-yield cleanup. FastAPI
+0.115.6 routing (see `fastapi/routing.py` line 290) exits the `AsyncExitStack` — and
+thus runs all `yield`-dependency teardown including `await session.commit()` — **before**
+the response object is returned to Starlette for byte transmission. So the commit lands
+before the `Set-Cookie` response bytes reach the client. **Suspect A was ruled out as
+the primary cause for FastAPI 0.115.6.** Belt-and-suspenders: an explicit
+`await db.commit()` was added to `run_setup` after `create_session` so the behaviour
+is robust across FastAPI version changes and the intent is self-documenting. A redundant
+commit on an already-committed SQLAlchemy async session is a harmless no-op.
+
+**Suspect B — frontend navigation race (confirmed primary cause):** `SetupPage.onSuccess`
+called `queryClient.invalidateQueries({queryKey:['me']})` (fire-and-forget, not awaited)
+then `navigate('/', {replace:true})` synchronously. When `AuthGuard` rendered at `/`:
+- `user` was still `null` (stale cached value)
+- `isLoading` was `false` (background refetch triggered by `invalidateQueries` does
+  **not** set `isLoading=true` when the query already has data; only `isFetching`
+  becomes true, which `AuthGuard` does not check)
+- Result: `AuthGuard` immediately rendered `<Navigate to="/login" />` before the
+  background refetch could update `user`.
+
+**Fix:** `SetupPage.onSuccess` and `LoginPage.onSuccess` are now `async` and call
+`await queryClient.refetchQueries({queryKey:['me']})` before `navigate`, guaranteeing
+`AuthContext.user` is non-null before `AuthGuard` evaluates the route.
+- `SetupPage`: falls back to `/login` on refetch error (session cookie is set; normal
+  login flow can proceed).
+- `LoginPage`: navigates to `from` regardless of refetch outcome (session is set; a
+  re-fetch will happen on the next `AuthGuard` render).
+- A local `isNavigating` state keeps the Finish Setup button disabled/loading during
+  the async post-mutation refetch window.
+
+**Confirm-password field** added to `SetupPage` step 1 as an owner request riding in
+the same commit. The field is local UI state only; `admin_confirm_password` is never
+sent to the API. Backend `SetupRequest` schema is unchanged.
+
 ## 2026-07-02 — Fix import-wizard default image not applied on commit (issue #14)
 
 **Root cause:** `patch_import_session` stored `session.default_image_path` but did

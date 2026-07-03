@@ -113,9 +113,17 @@ async def run_setup(
 
     await db.flush()
 
-    # Auto-login the new admin
+    # Auto-login the new admin.
     session_token, csrf_token = await create_session(db, user.id)
     set_session_cookie(response, session_token, secure=settings.COOKIE_SECURE)
     set_csrf_cookie(response, csrf_token, secure=settings.COOKIE_SECURE)
+
+    # Commit explicitly here so the session row is durable in the DB before
+    # this function returns.  FastAPI's get_db dependency also commits after the
+    # yield (which runs after the response object is built but before bytes are
+    # sent), so this is belt-and-suspenders: it ensures a near-instant follow-up
+    # GET /api/auth/me can never race a still-pending commit.  A redundant
+    # commit on an already-committed session is a harmless no-op in SQLAlchemy.
+    await db.commit()
 
     return SetupResponse(ok=True, user_id=user.id)

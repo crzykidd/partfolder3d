@@ -110,17 +110,33 @@ export function SetupPage() {
     timezone: 'UTC',
   })
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  // Confirm-password is local UI state only — never sent to the API.
+  const [confirmPassword, setConfirmPassword] = useState('')
+  // True while awaiting the /me refetch post-mutation so the button stays
+  // disabled/loading across the entire submit flow (issue #13 fix).
+  const [isNavigating, setIsNavigating] = useState(false)
 
   const mutation = useMutation({
     mutationFn: () => api.runSetup(form),
-    onSuccess: () => {
+    onSuccess: async () => {
       // The instance is now initialized and the backend auto-logged us in.
       // Write setupStatus directly (not invalidate) so AuthGuard doesn't read a
       // stale `initialized:false` from cache during the refetch and bounce us
-      // back to /setup. Refetch /me so AuthContext picks up the new session.
+      // back to /setup.
       queryClient.setQueryData(['setupStatus'], { initialized: true })
-      queryClient.invalidateQueries({ queryKey: ['me'] })
-      navigate('/', { replace: true })
+      setIsNavigating(true)
+      try {
+        // Await the /me refetch so AuthContext.user is populated before we
+        // navigate.  Without this await, AuthGuard renders with user===null and
+        // isLoading===false (background refetch doesn't flip isLoading) and
+        // immediately redirects to /login — the race described in issue #13.
+        await queryClient.refetchQueries({ queryKey: ['me'] })
+        navigate('/', { replace: true })
+      } catch {
+        // Refetch failed (e.g. transient network error).  The session cookie is
+        // set; fall back to /login where the user can proceed normally.
+        navigate('/login', { replace: true })
+      }
     },
   })
 
@@ -128,8 +144,13 @@ export function SetupPage() {
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) => {
     const { name, value } = e.target
-    setForm((prev) => ({ ...prev, [name]: value }))
-    setFieldErrors((prev) => ({ ...prev, [name]: '' }))
+    if (name === 'admin_confirm_password') {
+      setConfirmPassword(value)
+      setFieldErrors((prev) => ({ ...prev, admin_confirm_password: '' }))
+    } else {
+      setForm((prev) => ({ ...prev, [name]: value }))
+      setFieldErrors((prev) => ({ ...prev, [name]: '' }))
+    }
   }
 
   const validate = (): boolean => {
@@ -138,6 +159,8 @@ export function SetupPage() {
     if (!form.admin_name.trim()) errors['admin_name'] = 'Name is required'
     if (form.admin_password.length < 8)
       errors['admin_password'] = 'Password must be at least 8 characters'
+    if (form.admin_password !== confirmPassword)
+      errors['admin_confirm_password'] = 'Passwords do not match'
     if (!form.instance_name.trim())
       errors['instance_name'] = 'Instance name is required'
     setFieldErrors(errors)
@@ -206,6 +229,7 @@ export function SetupPage() {
             {step === 1 && (
               <Step1
                 form={form}
+                confirmPassword={confirmPassword}
                 errors={fieldErrors}
                 onChange={handleChange}
               />
@@ -243,14 +267,18 @@ export function SetupPage() {
               {step === 2 && (
                 <button
                   type="submit"
-                  disabled={mutation.isPending}
+                  disabled={mutation.isPending || isNavigating}
                   style={{
                     ...BTN_PRIMARY,
-                    opacity: mutation.isPending ? 0.6 : 1,
-                    cursor: mutation.isPending ? 'not-allowed' : 'pointer',
+                    opacity: (mutation.isPending || isNavigating) ? 0.6 : 1,
+                    cursor: (mutation.isPending || isNavigating) ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  {mutation.isPending ? 'Setting up…' : 'Finish Setup'}
+                  {mutation.isPending
+                    ? 'Setting up…'
+                    : isNavigating
+                    ? 'Logging in…'
+                    : 'Finish Setup'}
                 </button>
               )}
             </div>
@@ -294,11 +322,12 @@ interface Step1Props {
     instance_name: string
     timezone: string
   }
+  confirmPassword: string
   errors: Record<string, string>
   onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => void
 }
 
-function Step1({ form, errors, onChange }: Step1Props) {
+function Step1({ form, confirmPassword, errors, onChange }: Step1Props) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--aurora-text)' }}>
@@ -351,6 +380,22 @@ function Step1({ form, errors, onChange }: Step1Props) {
           placeholder="At least 8 characters"
         />
         <FieldError msg={errors['admin_password']} />
+      </div>
+
+      <div>
+        <label htmlFor="admin_confirm_password" style={LABEL_STYLE}>
+          Confirm password <span style={{ color: 'var(--aurora-danger)' }}>*</span>
+        </label>
+        <AuroraInput
+          id="admin_confirm_password"
+          name="admin_confirm_password"
+          type="password"
+          autoComplete="new-password"
+          value={confirmPassword}
+          onChange={onChange}
+          placeholder="Re-enter your password"
+        />
+        <FieldError msg={errors['admin_confirm_password']} />
       </div>
 
       <div>
