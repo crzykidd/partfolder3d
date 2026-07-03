@@ -32,3 +32,14 @@ export const RENDER_MODE_LABELS: Record<RenderMode, string> = {
 
 export const setRenderMode = (value: RenderMode): Promise<SettingOut> =>
   upsertSetting('render.mode', value)
+
+// ---------------------------------------------------------------------------
+// Default import library (admin) — key: "import.default_library_id"
+// ---------------------------------------------------------------------------
+
+export const IMPORT_DEFAULT_LIBRARY_KEY = 'import.default_library_id'
+
+export const setDefaultImportLibrary = (
+  libraryId: number | null,
+): Promise<SettingOut> =>
+  upsertSetting(IMPORT_DEFAULT_LIBRARY_KEY, libraryId)

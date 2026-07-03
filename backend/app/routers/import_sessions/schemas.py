@@ -128,3 +128,31 @@ class CommitResponse(BaseModel):
     item_key: str
     item_id: int
     session_id: str
+
+
+class BulkCommitRequest(BaseModel):
+    """Request body for POST /api/import-sessions/bulk-commit.
+
+    session_ids: list of session UUIDs to commit, or null to target all
+                 pending_wizard sessions visible to the caller.
+    library_id: optional override — if set, this library is used for every
+                session in the batch regardless of the session's own library_id
+                or the default-import-library setting.
+    """
+
+    session_ids: list[str] | None = None
+    library_id: int | None = None
+
+
+class BulkCommitSkipped(BaseModel):
+    session_id: str
+    reason: str
+
+
+class BulkCommitResponse(BaseModel):
+    """Partial-success summary from POST /api/import-sessions/bulk-commit."""
+
+    total: int
+    committed: int
+    skipped: list[BulkCommitSkipped]
+    errors: list[BulkCommitSkipped]

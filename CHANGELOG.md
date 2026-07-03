@@ -20,6 +20,26 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Added
+
+- **Bulk commit endpoint** (`POST /api/import-sessions/bulk-commit`) — commits
+  multiple pending-wizard import sessions in one call.  Pass `session_ids` (list
+  of UUIDs) or `null` to target all visible pending-wizard sessions.  An optional
+  `library_id` override applies to every session in the batch.  Library resolution
+  per session: (a) request override, (b) session's own `library_id`, (c) new
+  `import.default_library_id` instance setting, (d) sole enabled library, (e) skip
+  with reason.  Each session runs in its own isolated transaction — one failure does
+  not roll back others.  Returns `{ total, committed, skipped, errors }` for
+  full partial-success reporting.  (Issue #15)
+- **Default import library setting** (`import.default_library_id`) — admin can
+  configure a default library via Settings.  Used by bulk commit and the inbox
+  scanner when a session has no explicit library set.  Validates that the referenced
+  library exists and is enabled; accepts null to clear.
+- **"Commit ready" button on `/imports`** — one-click bulk commit for all pending
+  inbox sessions visible to the current user.  If multiple libraries exist and no
+  default is configured, a library-picker modal appears before submitting.  Shows a
+  partial-success summary (committed N/M; reasons for skips/errors).
+
 ## [0.2.5] — 2026-07-02
 
 ### Added

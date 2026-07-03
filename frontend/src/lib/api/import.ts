@@ -233,3 +233,34 @@ export const importFromShareLink = (
     method: 'POST',
     body: JSON.stringify(body),
   })
+
+// ---------------------------------------------------------------------------
+// Issue #15 — Bulk commit
+// ---------------------------------------------------------------------------
+
+export interface BulkCommitRequest {
+  /** List of session UUIDs to commit, or null to target all pending_wizard sessions. */
+  session_ids?: string[] | null
+  /** Optional library override applied to every session in the batch. */
+  library_id?: number | null
+}
+
+export interface BulkCommitSkipped {
+  session_id: string
+  reason: string
+}
+
+export interface BulkCommitResponse {
+  total: number
+  committed: number
+  skipped: BulkCommitSkipped[]
+  errors: BulkCommitSkipped[]
+}
+
+export const bulkCommitImportSessions = (
+  body: BulkCommitRequest,
+): Promise<BulkCommitResponse> =>
+  apiFetch<BulkCommitResponse>('/api/import-sessions/bulk-commit', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
