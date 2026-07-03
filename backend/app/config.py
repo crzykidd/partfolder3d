@@ -4,7 +4,10 @@ Values are read from environment variables (or a .env file if present).
 See .env.example for documentation of every variable.
 """
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Annotated
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -27,7 +30,30 @@ class Settings(BaseSettings):
     DATA_DIR: str = "/data"
 
     # ---- API / CORS ----
-    ALLOWED_ORIGINS: list[str] = ["http://localhost:8973", "http://localhost:5173"]
+    # Accepts the operator-friendly comma-separated form documented in
+    # .env.example (ALLOWED_ORIGINS=https://a.example,https://b.example), a JSON
+    # array, or empty. NoDecode disables pydantic-settings' JSON-only decoding so
+    # a plain comma-separated value no longer raises a SettingsError at boot.
+    ALLOWED_ORIGINS: Annotated[list[str], NoDecode] = [
+        "http://localhost:8973",
+        "http://localhost:5173",
+    ]
+
+    @field_validator("ALLOWED_ORIGINS", mode="before")
+    @classmethod
+    def _parse_allowed_origins(cls, v: object) -> object:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return []
+            if s.startswith("["):  # explicit JSON array
+                import json
+
+                return json.loads(s)
+            return [part.strip() for part in s.split(",") if part.strip()]
+        return v
 
     # ---- Session cookies ----
     # Set to False for local http:// dev (Docker or plain uvicorn).
@@ -100,6 +126,28 @@ class Settings(BaseSettings):
     ZIP_MAX_UNCOMPRESSED_MB: int = 2048
     # Maximum number of files in a single ZIP archive.
     ZIP_MAX_FILES: int = 10_000
+
+    # ---- Admin filesystem browser (issue #8) ----
+    # Comma-separated absolute paths (or JSON array) that admins are allowed to
+    # browse via GET /api/admin/fs/browse.  Any path resolving outside ALL of
+    # these roots is rejected with 400.  Never allow "/" or system paths here.
+    FS_BROWSE_ROOTS: Annotated[list[str], NoDecode] = ["/library"]
+
+    @field_validator("FS_BROWSE_ROOTS", mode="before")
+    @classmethod
+    def _parse_fs_browse_roots(cls, v: object) -> object:
+        if v is None:
+            return ["/library"]
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return ["/library"]
+            if s.startswith("["):  # explicit JSON array
+                import json
+
+                return json.loads(s)
+            return [part.strip() for part in s.split(",") if part.strip()]
+        return v
 
 
 settings = Settings()

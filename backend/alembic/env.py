@@ -70,10 +70,23 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
+    # lock_timeout / statement_timeout make a blocked or runaway migration FAIL
+    # with a clear Postgres error instead of hanging container startup forever
+    # with no output. Applied at connection start (session-scoped, survives the
+    # autocommit blocks some migrations use). Values are milliseconds; override
+    # via MIGRATION_LOCK_TIMEOUT_MS / MIGRATION_STATEMENT_TIMEOUT_MS.
+    lock_ms = os.environ.get("MIGRATION_LOCK_TIMEOUT_MS", "30000")
+    stmt_ms = os.environ.get("MIGRATION_STATEMENT_TIMEOUT_MS", "300000")
     connectable = async_engine_from_config(
         {"sqlalchemy.url": get_url()},
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args={
+            "server_settings": {
+                "lock_timeout": lock_ms,
+                "statement_timeout": stmt_ms,
+            }
+        },
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

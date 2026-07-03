@@ -11,7 +11,7 @@
 </div>
 
 > [!WARNING]
-> **Early alpha (v0.2.3) — under active development.** This is an early release: expect rough
+> **Early alpha (v0.2.4) — under active development.** This is an early release: expect rough
 > edges, and **breaking changes can land between releases** (database schema, config, or API).
 > It's usable and published — pull the images and follow [Getting started](#getting-started) — but
 > **pin a specific version, back up your data, and read the release notes before upgrading.**
@@ -19,7 +19,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.2.3-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.2.4-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![Stage](https://img.shields.io/badge/stage-alpha-orange)
 ![Code](https://img.shields.io/badge/code-yes-brightgreen)
@@ -31,6 +31,18 @@
 ---
 
 ## What's New
+
+### v0.2.4 (2026-07-02)
+
+Production reliability + admin UX. **Fixes production image display** — nginx was 404-ing
+item thumbnails/renders and logos (`/api/…/*.png`), so nothing rendered; now fixed. Adds
+**fail-loud startup logging** to the backend and frontend containers (version banner, DB
+preflight, writable checks, streamed migrations with a hard timeout, redacted config) so a
+"won't start" is never a silent hang. Fixes `ALLOWED_ORIGINS` crashing boot when set as a
+comma-separated string. Adds an **admin folder browser** for picking a library mount path
+(instead of typing it), stops offering **disabled libraries** as an add-item destination,
+fixes a stale settings-nav link, and makes native **dark-mode dropdowns** render dark.
+See [CHANGELOG.md](CHANGELOG.md) for the full details.
 
 ### v0.2.3 (2026-07-02)
 
@@ -105,7 +117,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.2.3 alpha) — see the
+> The full feature set below is **built and released** (v0.2.4 alpha) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -302,8 +314,8 @@ transfer, and resilience against database loss.
 
 | Container  | Role |
 |------------|------|
-| `nginx`    | Single external entry point / reverse proxy; serves frontend, proxies `/api`, streams downloads. |
-| `frontend` | Build artifact (served by nginx) — React + TypeScript + Vite + Tailwind + shadcn/ui. |
+| `nginx`    | Single external entry point / reverse proxy; serves the built UI **read-only from the shared `frontend_dist` volume**, proxies `/api`, streams downloads. |
+| `frontend` | **One-time-run** container (`restart: "no"`) — copies the built React/TypeScript/Vite UI into the shared `frontend_dist` volume, then **exits 0** (expected). nginx waits for it, then serves those files. |
 | `backend`  | FastAPI app — REST API, auth, OpenAPI docs. |
 | `worker`   | Background jobs — scans, imports, thumbnail rendering, AI tagging, scraping, backups, sync. |
 | `redis`    | Job queue + scheduling broker. |
@@ -369,7 +381,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is at the **alpha** stage (v0.2.3).
+Honest snapshot — this project is at the **alpha** stage (v0.2.4).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -433,6 +445,21 @@ What happens on first `docker compose up -d`:
 - **nginx config is baked into the `partfolder3d-nginx` image** — the reverse proxy config
   (`client_max_body_size 1024m`, `/api/` proxy, SPA fallback, `/img/` logos) ships inside
   the image so no host config files are needed. The baked default is the supported path.
+- **The `frontend` container runs once and exits — this is normal.** It copies the built UI
+  into the shared `frontend_dist` volume and exits `0` (`restart: "no"`); nginx waits for it
+  (`depends_on: service_completed_successfully`), then serves those files. A `frontend`
+  showing `Exited (0)` in `docker compose ps` is expected, not a failure.
+
+> [!IMPORTANT]
+> **`frontend` + `nginx` share the `frontend_dist` volume, and it must be writable by your
+> `PUID`/`PGID`.** The `frontend` container **writes** the built UI into `frontend_dist` as
+> your configured `PUID:PGID`; `nginx` then **serves it read-only** from the same volume. Run
+> the app services (`backend`, `worker`, `frontend`) with the **same `PUID`/`PGID`** so
+> ownership of that shared volume stays consistent. On a fresh install this just works. If you
+> **reuse an old volume or change `PUID`/`PGID`**, the frontend can fail to write it and exit
+> with `FATAL: '/dist' … is not writable by uid=… gid=…` (which blocks nginx). Fix it by
+> recreating the volumes — `docker compose down -v` (⚠️ also wipes db/redis/`./data`) — or
+> `chown` the `frontend_dist` volume to your `PUID:PGID`.
 
 > [!TIP]
 > **Custom nginx config** — if you need to adjust the nginx config (e.g. to add TLS
@@ -519,6 +546,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — alpha (v0.2.3) · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — alpha (v0.2.4) · built by <code>crzykidd</code></sub>
 
 </div>

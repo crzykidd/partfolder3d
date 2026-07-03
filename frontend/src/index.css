@@ -160,3 +160,15 @@
     color: hsl(var(--muted-foreground));
   }
 }
+
+/* Native <select> option popups in dark mode.
+   The aurora input background (--aurora-input-bg) is SEMI-TRANSPARENT: fine on the
+   page, but a native <option> popup has its own light base, so ~6% white over it
+   renders essentially WHITE — and `color-scheme: dark` alone does not reliably darken
+   option lists (esp. Chrome on Windows). Force an OPAQUE dark surface + light text on
+   the options themselves. Fixes #6 (signup Timezone) and #10 (Add Asset Library). */
+.dark select option,
+.dark option {
+  background-color: var(--aurora-bg-to);
+  color: var(--aurora-text);
+}

@@ -20,6 +20,91 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.2.4] — 2026-07-02
+
+> ⚠️ **nginx config changed** — if you are running a custom nginx config
+> (the `./nginx/nginx.conf` bind-mount in `docker-compose.yml`), compare your
+> copy against the updated `nginx/nginx.conf` in this release and reconcile any
+> differences before upgrading.
+
+### Added
+
+- **Folder browser for library mount-path setup** — the Add Library form now
+  includes a Browse button that opens a modal filesystem navigator. Operators
+  can drill into the container filesystem (starting from the configured
+  `FS_BROWSE_ROOTS`, default `/library`) and click "Select this folder" to fill
+  the Mount path field instead of typing it. Manual text entry is preserved as
+  a fallback. The backend endpoint (`GET /api/admin/fs/browse`) is admin-only
+  and rejects any path that resolves outside the allowlist (prevents traversal
+  to `/`, `/etc`, `/proc`, or arbitrary absolute paths). (Closes #8)
+
+### Fixed
+
+- **Native `<select>` dropdowns no longer render a white option list in dark mode**
+  (fixes #6, #10) — the signup Timezone picker and the Add Asset Library selector
+  showed a white popup because the aurora input background is semi-transparent
+  (`rgba(255,255,255,0.06)`), which over a native option popup's own light base is
+  effectively white, and `color-scheme: dark` alone doesn't reliably darken option
+  lists (notably Chrome on Windows). Options now get an explicit opaque dark surface
+  + light text in dark mode.
+
+- **Disabled libraries no longer appear as import destinations** — soft-deleted
+  (`enabled = false`) libraries were still offered in the Add Asset modal (both
+  Upload and From-URL tabs), letting users target a library they had just
+  "deleted." The destination pickers now filter to enabled libraries only; if all
+  libraries are disabled a clear message is shown. The admin Libraries page is
+  unaffected and continues to list all libraries. The backend already rejected
+  disabled-library sessions at create time; the frontend now prevents the
+  selection in the first place. (Fixes #9)
+
+- **Corrected the settings location text on the version/landing page** — the
+  info card said "Admin → Settings" but that nav item does not exist; library
+  paths and configuration live under **Admin → Content**. The text now links
+  directly to `/admin/content/libraries` using React Router `<Link>` so it
+  cannot silently drift out of sync again. (Fixes #7)
+
+- **Images and renders now display in production** (nginx no longer 404s
+  `/api/…/*.png`) — the baked nginx config's static-asset regex
+  (`location ~* \.(png|jpg|js|…)$`) matched *any* URL ending in an image
+  extension, including proxied item images like
+  `/api/items/<key>/files/renders/<sha>.png` and baked logos under `/img/`. Because
+  regex locations are evaluated before plain prefixes, those requests were served
+  from nginx's frontend root (where they don't exist) and returned 404 instead of
+  being proxied to the backend — so thumbnails/renders never rendered. The `/api/`
+  and `/img/` locations now use `^~` to take precedence over the regex.
+
+- **Frontend "publish" container now logs a version banner and fails loudly** —
+  previously it ran a bare `cp … && echo` and exited silently, so a failed asset
+  copy (most often the `frontend_dist` volume not being writable by the
+  configured `PUID`/`PGID`) blocked nginx with no explanation. It now logs
+  `PartFolder 3D frontend vX.Y.Z — uid=… gid=…`, verifies the destination is
+  writable (clear FATAL + remediation if not), reports how many files it
+  published, and states that exit 0 is expected.
+
+- **`ALLOWED_ORIGINS` no longer crashes the app when set as a comma-separated
+  string** — `.env.example` documents the comma form
+  (`ALLOWED_ORIGINS=https://a,https://b`), but pydantic-settings JSON-decodes
+  list env vars, so a plain/empty value raised `SettingsError: error parsing
+  value for field "ALLOWED_ORIGINS"` at boot (the app exited before serving). The
+  setting now accepts a comma-separated string, a JSON array, or an empty value.
+
+- **Backend startup now logs and fails loudly instead of hanging silently** — the
+  container entrypoint previously printed only "applying database migrations…" and
+  then went dark on any problem, so a bad DB host/credentials, an unwritable data
+  volume (PUID/PGID mismatch), or a lock-blocked migration all looked identical: a
+  stuck service with no logs. The entrypoint now (1) verifies the data dir is
+  writable and prints a clear FATAL on a permissions problem, (2) waits for the
+  database with a bounded timeout and logs the **actual** connection error
+  (`ConnectionRefusedError`, `InvalidPasswordError`, …) on each attempt, and (3)
+  runs migrations with a `lock_timeout`/`statement_timeout` **and** a hard
+  `MIGRATION_TIMEOUT` (default 600s) so a blocked migration errors with a clear
+  message naming the culprit instead of hanging forever. It also logs a startup
+  banner — app **version**, uid/gid, the current DB revision before upgrading, and
+  the `DATABASE_URL` **with the password redacted** — plus streams alembic's
+  per-migration output live (`PYTHONUNBUFFERED`), so a user's log paste alone is
+  enough to report an issue. Tunable via `DB_WAIT_TIMEOUT`, `DB_CONNECT_TIMEOUT`,
+  `MIGRATION_LOCK_TIMEOUT_MS`, `MIGRATION_STATEMENT_TIMEOUT_MS`, `MIGRATION_TIMEOUT`.
+
 ## [0.2.3] — 2026-07-02
 
 > ⚠️ **nginx config changed** — if you are running a custom nginx config

@@ -2,6 +2,60 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-02 — CodeQL triage for the FS browser endpoint (issue #8, PR #12)
+
+CodeQL flagged 5 alerts on `backend/app/routers/fs_browse.py`:
+
+- **`py/log-injection` (1)** — **fixed in code.** The `except OSError` handler logged the
+  resolved (user-influenced) path via `%s`; a directory name can technically contain
+  CR/LF. Now strips `\r`/`\n` before logging.
+- **`py/path-injection` (4)** — **dismissed as false positives** (won't-fix). The endpoint
+  is admin-only (`require_admin`) and every request path is `Path(path).resolve()`-d and
+  then containment-checked against the `FS_BROWSE_ROOTS` allowlist via `is_relative_to`
+  before any filesystem access; paths outside all roots are rejected with 400. CodeQL does
+  not recognise the multi-root allowlist helper (`_inside_any_root`, an `any(...)` over
+  `is_relative_to`) as a taint barrier, so it reports the constrained `resolve()`/`scandir`
+  calls. Traversal to `/`, `/etc`, `/proc`, `..`, and symlink escapes is prevented and
+  covered by 14 tests in `tests/test_fs_browse.py`. Dismissed via the code-scanning API
+  with this justification. (Same precedent as the earlier `downloads.py` path triage.)
+
+## 2026-07-02 — FS browser allowlist-root design (issue #8)
+
+**Problem:** The library mount-path field is free text, forcing operators to guess
+the absolute container path. Adding a filesystem browser requires tight security because
+the API is running inside the container and must not expose arbitrary paths like `/`,
+`/etc`, or `/proc` to any caller — even admins.
+
+**Design: operator-configured allowlist (`FS_BROWSE_ROOTS`)**
+
+A new config setting `FS_BROWSE_ROOTS` (env var; comma-separated or JSON array; default
+`["/library"]`) defines the only roots the browser may expose. Every request path is:
+
+1. Checked to be absolute (reject relative paths immediately).
+2. Resolved via `Path(path).resolve()` — this normalises `..` components and follows
+   symlinks, so `/library/../etc` resolves to `/etc` before the check runs.
+3. Checked with `is_relative_to()` against every configured root. If the resolved path
+   is not inside *any* root, the request is rejected with HTTP 400.
+
+**Why resolved path + is_relative_to, not a string prefix check:** `Path.is_relative_to`
+works on normalised Path objects, so it is immune to tricks like extra slashes, `.`, or
+`..` that fool naive string prefix matching (e.g. `/libraryfoo` would falsely pass a
+`str.startswith("/library")` check but correctly fails `is_relative_to(Path("/library"))`).
+
+**Why allowlist instead of a read-only flag:** A simple "read-only browse" flag would
+still allow admins to enumerate `/etc/passwd`, `/proc/*/environ`, etc. — information that
+should not leak even to admins in a shared-hosting context. The allowlist gates what paths
+the container exposes via the HTTP API entirely independently of filesystem permissions.
+
+**Parent navigation stops at the root boundary:** The `parent` field in the response is
+set to `None` when the parent directory is outside all configured roots, preventing
+up-navigation above the allowlist boundary.
+
+**Symlinks in directory entries are excluded:** `os.scandir` entries are filtered with
+`is_dir(follow_symlinks=False)` so symlinked directories are not shown to the user.
+(The *roots themselves* may be symlinks; whether to resolve them is the operator's
+responsibility when configuring `FS_BROWSE_ROOTS`.)
+
 ## 2026-07-02 — Frontend typecheck gate is `npm run build`, not `npx tsc --noEmit`
 
 **Problem:** The frontend production image (`frontend/Dockerfile --target prod`) runs

@@ -516,7 +516,11 @@ export function AddAssetModal({ open, onClose }: AddAssetModalProps) {
 
   if (!open) return null
 
-  const libs = libraries ?? []
+  const allLibs = libraries ?? []
+  // Only offer ENABLED libraries as import destinations.
+  // Disabled libraries still appear in the admin Libraries page but must
+  // not be selectable here (fixes #9).
+  const libs = allLibs.filter((l) => l.enabled)
 
   const TABS: [TabId, string][] = [
     ['upload', 'Upload Files'],
@@ -659,7 +663,9 @@ export function AddAssetModal({ open, onClose }: AddAssetModalProps) {
               }}
             >
               <p style={{ fontSize: 13, color: '#D97706', margin: 0 }}>
-                No libraries configured. Ask an admin to add one before importing.
+                {allLibs.length > 0
+                  ? 'All libraries are currently disabled. Ask an admin to re-enable one before importing.'
+                  : 'No libraries configured. Ask an admin to add one before importing.'}
               </p>
             </div>
           ) : activeTab === 'upload' ? (
