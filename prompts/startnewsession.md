@@ -8,36 +8,57 @@ standards/operating rules). Keep them separate: rules in `CLAUDE.md`, live state
 > "Current status" and "Open threads" sections so the next session loses nothing. This is
 > a deliberate ritual — see the checklist at the bottom.
 
-**Last updated:** 2026-07-02 (v0.2.2 released on `main`; the perpetual release-PR "bypass" problem is
-FIXED — merges are clean now; no open release gate)
+**Last updated:** 2026-07-02 (v0.2.4 released on `main` — production-deploy hardening batch; release
+PRs merge clean; no open release gate; `dev` == `main`)
 
-> ## CURRENT STATE (2026-07-02) — v0.2.2 released; CI gate finally merges clean
-> **Latest release: `v0.2.2`** on `main` (tag at merge `f826710`). Release history since v0.1.1:
-> - **v0.2.0** — the "read-don't-render" asset-detail rework: 3MF READ not rendered (embedded slicer
->   thumbnail `ImageSource.embedded` + real slice metadata, migration **0021**), bounded STL/OBJ/PLY
->   render on the **`vtk-osmesa`** wheel (+`libosmesa6`; stock PyPI `vtk` is X11-only and can't render
->   headless — see decisions), ZIP auto-extraction, file-tree UI + collapsible 3MF panel, in-browser
->   three.js viewer, per-file 3MF thumbnails. `networkx` is now an explicit backend dep.
-> - **v0.2.1** — PREPPED BUT NEVER TAGGED (merged to `main`, no release). Rolled forward into v0.2.2.
-> - **v0.2.2** — PUID/PGID runtime user (NFS), **pytest-xdist** parallel CI (~3.7x local / ~6min CI),
->   alembic-path fix for xdist-in-CI, and the CI-workflow/branch-protection fixes below.
+> ## CURRENT STATE (2026-07-02) — v0.2.4 released; production-deploy hardening
+> **Latest release: `v0.2.4`** on `main` (merge `b2a8419`, tag `v0.2.4`). `dev` == `main` (nothing
+> queued). Release history since v0.1.1:
+> - **v0.2.0** — "read-don't-render" asset-detail rework: 3MF READ not rendered (embedded slicer
+>   thumbnail `ImageSource.embedded` + slice metadata, migration **0021**), bounded STL/OBJ/PLY render
+>   on the **`vtk-osmesa`** wheel (+`libosmesa6`; stock PyPI `vtk` is X11-only, can't render headless),
+>   ZIP auto-extraction, file-tree UI + collapsible 3MF panel, in-browser three.js viewer, per-file 3MF
+>   thumbnails. `networkx` is an explicit backend dep. (v0.2.1 prepped-but-never-tagged → rolled into 0.2.2.)
+> - **v0.2.2** — PUID/PGID runtime user (NFS), **pytest-xdist** parallel CI, the branch-protection fix (below).
+> - **v0.2.3** — published **`partfolder3d-frontend` + `-nginx` images**; **nginx config baked into the
+>   nginx image** (`nginx/Dockerfile`; optional `./nginx/nginx.conf` bind-mount override); fixed the
+>   frontend prod build — `npm run build` (`tsc -b`) catches strict errors `npx tsc --noEmit` misses.
+> - **v0.2.4** — production-deploy hardening + issue batch:
+>   - **nginx image-serving fix** — the baked static-asset regex `location ~* \.(png|jpg|…)$` was stealing
+>     `/api/…/*.png` (item images/renders) and `/img/` logos → **404** (served from the frontend root,
+>     never proxied). Fixed with **`^~`** on `/api/` and `/img/` so they beat the regex. **This was the
+>     prod "images/renders don't display" bug.** Found via logs (404 only in nginx, never reached backend).
+>   - **Fail-loud startup logging on EVERY service** — backend entrypoint (DB preflight via `app.dbcheck`,
+>     writable check, streamed alembic + hard `MIGRATION_TIMEOUT`, version/uid/redacted-DB banner) +
+>     frontend publish container (version banner, writability check, loud copy errors). A silent hang is
+>     no longer possible; a user's log paste is a complete bug report.
+>   - **`ALLOWED_ORIGINS` fix** — accepts comma / JSON / empty (was crashing boot with a pydantic
+>     `SettingsError`: `env_file: .env` injects the whole file and pydantic JSON-decodes list vars).
+>     `NoDecode` + a `field_validator`. Same pattern applied to `FS_BROWSE_ROOTS`.
+>   - **Issues fixed:** #8 admin **folder browser** (allowlist `FS_BROWSE_ROOTS`, traversal-safe, 14
+>     tests; CodeQL path-injection FPs dismissed + log-injection fixed — see decisions), #9 disabled
+>     libraries filtered from the add-item picker, #7 version-page nav link → **Admin → Content**,
+>     #6/#10 dark-mode `<select>` option popups (opaque `option` bg — the semi-transparent input bg is
+>     ~white over a native popup's light base; `color-scheme` alone insufficient on Chrome/Windows).
 >
-> ### 🔑 The release-bypass problem is FIXED (2026-07-02) — see `docs/decisions.md`
-> Every release PR (v0.1.0–v0.2.1) needed a manual "bypass rules" merge because the required CI checks
-> sat at **"Expected — Waiting for status to be reported."** Root cause: `main` branch protection
-> required **`CI / Lint`, `CI / Test`, …** (workflow-prefixed), but **GitHub Actions binds required
-> checks by the BARE job name** (`Lint`, `Test`, …). Fixed by setting `required_status_checks.contexts`
-> to the bare names → PR #4 went `CLEAN` and merged with a normal button. **Load-bearing now:** the
-> `ci.yml` job names ARE the required contexts — don't rename them. CI workflow shape:
-> - **`ci.yml`** — `pull_request: [main]` ONLY. The required gate (Lint/Frontend/Config validation/
->   Migration check/Compose validation/Image build/Test). Bare job names = required contexts.
-> - **`dev-checks.yml`** — `push: [dev]`. Fast non-required feedback; jobs suffixed **"(dev)"** so they
->   can't shadow the required bare-name contexts. No heavy Test.
-> - **`publish.yml`** — builds/pushes `:latest` on `push:main` and `:<semver>`/`:<major>` on release.
-> - **`codeql.yml`** — `pull_request` + `push:main` (green, not a required gate).
+> ### 🏭 Production-deploy operational knowledge (learned bringing up the owner's prod stack)
+> - **`frontend` is a ONE-TIME-RUN container** (`restart: "no"`): copies the built UI into the shared
+>   **`frontend_dist`** volume, then **exits 0** (expected — `Exited (0)` frontend is normal). nginx
+>   serves that volume read-only and waits via `depends_on: service_completed_successfully`.
+> - **#1 prod gotcha: `frontend_dist` volume permissions.** The frontend writes it as `PUID:PGID`; a
+>   reused/old volume owned by a different UID makes the copy fail → nginx never starts. Fix:
+>   `docker compose down -v` (recreates the volume) or chown it. Documented in the README deploy section.
+> - Owner runs on **NFS** (uid=2000 gid=66000), behind **https** (`partfolder3d.crzynet.com`),
+>   `COOKIE_SECURE=true`. Diagnose image/asset problems by the **status code in the nginx log** (404 =
+>   path/regex, 403/500 = perms). The 0.2.4 logging makes all of this visible.
 >
-> **`dev` is a few commits ahead of `main`** (the `(dev)`-suffix workflow tidy + these doc updates) —
-> no release gate open; fold into the next release whenever.
+> ### 🔑 Release-bypass problem is FIXED — see `docs/decisions.md` (still true, LOAD-BEARING)
+> `main` required checks bind by **BARE job name** (`Lint`, `Test`, …), NOT `CI / Test`. Required
+> contexts = the 6 `ci.yml` bare job names — **don't rename ci.yml jobs.** CI shape: **`ci.yml`**
+> `pull_request:[main]` only (the required gate); **`dev-checks.yml`** `push:[dev]` (fast, non-required,
+> jobs suffixed "(dev)"); **`publish.yml`** 3-image matrix (backend/frontend/nginx) on push:main +
+> release; **`codeql.yml`** PR + push:main (green, **NOT required** — doesn't block merge). Releases:
+> `/release-prep <v>` → merge PR (clean) → `:latest` publishes → `/release-cut <v>`. Worked for 0.2.3 + 0.2.4.
 >
 > ---
 >
@@ -86,7 +107,7 @@ FIXED — merges are clean now; no open release gate)
 >
 > **Verify discipline (unchanged):** backend = `ruff check backend/` (pinned 0.8.4 +
 > `backend/pyproject.toml` config — unpinned/no-config gives false UP042/F841) + ephemeral-PG
-> pytest (`alembic upgrade head` first, now at migration **0021**, 21 revisions; suite = **582**);
+> pytest (`alembic upgrade head` first, now at migration **0021**, 21 revisions; suite = **605**);
 > frontend = **`npm run build`** (`tsc -b && vite build`) + vitest (**280 passing**). Use **`npm run
 > build`**, NOT `npx tsc --noEmit` — the latter uses the root `tsconfig.json` which has
 > no `noUnusedLocals`/`noUnusedParameters` and misses the strict project-reference errors
@@ -121,15 +142,15 @@ FIXED — merges are clean now; no open release gate)
 
 ## Current status
 
-- **v0.1.1 released and tagged on `main`** (PR #1 merged `79ed44b`, tag at `1b3990a`). All of
-  Phases 0–10 + the Aurora UI revamp + issue-resolution framework (Phases 1–3) + render
-  reliability/lifecycle work shipped in that release. See the CURRENT STATE block above for the
-  full detail and what's landed on `dev` since.
-- **NEXT ACTIONS:** none blocking — no release gate is currently open. When the owner wants the
-  next release: `/release-prep <version>` (rolls the 4 unreleased `dev` commits already in
-  `CHANGELOG.md [Unreleased]`) → review/merge PR → wait for main CI + CodeQL green + `:latest`
-  published → `/release-cut <version>` (never re-tag). Also worth doing at that point: make the
-  2 CodeQL checks required on `main` branch protection (still open, see above).
+- **v0.2.4 is the latest release on `main`** (see the CURRENT STATE block above for full detail).
+  `dev` == `main`, no release gate open. The full stack (Phases 0–10 + Aurora UI + issue-resolution
+  + render rework + v0.2.x production-deploy hardening) has shipped.
+- **NEXT ACTIONS:** none blocking. Known open GitHub issues to tackle when the owner wants:
+  **#11** library hard-delete + move-assets-between-libraries (future), **#13** post-setup
+  auto-login not sticking (may have been a not-logged-in mixup — verify/close), **#14**
+  import-from-URL "set default image" not applied. Next release: `/release-prep <version>` →
+  merge PR (clean) → `:latest` publishes → `/release-cut <version>` (never re-tag). Optional:
+  make the 2 CodeQL checks required on `main` branch protection (still not required).
 - **Deploy-readiness fix (committed):** scaffolding gap (since Phase 0) — nothing ran migrations
   on startup, so a fresh stack came up on an empty DB and the wizard failed. Fixed by **bundling
   migrations into the backend's image entrypoint** (`backend/docker-entrypoint.sh`:
@@ -256,11 +277,12 @@ FIXED — merges are clean now; no open release gate)
 - [x] **Render / asset-detail rework landed on `dev`** (2026-07-02, 5 commits `247dfa6`→`5797b0c`) —
       3MF read-not-render, ZIP auto-extract, file-tree + 3MF collapsible UI, in-browser three.js
       viewer, vtk-osmesa render fix. Verified against a rebuilt image (see CURRENT STATE).
-- [ ] **Manual check outstanding:** click "View in 3D" on an STL in the running UI
-      (http://localhost:8973) — the only render-rework piece not machine-verifiable here.
-- [ ] **9 unreleased commits sit on `dev`** (4 prior polish commits + the 5 render-rework commits) —
-      captured in `CHANGELOG.md [Unreleased]`, ship with the next release. Re-verify frontend
-      (tsc/vitest/vite build) + backend (ruff/ephemeral-PG pytest, migration 0021) at release-prep.
+- [x] **All v0.2.x work shipped** through v0.2.4 — `dev` == `main`, nothing queued for release.
+- [ ] **Open GitHub issues** (owner will look at later): **#11** library hard-delete + move-assets
+      between libraries (future), **#13** post-setup auto-login not sticking (verify/close), **#14**
+      import-from-URL "set default image" not applied.
+- [ ] **Re-verify on the owner's prod deploy after the 0.2.4 pull:** dark-mode dropdowns (#6/#10)
+      render dark, and the original NFS "images don't display" problem is resolved by the nginx `^~` fix.
 - [ ] **Rotate the AgentQL API key** (owner pasted it in chat during earlier testing).
 - [ ] **PRD §18 remaining notes** to honor when relevant: move journaling/crash recovery,
       real slicing for filament estimates, trash purge UI (see OPEN ITEMS above for detail).
