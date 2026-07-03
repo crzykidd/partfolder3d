@@ -22,6 +22,14 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **Responsive catalog grid** — the grid column count now adapts to the window width
+  (ResizeObserver): narrowing removes columns, widening adds them (min card width 220px
+  compact / 340px full), instead of a hardcoded 3 columns.
+- **Compact / Full catalog grid mode** — a toggle in the catalog toolbar (grid view). Compact
+  is the dense cropped layout; Full shows uncropped images (~260px, contain fit). Persisted to
+  localStorage (`pf3d-catalog-grid-mode`).
+- **Configurable catalog page size** — a "Per page: 20 / 40 / 60 / 100" selector replaces the
+  hardcoded 20; changing it resets to page 1. Persisted to localStorage (`pf3d-catalog-per-page`).
 - **Image carousel "Renders" filter** — when an item has a mix of images, a **Renders**
   toggle next to the image counter filters the carousel to app-generated renders
   (`source === 'render'`) so you can quickly page through just the renders.

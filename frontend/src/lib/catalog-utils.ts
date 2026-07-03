@@ -236,3 +236,28 @@ export function mapBundleStatus(backendStatus: string): ZipPollStatus {
 export function shouldContinuePolling(status: ZipPollStatus): boolean {
   return status === 'queued' || status === 'building'
 }
+
+// ---------------------------------------------------------------------------
+// Grid column computation (CatalogPage responsive grid)
+// ---------------------------------------------------------------------------
+
+/** Gap between grid cards (px) — must match the CSS gap used in VirtualGrid. */
+export const GRID_GAP_PX = 12
+
+/**
+ * Compute the number of grid columns that fit in a container width.
+ *
+ * Accounts for gaps between columns:
+ *   N cards + (N − 1) gaps ≤ containerWidth
+ *   → N ≤ (containerWidth + gap) / (minCardWidth + gap)
+ *
+ * Always returns at least 1.
+ */
+export function computeCols(
+  containerWidth: number,
+  minCardWidth: number,
+  gap = GRID_GAP_PX,
+): number {
+  if (containerWidth <= 0) return 1
+  return Math.max(1, Math.floor((containerWidth + gap) / (minCardWidth + gap)))
+}

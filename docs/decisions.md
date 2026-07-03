@@ -2,6 +2,18 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-03 — Catalog grid: responsive cols, compact/full mode, page-size selector
+
+- **Column count** = `floor((W + gap) / (minCard + gap))` (N cards + N−1 gaps in width W),
+  extracted as `computeCols` in `catalog-utils.ts` + unit-tested. Min card widths 220px
+  (compact) / 340px (full).
+- **Virtual scroll container height** changed from a fixed 640px to `calc(100vh - 320px)`
+  clamped 480–900px — fixed height under/over-shot on different screens; viewport-relative
+  self-adjusts (320px accounts for the chrome above the grid).
+- **`gridMode` + `perPage` stored in localStorage, not URL** — they're UI-density
+  preferences, not navigation state; keeping them out of the URL avoids polluting
+  shared/bookmarked links (URL still carries q/tags/sort/page/view).
+
 ## 2026-07-03 — Black-screen on load: React Query key collision (#24 popup)
 
 The #24 release-notes hook used `useQuery({ queryKey: ['version'] })` returning a **bare

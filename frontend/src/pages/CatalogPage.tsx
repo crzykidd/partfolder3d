@@ -29,10 +29,10 @@ import {
   type SortingState,
 } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Box, HardDrive, LayoutGrid, List, Search, Star, X } from 'lucide-react'
+import { Box, HardDrive, LayoutGrid, List, Maximize, Search, Star, X } from 'lucide-react'
 
 import * as api from '@/lib/api'
-import { getTagFontSize, getTagFontWeight, sortTags, type TagSortMode } from '@/lib/catalog-utils'
+import { computeCols, GRID_GAP_PX, getTagFontSize, getTagFontWeight, sortTags, type TagSortMode } from '@/lib/catalog-utils'
 import { useAuth } from '@/context/AuthContext'
 import { useTheme } from '@/components/ThemeProvider'
 
@@ -40,12 +40,29 @@ import { useTheme } from '@/components/ThemeProvider'
 // Constants
 // ---------------------------------------------------------------------------
 
-const GRID_COLS = 3
-const ROW_HEIGHT_PX = 280
-const PER_PAGE = 20
+/** Minimum card width (px) for compact grid mode — dense layout. */
+const MIN_CARD_WIDTH_COMPACT = 220
+/** Minimum card width (px) for full grid mode — uncropped images, fewer columns. */
+const MIN_CARD_WIDTH_FULL = 340
+/** Estimated row height for compact mode (image 160 + body + padding). */
+const ROW_HEIGHT_COMPACT = 300
+/** Estimated row height for full mode (image 260 + body + padding). */
+const ROW_HEIGHT_FULL = 400
+
+const DEFAULT_PER_PAGE = 20
+const PER_PAGE_OPTIONS = [20, 40, 60, 100]
 const DEBOUNCE_MS = 300
 const TAG_CLOUD_PER_PAGE = 200
-const VIRTUAL_CONTAINER_HEIGHT = 640 // px
+
+/**
+ * Height of the virtual scroll container.
+ * Using viewport-relative height so large page sizes (60–100 items) show
+ * more rows without a fixed cut-off; clamped to a sensible range.
+ * See docs/decisions.md for rationale.
+ */
+const VIRTUAL_CONTAINER_HEIGHT = 'calc(100vh - 320px)'
+const VIRTUAL_CONTAINER_MIN_HEIGHT = 480  // px
+const VIRTUAL_CONTAINER_MAX_HEIGHT = 900  // px
 
 const SORT_OPTIONS = [
   { value: 'created_at_desc', label: 'Newest first' },
@@ -191,9 +208,11 @@ interface ItemCardProps {
   item: api.ItemSummary
   onToggleFavorite: (key: string, favorited: boolean) => void
   isFavoriting: boolean
+  gridMode: 'compact' | 'full'
 }
 
-function ItemCard({ item, onToggleFavorite, isFavoriting }: ItemCardProps) {
+function ItemCard({ item, onToggleFavorite, isFavoriting, gridMode }: ItemCardProps) {
+  const imgHeight = gridMode === 'compact' ? 160 : 260
   return (
     <div
       style={{
@@ -220,13 +239,23 @@ function ItemCard({ item, onToggleFavorite, isFavoriting }: ItemCardProps) {
       {/* Cover image */}
       <Link
         to={`/items/${item.key}`}
-        style={{ display: 'block', height: 160, position: 'relative', textDecoration: 'none', flexShrink: 0 }}
+        style={{ display: 'block', height: imgHeight, position: 'relative', textDecoration: 'none', flexShrink: 0 }}
       >
         {item.default_image_path ? (
           <img
             src={`/api/items/${item.key}/files/${item.default_image_path}`}
             alt={item.title}
-            style={{ position: 'absolute', inset: 0, height: '100%', width: '100%', objectFit: 'cover' }}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              height: '100%',
+              width: '100%',
+              objectFit: gridMode === 'compact' ? 'cover' : 'contain',
+              // Full mode: subtle letterbox backdrop so empty space looks intentional
+              background: gridMode === 'full'
+                ? 'radial-gradient(ellipse at 50% 50%, rgba(15,164,171,0.08) 0%, rgba(0,0,0,0.18) 100%)'
+                : undefined,
+            }}
             loading="lazy"
             onError={(e) => {
               ;(e.currentTarget as HTMLImageElement).style.display = 'none'
@@ -342,30 +371,64 @@ interface VirtualGridProps {
   items: api.ItemSummary[]
   onToggleFavorite: (key: string, favorited: boolean) => void
   favoritingKey: string | null
+  gridMode: 'compact' | 'full'
 }
 
-function VirtualGrid({ items, onToggleFavorite, favoritingKey }: VirtualGridProps) {
+function VirtualGrid({ items, onToggleFavorite, favoritingKey, gridMode }: VirtualGridProps) {
   const parentRef = useRef<HTMLDivElement>(null)
+
+  // --- Responsive column count via ResizeObserver ---
+  const [containerWidth, setContainerWidth] = useState(0)
+
+  useEffect(() => {
+    const el = parentRef.current
+    if (!el) return
+    // Measure immediately so first render uses the real width.
+    setContainerWidth(el.clientWidth)
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width)
+      }
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, []) // parentRef.current is stable after mount
+
+  const minCardWidth = gridMode === 'compact' ? MIN_CARD_WIDTH_COMPACT : MIN_CARD_WIDTH_FULL
+  const cols = useMemo(
+    () => computeCols(containerWidth, minCardWidth, GRID_GAP_PX),
+    [containerWidth, minCardWidth],
+  )
 
   const rows = useMemo(() => {
     const result: api.ItemSummary[][] = []
-    for (let i = 0; i < items.length; i += GRID_COLS) {
-      result.push(items.slice(i, i + GRID_COLS))
+    for (let i = 0; i < items.length; i += cols) {
+      result.push(items.slice(i, i + cols))
     }
     return result
-  }, [items])
+  }, [items, cols])
+
+  const estimatedRowHeight = gridMode === 'compact' ? ROW_HEIGHT_COMPACT : ROW_HEIGHT_FULL
 
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => ROW_HEIGHT_PX + 16, // + gap
+    estimateSize: () => estimatedRowHeight + GRID_GAP_PX,
     overscan: 2,
   })
 
   return (
     <div
       ref={parentRef}
-      style={{ height: VIRTUAL_CONTAINER_HEIGHT, overflowY: 'auto', width: '100%', scrollbarWidth: 'thin', scrollbarColor: 'var(--aurora-glass) transparent' }}
+      style={{
+        height: VIRTUAL_CONTAINER_HEIGHT,
+        minHeight: VIRTUAL_CONTAINER_MIN_HEIGHT,
+        maxHeight: VIRTUAL_CONTAINER_MAX_HEIGHT,
+        overflowY: 'auto',
+        width: '100%',
+        scrollbarWidth: 'thin',
+        scrollbarColor: 'var(--aurora-glass) transparent',
+      }}
     >
       <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative' }}>
         {rowVirtualizer.getVirtualItems().map((virtualRow) => {
@@ -383,13 +446,21 @@ function VirtualGrid({ items, onToggleFavorite, favoritingKey }: VirtualGridProp
                 transform: `translateY(${virtualRow.start}px)`,
               }}
             >
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, paddingBottom: 12 }}>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: `repeat(${cols}, 1fr)`,
+                  gap: GRID_GAP_PX,
+                  paddingBottom: GRID_GAP_PX,
+                }}
+              >
                 {rowItems.map((item) => (
                   <ItemCard
                     key={item.key}
                     item={item}
                     onToggleFavorite={onToggleFavorite}
                     isFavoriting={favoritingKey === item.key}
+                    gridMode={gridMode}
                   />
                 ))}
               </div>
@@ -715,6 +786,39 @@ export function CatalogPage() {
     () => (localStorage.getItem('pf3d-tag-sort') as TagSortMode | null) ?? 'number',
   )
 
+  // Grid display mode — persisted in localStorage, default compact.
+  const [gridMode, setGridMode] = useState<'compact' | 'full'>(
+    () => (localStorage.getItem('pf3d-catalog-grid-mode') as 'compact' | 'full' | null) ?? 'compact',
+  )
+
+  const handleGridModeChange = useCallback((mode: 'compact' | 'full') => {
+    localStorage.setItem('pf3d-catalog-grid-mode', mode)
+    setGridMode(mode)
+  }, [])
+
+  // Items per page — persisted in localStorage, default 20.
+  const [perPage, setPerPage] = useState<number>(
+    () => {
+      const stored = localStorage.getItem('pf3d-catalog-per-page')
+      const parsed = stored ? Number(stored) : NaN
+      return PER_PAGE_OPTIONS.includes(parsed) ? parsed : DEFAULT_PER_PAGE
+    },
+  )
+
+  const handlePerPageChange = useCallback(
+    (value: number) => {
+      localStorage.setItem('pf3d-catalog-per-page', String(value))
+      setPerPage(value)
+      // Reset to page 1 when page size changes.
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('page')
+        return next
+      })
+    },
+    [setSearchParams],
+  )
+
   const handleTagSortChange = useCallback((mode: TagSortMode) => {
     localStorage.setItem('pf3d-tag-sort', mode)
     setTagSortMode(mode)
@@ -837,7 +941,7 @@ export function CatalogPage() {
 
   // --- Data fetching ---
   const { data: itemsData, isLoading: itemsLoading } = useQuery({
-    queryKey: ['items', urlQ, urlTags, urlCreatorId, urlFavorited, urlSort, urlPage],
+    queryKey: ['items', urlQ, urlTags, urlCreatorId, urlFavorited, urlSort, urlPage, perPage],
     queryFn: () =>
       api.listItems({
         q: urlQ || undefined,
@@ -846,7 +950,7 @@ export function CatalogPage() {
         favorited: urlFavorited || undefined,
         sort: urlSort,
         page: urlPage,
-        per_page: PER_PAGE,
+        per_page: perPage,
       }),
   })
 
@@ -884,7 +988,7 @@ export function CatalogPage() {
 
   const items = itemsData?.items ?? []
   const total = itemsData?.total ?? 0
-  const totalPages = Math.ceil(total / PER_PAGE)
+  const totalPages = Math.ceil(total / perPage)
   const tags = tagsData?.tags ?? []
 
   return (
@@ -1029,73 +1133,157 @@ export function CatalogPage() {
 
         {/* Main content */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-          {/* Toolbar: sort + view toggle */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-            {/* Sort select — color-scheme matches active theme so native dropdown
-                is readable in both light and dark mode. */}
-            <select
-              value={urlSort}
-              onChange={(e) => setSort(e.target.value)}
-              style={{
-                ...INPUT_STYLE,
-                width: 'auto',
-                padding: '5px 10px',
-                cursor: 'pointer',
-                colorScheme: isDark ? 'dark' : 'light',
-              }}
-            >
-              {SORT_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
+          {/* Toolbar: sort + per-page + grid-mode (grid only) + view toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+            {/* Left cluster: sort + per-page */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {/* Sort select — color-scheme matches active theme so native dropdown
+                  is readable in both light and dark mode. */}
+              <select
+                value={urlSort}
+                onChange={(e) => setSort(e.target.value)}
+                style={{
+                  ...INPUT_STYLE,
+                  width: 'auto',
+                  padding: '5px 10px',
+                  cursor: 'pointer',
+                  colorScheme: isDark ? 'dark' : 'light',
+                }}
+              >
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
 
-            {/* View toggle — icon buttons */}
-            <div style={{ display: 'flex', background: 'var(--aurora-glass)', border: '1px solid var(--aurora-glass-border)', borderRadius: 10, overflow: 'hidden' }}>
-              <button
-                onClick={() => setView('grid')}
-                title="Grid view"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  padding: '6px 12px',
-                  fontSize: 12,
-                  border: 'none',
-                  cursor: 'pointer',
-                  background: urlView === 'grid' ? 'var(--aurora-pill)' : 'transparent',
-                  color: urlView === 'grid' ? 'var(--aurora-accent)' : 'var(--aurora-text-dim)',
-                  fontWeight: urlView === 'grid' ? 700 : 400,
-                  boxShadow: urlView === 'grid' ? 'var(--aurora-glow)' : 'none',
-                  borderRight: '1px solid var(--aurora-glass-border)',
-                  transition: 'all 0.15s',
-                }}
-              >
-                <LayoutGrid size={13} />
-                Grid
-              </button>
-              <button
-                onClick={() => setView('table')}
-                title="Table view"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  padding: '6px 12px',
-                  fontSize: 12,
-                  border: 'none',
-                  cursor: 'pointer',
-                  background: urlView === 'table' ? 'var(--aurora-pill)' : 'transparent',
-                  color: urlView === 'table' ? 'var(--aurora-accent)' : 'var(--aurora-text-dim)',
-                  fontWeight: urlView === 'table' ? 700 : 400,
-                  boxShadow: urlView === 'table' ? 'var(--aurora-glow)' : 'none',
-                  transition: 'all 0.15s',
-                }}
-              >
-                <List size={13} />
-                Table
-              </button>
+              {/* Per-page selector — both views */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ fontSize: 11, color: 'var(--aurora-muted)', whiteSpace: 'nowrap' }}>Per page:</span>
+                <select
+                  value={perPage}
+                  onChange={(e) => handlePerPageChange(Number(e.target.value))}
+                  style={{
+                    ...INPUT_STYLE,
+                    width: 'auto',
+                    padding: '5px 8px',
+                    cursor: 'pointer',
+                    colorScheme: isDark ? 'dark' : 'light',
+                  }}
+                >
+                  {PER_PAGE_OPTIONS.map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Right cluster: compact/full toggle (grid only) + view toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {/* Compact / Full grid-mode toggle — shown only in grid view */}
+              {urlView === 'grid' && (
+                <div
+                  style={{
+                    display: 'flex',
+                    background: 'var(--aurora-glass)',
+                    border: '1px solid var(--aurora-glass-border)',
+                    borderRadius: 10,
+                    overflow: 'hidden',
+                  }}
+                  title="Grid density"
+                >
+                  <button
+                    onClick={() => handleGridModeChange('compact')}
+                    title="Compact — dense grid, cropped images"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      padding: '6px 12px',
+                      fontSize: 12,
+                      border: 'none',
+                      cursor: 'pointer',
+                      background: gridMode === 'compact' ? 'var(--aurora-pill)' : 'transparent',
+                      color: gridMode === 'compact' ? 'var(--aurora-accent)' : 'var(--aurora-text-dim)',
+                      fontWeight: gridMode === 'compact' ? 700 : 400,
+                      boxShadow: gridMode === 'compact' ? 'var(--aurora-glow)' : 'none',
+                      borderRight: '1px solid var(--aurora-glass-border)',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <LayoutGrid size={13} />
+                    Compact
+                  </button>
+                  <button
+                    onClick={() => handleGridModeChange('full')}
+                    title="Full — uncropped images, fewer columns"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      padding: '6px 12px',
+                      fontSize: 12,
+                      border: 'none',
+                      cursor: 'pointer',
+                      background: gridMode === 'full' ? 'var(--aurora-pill)' : 'transparent',
+                      color: gridMode === 'full' ? 'var(--aurora-accent)' : 'var(--aurora-text-dim)',
+                      fontWeight: gridMode === 'full' ? 700 : 400,
+                      boxShadow: gridMode === 'full' ? 'var(--aurora-glow)' : 'none',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <Maximize size={13} />
+                    Full
+                  </button>
+                </div>
+              )}
+
+              {/* View toggle — Grid / Table */}
+              <div style={{ display: 'flex', background: 'var(--aurora-glass)', border: '1px solid var(--aurora-glass-border)', borderRadius: 10, overflow: 'hidden' }}>
+                <button
+                  onClick={() => setView('grid')}
+                  title="Grid view"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: '6px 12px',
+                    fontSize: 12,
+                    border: 'none',
+                    cursor: 'pointer',
+                    background: urlView === 'grid' ? 'var(--aurora-pill)' : 'transparent',
+                    color: urlView === 'grid' ? 'var(--aurora-accent)' : 'var(--aurora-text-dim)',
+                    fontWeight: urlView === 'grid' ? 700 : 400,
+                    boxShadow: urlView === 'grid' ? 'var(--aurora-glow)' : 'none',
+                    borderRight: '1px solid var(--aurora-glass-border)',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <LayoutGrid size={13} />
+                  Grid
+                </button>
+                <button
+                  onClick={() => setView('table')}
+                  title="Table view"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: '6px 12px',
+                    fontSize: 12,
+                    border: 'none',
+                    cursor: 'pointer',
+                    background: urlView === 'table' ? 'var(--aurora-pill)' : 'transparent',
+                    color: urlView === 'table' ? 'var(--aurora-accent)' : 'var(--aurora-text-dim)',
+                    fontWeight: urlView === 'table' ? 700 : 400,
+                    boxShadow: urlView === 'table' ? 'var(--aurora-glow)' : 'none',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <List size={13} />
+                  Table
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1182,6 +1370,7 @@ export function CatalogPage() {
               items={items}
               onToggleFavorite={handleToggleFavorite}
               favoritingKey={favoritingKey}
+              gridMode={gridMode}
             />
           )}
 
