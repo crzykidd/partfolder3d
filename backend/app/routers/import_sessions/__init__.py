@@ -17,6 +17,7 @@ from ...config import settings
 from ...models.import_session import ImportSession, ImportSessionStatus, ImportSourceType
 from ...models.user import User
 from ...storage.link_url import normalize_link_url
+from .commit import router as _commit_router
 from .helpers import (  # noqa: F401 (reconcile_tags is imported by tests and worker tasks)
     _session_out,
     reconcile_tags,
@@ -81,6 +82,7 @@ class ShareLinkImportRequest(BaseModel):
 
 router = APIRouter()
 router.include_router(_sessions_router)
+router.include_router(_commit_router)
 router.include_router(_site_caps_router)
 
 
