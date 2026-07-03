@@ -26,6 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import csrf_protect, get_current_user, get_db, require_admin
+from ..models.library import Library
 from ..models.setting import Setting
 from ..models.user import User
 
@@ -128,6 +129,27 @@ async def upsert_setting(
                     f"Must be one of {sorted(allowed)}."
                 ),
             )
+
+    # import.default_library_id: must be int (or null) referencing an enabled library.
+    # Explicitly exclude bool: bool is a subclass of int in Python, so isinstance(True, int)
+    # is True — we must reject it explicitly.
+    if key == "import.default_library_id":
+        if body.value is not None:
+            if not isinstance(body.value, int) or isinstance(body.value, bool):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="import.default_library_id must be an integer or null.",
+                )
+            lib_res = await db.execute(
+                select(Library).where(
+                    Library.id == body.value, Library.enabled.is_(True)
+                )
+            )
+            if lib_res.scalar_one_or_none() is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Library {body.value} not found or not enabled.",
+                )
 
     value_json = json.dumps(body.value)
     result = await db.execute(select(Setting).where(Setting.key == key))

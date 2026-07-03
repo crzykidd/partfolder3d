@@ -2,6 +2,37 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-02 — Bulk commit design (issue #15)
+
+**Deferred**: CLI option (issue #15 option 3) was explicitly excluded from scope;
+only the endpoint + UI button were shipped.
+
+**Per-session isolated transactions**: `bulk_commit_import_sessions` creates a new
+`SessionLocal()` per session so a failure in one session's commit does not roll back
+others.  The request-scoped `db` is used only to enumerate target session IDs; all
+actual commit work runs in isolated connections.
+
+**Library resolution order** (decided with owner, baked into both bulk-commit and
+inbox-scan): (a) request body `library_id` override, (b) session's own `library_id`,
+(c) `import.default_library_id` instance setting, (d) sole enabled library, (e) skip
+with `no_library` reason.  The same helper `_resolve_import_library` is used by all
+code paths.
+
+**`bool` rejected from `import.default_library_id`**: Python's `bool` is a subclass of
+`int`, so `isinstance(True, int)` is `True`.  Added an explicit `isinstance(body.value,
+bool)` guard to prevent `true`/`false` from being accepted as library IDs.
+
+**No migration needed**: `import.default_library_id` is stored in the existing `Settings`
+generic key-value table.  No schema change required.
+
+**Monkeypatch approach for bulk-commit tests**: the bulk-commit endpoint creates
+`SessionLocal()` per session (a new DB connection) which cannot see uncommitted test
+transaction data.  Tests that exercise the commit path monkeypatch `app.db.SessionLocal`
+to return a context manager yielding the test's `db_session` (backed by the outer
+transaction).  Since `db_session` uses `bind=conn` with `expire_on_commit=False`, the
+`session.commit()` call within the inner context manager uses savepoint semantics and
+does not escape the test transaction.
+
 ## 2026-07-02 — Auto-login race fix and confirm-password field (issue #13)
 
 **Root cause confirmed: Suspect B (frontend navigation race).**

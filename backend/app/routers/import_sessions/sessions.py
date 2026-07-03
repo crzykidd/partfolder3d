@@ -56,6 +56,9 @@ from .helpers import (
     reconcile_tags,
 )
 from .schemas import (
+    BulkCommitRequest,
+    BulkCommitResponse,
+    BulkCommitSkipped,
     CommitResponse,
     CreateSessionRequest,
     ImportSessionOut,
@@ -476,6 +479,287 @@ async def patch_import_session(
     return _session_out(result.scalar_one())
 
 
+async def _resolve_import_library(
+    override_lib_id: int | None,
+    session_lib_id: int | None,
+    db: AsyncSession,
+) -> Library | None:
+    """Resolve which enabled library to use for a session commit.
+
+    Resolution order (first match wins, only enabled libraries are valid):
+      (a) override_lib_id  — explicit caller override (bulk-commit body)
+      (b) session_lib_id   — library already set on the session
+      (c) import.default_library_id setting
+      (d) sole enabled library (exactly one)
+      (e) None             — caller must skip/report
+    """
+    import json as _json  # noqa: PLC0415
+
+    from ...models.setting import Setting  # noqa: PLC0415
+
+    async def _get_enabled(lib_id: int) -> Library | None:
+        res = await db.execute(
+            select(Library).where(Library.id == lib_id, Library.enabled.is_(True))
+        )
+        return res.scalar_one_or_none()
+
+    # (a) explicit override
+    if override_lib_id is not None:
+        return await _get_enabled(override_lib_id)
+
+    # (b) session's own library_id
+    if session_lib_id is not None:
+        lib = await _get_enabled(session_lib_id)
+        if lib is not None:
+            return lib
+
+    # (c) default import library setting
+    setting_res = await db.execute(
+        select(Setting).where(Setting.key == "import.default_library_id")
+    )
+    setting_row = setting_res.scalar_one_or_none()
+    if setting_row is not None:
+        try:
+            raw_id = _json.loads(setting_row.value)
+            if isinstance(raw_id, int):
+                lib = await _get_enabled(raw_id)
+                if lib is not None:
+                    return lib
+        except Exception:
+            pass
+
+    # (d) sole enabled library
+    all_libs_res = await db.execute(select(Library).where(Library.enabled.is_(True)))
+    all_libs = all_libs_res.scalars().all()
+    if len(all_libs) == 1:
+        return all_libs[0]
+
+    return None
+
+
+async def _commit_session_inner(
+    session: ImportSession,
+    library: Library,
+    user: User,
+    db: AsyncSession,
+) -> CommitResponse:
+    """Core commit logic shared by single-commit and bulk-commit paths.
+
+    Expects `session` and `library` already loaded from `db`.  Caller is
+    responsible for the surrounding transaction (commit / rollback on error).
+    """
+    session_id_str = str(session.id)
+    title = session.confirmed_title or session.suggested_title
+
+    # ---- 1. Resolve/create creator ----
+    creator: Creator | None = None
+    if session.creator_is_own_design:
+        creator = await _ensure_creator(
+            db,
+            name=user.name,
+            user_id=user.id,
+        )
+    elif session.creator_name:
+        creator = await _ensure_creator(
+            db,
+            name=session.creator_name,
+            profile_url=session.creator_profile_url,
+            source_site=session.creator_source_site,
+        )
+
+    # ---- 2. Generate key + build item dir path ----
+    key = await generate_unique_key(db)
+    slug = item_slug(title, key)  # type: ignore[arg-type]
+    item_dir = item_dir_path(library.mount_path, key, title)  # type: ignore[arg-type]
+    item_dir.mkdir(parents=True, exist_ok=True)
+
+    # ---- 3. Move staged files into item dir ----
+    for sf in session.files:
+        src_path = Path(sf.staged_path)
+        if src_path.exists():
+            dest_path = item_dir / src_path.name
+            try:
+                src_path.replace(dest_path)
+            except OSError:
+                shutil.copy2(str(src_path), str(dest_path))
+                src_path.unlink(missing_ok=True)
+
+    # For inbox sessions: move files from inbox folder too
+    if session.source_type == ImportSourceType.inbox and session.inbox_folder:
+        inbox_path = Path(session.inbox_folder)
+        if inbox_path.is_dir():
+            for entry in inbox_path.iterdir():
+                if entry.is_file():
+                    dest = item_dir / entry.name
+                    try:
+                        entry.replace(dest)
+                    except OSError:
+                        shutil.copy2(str(entry), str(dest))
+                        entry.unlink(missing_ok=True)
+
+    # ---- 4. Insert Item row ----
+    item = Item(
+        key=key,
+        title=title,
+        slug=slug,
+        description=session.description,
+        source_url=session.source_url,
+        source_site=session.source_site,
+        license=session.license,
+        creator_id=creator.id if creator else None,
+        library_id=library.id,
+        dir_path=str(item_dir),
+        schema_version=1,
+    )
+    db.add(item)
+    await db.flush()
+    await db.refresh(item)
+
+    # ---- 5. Attach tags ----
+    confirmed_tags: list[str] = []
+    pending_tags: list[str] = []
+    if session.tag_state:
+        confirmed_tags = session.tag_state.get("confirmed", [])
+        pending_tags = session.tag_state.get("pending", [])
+
+    for tag_name in pending_tags:
+        tag_name = tag_name.strip()
+        if not tag_name:
+            continue
+        t_res = await db.execute(select(Tag).where(Tag.name == tag_name))
+        tag = t_res.scalar_one_or_none()
+        if tag is None:
+            tag = Tag(name=tag_name, status=TagStatus.pending)
+            db.add(tag)
+            await db.flush()
+        if tag_name not in confirmed_tags:
+            confirmed_tags.append(tag_name)
+
+    if confirmed_tags:
+        await _attach_tags(db, item, confirmed_tags, new_tag_status=TagStatus.pending)
+
+    # ---- 6. Inventory files + create File rows ----
+    sc_name = sidecar_name(title, key)  # type: ignore[arg-type]
+    records = inventory_item(item_dir, sc_name)
+    for rec in records:
+        f = FileModel(
+            item_id=item.id,
+            path=rec.relative_path,
+            role=rec.role,
+            size=rec.size,
+            sha256=rec.sha256,
+            mtime=rec.mtime,
+            last_seen_size=rec.size,
+            last_seen_mtime=rec.mtime,
+        )
+        db.add(f)
+    await db.flush()
+
+    # ---- 6b. Capture source_baseline ----
+    if session.source_url:
+        from ...models.file import FileRole  # noqa: PLC0415
+        baseline: dict[str, str] = {}
+        for rec in records:
+            if rec.role == FileRole.model and rec.sha256:
+                baseline[rec.relative_path] = rec.sha256
+        item.source_baseline = baseline if baseline else None
+    await db.flush()
+
+    # ---- 7. Handle images ----
+    img_order = 0
+    for si in session.images:
+        if si.is_url:
+            try:
+                import httpx as _httpx  # noqa: PLC0415
+
+                images_dir = item_dir / "images"
+                images_dir.mkdir(exist_ok=True)
+                with _httpx.Client(timeout=settings.SCRAPE_TIMEOUT) as c:
+                    r = c.get(si.path, follow_redirects=True)
+                    if r.status_code == 200:
+                        ext = _scraped_image_ext(
+                            si.path,
+                            r.headers.get("content-type", ""),
+                        )
+                        img_name = f"scraped_{img_order:02d}{ext}"
+                        img_dest = images_dir / img_name
+                        img_dest.write_bytes(r.content)
+                        rel_path = str(img_dest.relative_to(item_dir))
+                        img_obj = Image(
+                            item_id=item.id,
+                            path=rel_path,
+                            source=ImageSource.scraped,
+                            is_default=si.is_default,
+                            order=img_order,
+                        )
+                        db.add(img_obj)
+                        img_order += 1
+            except Exception:
+                log.warning("commit: failed to download image %s", si.path)
+        else:
+            rel = Path(si.path).name
+            img_path = item_dir / rel
+            if img_path.exists():
+                if si.path.startswith("images/"):
+                    rel_path = si.path
+                else:
+                    rel_path = str(Path("images") / rel)
+                img_obj = Image(
+                    item_id=item.id,
+                    path=rel_path,
+                    source=ImageSource.uploaded,
+                    is_default=si.is_default,
+                    order=img_order,
+                )
+                db.add(img_obj)
+                img_order += 1
+
+    await db.flush()
+
+    # ---- 8. Set creator on item for sidecar ----
+    if creator:
+        await db.refresh(creator)
+        item.creator = creator
+
+    # ---- 9. Write sidecar ----
+    await _write_item_sidecar(db, item)
+
+    # ---- 10. Update FTS vector ----
+    await _update_search_vector(
+        db, item.id, item.title, item.description, confirmed_tags
+    )
+
+    # ---- 11. Update session status ----
+    session.status = ImportSessionStatus.committed
+    session.item_id = item.id
+    session.updated_at = datetime.now(UTC)
+    await db.flush()
+
+    # ---- 12. Clean up staging dir ----
+    if session.staging_dir:
+        staging_path = Path(session.staging_dir)
+        if staging_path.is_dir():
+            try:
+                shutil.rmtree(str(staging_path))
+            except Exception:
+                log.warning("commit: failed to clean staging dir %s", staging_path)
+
+    # ---- 13. Enqueue render (fire-and-forget) ----
+    await _enqueue_render(item.id)
+
+    # ---- 14. Enqueue ZIP extraction when the item contains any ZIP ----
+    from ...models.file import FileRole as _FileRole  # noqa: PLC0415
+    has_zip = any(rec.role == _FileRole.zip for rec in records)
+    if has_zip:
+        await _enqueue_extract_archives(item.id)
+
+    return CommitResponse(
+        item_key=item.key,
+        item_id=item.id,
+        session_id=session_id_str,
+    )
+
+
 @router.post("/api/import-sessions/{session_id}/commit", response_model=CommitResponse)
 async def commit_import_session(
     session_id: str,
@@ -511,269 +795,24 @@ async def commit_import_session(
             detail="confirmed_title must be set before committing.",
         )
 
-    if not session.library_id:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="library_id must be set before committing.",
-        )
-
-    # Validate library
-    lib_res = await db.execute(
-        select(Library).where(
-            Library.id == session.library_id, Library.enabled.is_(True)
-        )
-    )
-    library = lib_res.scalar_one_or_none()
+    # Resolve library: session's own library_id (override or sole-lib fallback)
+    library = await _resolve_import_library(None, session.library_id, db)
     if library is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Library {session.library_id} not found or not enabled.",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "library_id must be set (or a default import library configured) "
+                "before committing."
+            ),
         )
 
     try:
-        # ---- 1. Resolve/create creator ----
-        creator: Creator | None = None
-        if session.creator_is_own_design:
-            creator = await _ensure_creator(
-                db,
-                name=user.name,
-                user_id=user.id,
-            )
-        elif session.creator_name:
-            creator = await _ensure_creator(
-                db,
-                name=session.creator_name,
-                profile_url=session.creator_profile_url,
-                source_site=session.creator_source_site,
-            )
-
-        # ---- 2. Generate key + build item dir path ----
-        key = await generate_unique_key(db)
-        slug = item_slug(title, key)
-        item_dir = item_dir_path(library.mount_path, key, title)
-        item_dir.mkdir(parents=True, exist_ok=True)
-
-        # ---- 3. Move staged files into item dir ----
-        for sf in session.files:
-            src_path = Path(sf.staged_path)
-            if src_path.exists():
-                dest_path = item_dir / src_path.name
-                # Use Path.replace for same-filesystem move (fastest)
-                # If cross-device, fall back to copy+delete
-                try:
-                    src_path.replace(dest_path)
-                except OSError:
-                    shutil.copy2(str(src_path), str(dest_path))
-                    src_path.unlink(missing_ok=True)
-
-        # For inbox sessions: move files from inbox folder too
-        if session.source_type == ImportSourceType.inbox and session.inbox_folder:
-            inbox_path = Path(session.inbox_folder)
-            if inbox_path.is_dir():
-                for entry in inbox_path.iterdir():
-                    if entry.is_file():
-                        dest = item_dir / entry.name
-                        try:
-                            entry.replace(dest)
-                        except OSError:
-                            shutil.copy2(str(entry), str(dest))
-                            entry.unlink(missing_ok=True)
-
-        # ---- 4. Insert Item row ----
-        item = Item(
-            key=key,
-            title=title,
-            slug=slug,
-            description=session.description,
-            source_url=session.source_url,
-            source_site=session.source_site,
-            license=session.license,
-            creator_id=creator.id if creator else None,
-            library_id=library.id,
-            dir_path=str(item_dir),
-            schema_version=1,
-        )
-        db.add(item)
-        await db.flush()
-        await db.refresh(item)
-
-        # ---- 5. Attach tags ----
-        # Confirmed tags from session tag_state
-        confirmed_tags: list[str] = []
-        pending_tags: list[str] = []
-        if session.tag_state:
-            confirmed_tags = session.tag_state.get("confirmed", [])
-            pending_tags = session.tag_state.get("pending", [])
-
-        # Create pending tags (approval queue)
-        for tag_name in pending_tags:
-            tag_name = tag_name.strip()
-            if not tag_name:
-                continue
-            t_res = await db.execute(select(Tag).where(Tag.name == tag_name))
-            tag = t_res.scalar_one_or_none()
-            if tag is None:
-                tag = Tag(name=tag_name, status=TagStatus.pending)
-                db.add(tag)
-                await db.flush()
-            # Add to confirmed list with pending status (still visible, just not canonical)
-            if tag_name not in confirmed_tags:
-                confirmed_tags.append(tag_name)
-
-        # Attach via shared helper — any brand-new tag created here is marked
-        # pending so it enters the admin approval queue rather than becoming
-        # immediately canonical.  Tags that already exist keep their current status.
-        if confirmed_tags:
-            await _attach_tags(db, item, confirmed_tags, new_tag_status=TagStatus.pending)
-
-        # ---- 6. Inventory files + create File rows ----
-        sc_name = sidecar_name(title, key)
-        records = inventory_item(item_dir, sc_name)
-        for rec in records:
-            f = FileModel(
-                item_id=item.id,
-                path=rec.relative_path,
-                role=rec.role,
-                size=rec.size,
-                sha256=rec.sha256,
-                mtime=rec.mtime,
-                last_seen_size=rec.size,
-                last_seen_mtime=rec.mtime,
-            )
-            db.add(f)
-        await db.flush()
-
-        # ---- 6b. Capture source_baseline (Phase 15) ----
-        # Only when the item has a source_url — this is the "original online version"
-        # reference.  Capture the sha256 of model files only (role=model).
-        if session.source_url:
-            from ...models.file import FileRole  # noqa: PLC0415
-            baseline: dict[str, str] = {}
-            for rec in records:
-                if rec.role == FileRole.model and rec.sha256:
-                    baseline[rec.relative_path] = rec.sha256
-            item.source_baseline = baseline if baseline else None
-        await db.flush()
-
-        # ---- 7. Handle images ----
-        # Defensive fallback: if PATCH set default_image_path before the image
-        # rows were materialized (edge case), no is_default flag will be True.
-        # Honor default_image_path now so the commit still picks the right image.
-        if session.default_image_path and not any(
-            si.is_default for si in session.images
-        ):
-            matched = False
-            for si in sorted(session.images, key=lambda x: x.order):
-                if si.path == session.default_image_path:
-                    si.is_default = True
-                    matched = True
-                    break
-            if not matched and session.images:
-                # Path no longer present — fall back to lowest-order image.
-                sorted_imgs = sorted(session.images, key=lambda x: x.order)
-                sorted_imgs[0].is_default = True
-
-        img_order = 0
-        for si in session.images:
-            if si.is_url:
-                # Download URL image into item_dir/images/
-                try:
-                    import httpx as _httpx  # noqa: PLC0415
-
-                    images_dir = item_dir / "images"
-                    images_dir.mkdir(exist_ok=True)
-                    with _httpx.Client(timeout=settings.SCRAPE_TIMEOUT) as c:
-                        r = c.get(si.path, follow_redirects=True)
-                        if r.status_code == 200:
-                            ext = _scraped_image_ext(
-                                si.path,
-                                r.headers.get("content-type", ""),
-                            )
-                            img_name = f"scraped_{img_order:02d}{ext}"
-                            img_dest = images_dir / img_name
-                            img_dest.write_bytes(r.content)
-                            rel_path = str(img_dest.relative_to(item_dir))
-                            img_obj = Image(
-                                item_id=item.id,
-                                path=rel_path,
-                                source=ImageSource.scraped,
-                                is_default=si.is_default,
-                                order=img_order,
-                            )
-                            db.add(img_obj)
-                            img_order += 1
-                except Exception:
-                    log.warning("commit: failed to download image %s", si.path)
-            else:
-                # Staged/inbox image already moved to item_dir
-                rel = Path(si.path).name
-                img_path = item_dir / rel
-                if img_path.exists():
-                    if si.path.startswith("images/"):
-                        rel_path = si.path
-                    else:
-                        rel_path = str(Path("images") / rel)
-                    img_obj = Image(
-                        item_id=item.id,
-                        path=rel_path,
-                        source=ImageSource.uploaded,
-                        is_default=si.is_default,
-                        order=img_order,
-                    )
-                    db.add(img_obj)
-                    img_order += 1
-
-        await db.flush()
-
-        # ---- 8. Set creator on item for sidecar ----
-        if creator:
-            await db.refresh(creator)
-            item.creator = creator
-
-        # ---- 9. Write sidecar ----
-        await _write_item_sidecar(db, item)
-
-        # ---- 10. Update FTS vector ----
-        await _update_search_vector(
-            db, item.id, item.title, item.description, confirmed_tags
-        )
-
-        # ---- 11. Update session status ----
-        session.status = ImportSessionStatus.committed
-        session.item_id = item.id
-        session.updated_at = datetime.now(UTC)
-        await db.flush()
-
-        # ---- 12. Clean up staging dir ----
-        if session.staging_dir:
-            staging_path = Path(session.staging_dir)
-            if staging_path.is_dir():
-                try:
-                    shutil.rmtree(str(staging_path))
-                except Exception:
-                    log.warning("commit: failed to clean staging dir %s", staging_path)
-
-        # ---- 13. Enqueue render (fire-and-forget) ----
-        await _enqueue_render(item.id)
-
-        # ---- 14. Enqueue ZIP extraction when the item contains any ZIP ----
-        # Best-effort: a bad archive must not fail the import.
-        from ...models.file import FileRole as _FileRole  # noqa: PLC0415
-        has_zip = any(rec.role == _FileRole.zip for rec in records)
-        if has_zip:
-            await _enqueue_extract_archives(item.id)
-
-        return CommitResponse(
-            item_key=item.key,
-            item_id=item.id,
-            session_id=session_id,
-        )
+        return await _commit_session_inner(session, library, user, db)
 
     except HTTPException:
         raise
     except Exception as exc:
         log.exception("commit_import_session: failed for session %s", session_id)
-        # Mark session failed
         try:
             session.status = ImportSessionStatus.failed
             session.error = str(exc)
@@ -785,6 +824,131 @@ async def commit_import_session(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Commit failed: {exc}",
         ) from exc
+
+
+@router.post("/api/import-sessions/bulk-commit", response_model=BulkCommitResponse)
+async def bulk_commit_import_sessions(
+    body: BulkCommitRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> BulkCommitResponse:
+    """Commit multiple pending_wizard import sessions in one call.
+
+    For each targeted session the commit runs in its own isolated transaction
+    so a failure on one does not roll back others (partial-success).
+
+    Library resolution order per session:
+      (a) body.library_id override if provided
+      (b) session's own library_id if set
+      (c) import.default_library_id instance setting
+      (d) sole enabled library
+      (e) skip with reason "no_library"
+
+    Returns:
+      { total, committed, skipped: [{session_id, reason}], errors: [{session_id, reason}] }
+    """
+    from sqlalchemy.orm import selectinload  # noqa: PLC0415
+
+    from ...db import SessionLocal  # noqa: PLC0415
+    from ...models.user import UserRole  # noqa: PLC0415
+
+    is_admin = user.role == UserRole.admin
+
+    # ---- 1. Determine target session IDs ----
+    if body.session_ids is not None:
+        # Explicit list: load each session (ownership enforced per-session below)
+        target_ids: list[str] = body.session_ids
+    else:
+        # All pending_wizard sessions visible to this user
+        q = (
+            select(ImportSession.id)
+            .where(ImportSession.status == ImportSessionStatus.pending_wizard)
+        )
+        if not is_admin:
+            q = q.where(ImportSession.created_by_id == user.id)
+        rows = (await db.execute(q)).scalars().all()
+        target_ids = [str(r) for r in rows]
+
+    committed_count = 0
+    skipped: list[BulkCommitSkipped] = []
+    errors: list[BulkCommitSkipped] = []
+
+    # ---- 2. Process each session in its own transaction ----
+    for sid in target_ids:
+        async with SessionLocal() as iso_db:
+            try:
+                import uuid as _uuid  # noqa: PLC0415
+
+                try:
+                    sid_uuid = _uuid.UUID(sid)
+                except ValueError:
+                    skipped.append(BulkCommitSkipped(session_id=sid, reason="invalid_id"))
+                    continue
+
+                result = await iso_db.execute(
+                    select(ImportSession)
+                    .options(
+                        selectinload(ImportSession.files),
+                        selectinload(ImportSession.images),
+                    )
+                    .where(ImportSession.id == sid_uuid)
+                )
+                session_obj = result.scalar_one_or_none()
+
+                if session_obj is None:
+                    skipped.append(BulkCommitSkipped(session_id=sid, reason="not_found"))
+                    continue
+
+                # Ownership check
+                if not is_admin and session_obj.created_by_id != user.id:
+                    skipped.append(BulkCommitSkipped(session_id=sid, reason="forbidden"))
+                    continue
+
+                # Status check
+                if session_obj.status != ImportSessionStatus.pending_wizard:
+                    skipped.append(
+                        BulkCommitSkipped(
+                            session_id=sid,
+                            reason=f"wrong_status:{session_obj.status.value}",
+                        )
+                    )
+                    continue
+
+                # Title check
+                title = session_obj.confirmed_title or session_obj.suggested_title
+                if not title:
+                    skipped.append(BulkCommitSkipped(session_id=sid, reason="no_title"))
+                    continue
+
+                # Library resolution
+                library = await _resolve_import_library(
+                    body.library_id, session_obj.library_id, iso_db
+                )
+                if library is None:
+                    skipped.append(BulkCommitSkipped(session_id=sid, reason="no_library"))
+                    continue
+
+                await _commit_session_inner(session_obj, library, user, iso_db)
+                await iso_db.commit()
+                committed_count += 1
+
+            except Exception as exc:
+                log.exception("bulk_commit: error on session %s", sid)
+                try:
+                    await iso_db.rollback()
+                except Exception:
+                    pass
+                errors.append(
+                    BulkCommitSkipped(session_id=sid, reason=str(exc)[:200])
+                )
+
+    return BulkCommitResponse(
+        total=len(target_ids),
+        committed=committed_count,
+        skipped=skipped,
+        errors=errors,
+    )
 
 
 @router.post(
