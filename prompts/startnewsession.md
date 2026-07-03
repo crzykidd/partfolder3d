@@ -14,7 +14,10 @@ merged to `dev`, unreleased. New backlog issues #16/#20/#21/#24 filed; render-ca
 > ## CURRENT STATE (2026-07-02) — v0.2.5 released; #15 bulk import queued on `dev`
 > **Latest release: `v0.2.5`** on `main` (merge `569d5e1`, tag `v0.2.5`). **`dev` is AHEAD of `main`**:
 > the #15 bulk-import feature is merged to `dev` (merge `0952358`) and awaits the next release —
-> **next `/release-prep` will be `0.2.6`** (or a minor if scope grows). Release history since v0.1.1:
+> **next release is `v0.3.0`** (minor bump — large feature batch: #15 bulk import + the overnight
+> batch #16/#17/#18/#19/#21/#24/#11 + #15 render param; a minor triggers the 0.2.x changelog archive
+> at `/release-prep`). As each issue is fixed on `dev`, comment it "fixed on dev → shipping in v0.3.0".
+> Release history since v0.1.1:
 > - **v0.2.0** — "read-don't-render" asset-detail rework: 3MF READ not rendered (embedded slicer
 >   thumbnail `ImageSource.embedded` + slice metadata, migration **0021**), bounded STL/OBJ/PLY render
 >   on the **`vtk-osmesa`** wheel (+`libosmesa6`; stock PyPI `vtk` is X11-only, can't render headless),
@@ -157,8 +160,9 @@ merged to `dev`, unreleased. New backlog issues #16/#20/#21/#24 filed; render-ca
   of `main`** — the **#15 bulk-import** feature is merged to `dev` (bulk-commit endpoint +
   `import.default_library_id` setting + inbox auto-resolution + "Commit ready" UI on `/imports`),
   unreleased. The full stack (Phases 0–10 + Aurora UI + render rework + v0.2.x hardening + #15) has shipped/queued.
-- **NEXT ACTIONS:** none blocking. When the owner wants to ship what's on `dev`: `/release-prep 0.2.6`
-  → merge PR → `:latest` publishes → `/release-cut 0.2.6` (never re-tag). **Open GitHub issues**
+- **NEXT ACTIONS:** none blocking. When the owner wants to ship what's on `dev`: `/release-prep 0.3.0`
+  (minor — confirm the warn prompt; it archives 0.2.x) → merge PR → `:latest` publishes →
+  `/release-cut 0.3.0` (never re-tag). **Open GitHub issues**
   (backlog): **#11** library hard-delete + move-assets-between-libraries (future); **#16** import
   wizard "Clean up (AI)" ignores a typed-but-unsaved description (frontend must PATCH the description
   before calling, or the endpoint should accept it in the body); **#20** queued worker jobs are
@@ -300,8 +304,9 @@ merged to `dev`, unreleased. New backlog issues #16/#20/#21/#24 filed; render-ca
       3MF read-not-render, ZIP auto-extract, file-tree + 3MF collapsible UI, in-browser three.js
       viewer, vtk-osmesa render fix. Verified against a rebuilt image (see CURRENT STATE).
 - [x] **v0.2.5 released** (2026-07-02) — #13 auto-login + #14 default-image + CodeQL log-injection fix.
-      Both #13 and #14 CLOSED. **#15 bulk import merged to `dev`** (merge `0952358`) — queued for 0.2.6.
-- [ ] **Ship what's on `dev` (0.2.6)** when the owner wants — `dev` is ahead of `main` by the #15 work.
+      Both #13 and #14 CLOSED. **#15 bulk import merged to `dev`** (merge `0952358`) — queued for v0.3.0.
+- [ ] **Ship what's on `dev` as v0.3.0** when the owner wants — `dev` is ahead of `main` by #15 + the
+      overnight batch (#16/#17/#18/#19/#21/#24/#11 + #15 render param). Minor bump; `/release-prep 0.3.0`.
 - [ ] **Open GitHub issues** (backlog): **#11** library hard-delete + move-assets (future); **#16**
       import "Clean up (AI)" ignores typed-but-unsaved description; **#20** queued jobs invisible in the
       monitor; **#21** capture 3D viewer view → item image (multi-capture; wizard "Try to render file",
