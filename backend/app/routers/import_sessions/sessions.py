@@ -676,6 +676,20 @@ async def _commit_session_inner(
     await db.flush()
 
     # ---- 7. Handle images ----
+    # Defensive fallback (issue #14): if PATCH set default_image_path before the
+    # image rows were materialized, no ImportSessionImage has is_default=True.
+    # Honor default_image_path here so the created item still gets a default.
+    # (Restored after the commit path was refactored into _commit_session_inner.)
+    if session.default_image_path and not any(si.is_default for si in session.images):
+        sorted_imgs = sorted(session.images, key=lambda x: x.order)
+        matched = next(
+            (si for si in sorted_imgs if si.path == session.default_image_path), None
+        )
+        if matched is not None:
+            matched.is_default = True
+        elif sorted_imgs:
+            sorted_imgs[0].is_default = True
+
     img_order = 0
     for si in session.images:
         if si.is_url:

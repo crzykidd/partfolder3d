@@ -2,6 +2,30 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-03 — v0.3.0 full-suite gate: one real regression + a test-hermeticity fix
+
+Running the full backend suite after the overnight batch surfaced two issues:
+
+1. **Real regression (fixed):** the issue-#14 commit-side default-image fallback (honor
+   `session.default_image_path` when no `ImportSessionImage.is_default` is set) was **dropped**
+   when `commit_import_session` was refactored into `_commit_session_inner` (by the bulk-import
+   work, then the render-param change). The agents that touched the commit path only ran
+   `test_bulk_import`/`test_phase5_import`, not `test_import_management`, so the #14 test never
+   re-ran — the full suite is what caught it. Restored the fallback just before the image loop in
+   `_commit_session_inner`. **Lesson:** when refactoring a shared function, run the tests of ALL
+   callers/features that depend on it, not just the new feature's tests.
+
+2. **Test hermeticity (fixed):** `test_clear_jobs_by_status_{succeeded,failed,cancelled}` asserted
+   an EXACT global archived count (`== 2`). Under xdist, other tests in the same worker DB leave
+   committed `Job` rows (notably #18's `extract_archives`, which now commits a Job row via
+   `job_tracker` outside the per-test rollback), so the global "clear all of status X" endpoint
+   correctly archives more than 2. Relaxed to `>= 2`; the per-job assertions already prove only the
+   right jobs are touched. The endpoint is correct — the test over-specified.
+
+Also noted: the local serial `:5433` test DB is NOT reset by conftest between runs (only xdist
+workers drop+create), so a long-lived container accumulates committed rows and produces spurious
+count failures in serial runs. Validate with xdist (`-n N`, fresh per-worker DBs) — that's how CI runs.
+
 ## 2026-07-03 — #11 library purge: no on-disk directory removal
 
 `DELETE /api/libraries/{id}/purge` hard-deletes the `libraries` row but does not remove
