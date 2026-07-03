@@ -22,6 +22,10 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **App-wide error boundary** — a component crash now shows a readable "Something went wrong"
+  screen (with Reload and "Reset app data & reload" actions) instead of blanking the entire
+  app. Also fixed a crash where the release-notes popup shared a React Query cache key with the
+  version page (object vs string), which blanked the app on load after an upgrade.
 - **Hard-delete empty library + re-enable disabled library** (issue #11) — two new admin
   actions fill the soft-delete gap.  A disabled library row in the admin Libraries page now
   shows **Re-enable** (restores `enabled = true` instantly) and **Delete permanently**.
