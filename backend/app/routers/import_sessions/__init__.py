@@ -16,6 +16,7 @@ from ...auth.deps import csrf_protect, get_current_user, get_db
 from ...config import settings
 from ...models.import_session import ImportSession, ImportSessionStatus, ImportSourceType
 from ...models.user import User
+from ...storage.link_url import normalize_link_url
 from .helpers import (  # noqa: F401 (reconcile_tags is imported by tests and worker tasks)
     _session_out,
     reconcile_tags,
@@ -176,7 +177,9 @@ async def import_from_share_link(
         if isinstance(item_data, dict)
         else remote_data.get("license")
     )
-    remote_source_url: str | None = (
+    # Drop non-http(s) schemes from the remote instance's source_url so it can't
+    # plant a javascript: href on the item / public share page (storage.link_url).
+    remote_source_url: str | None = normalize_link_url(
         item_data.get("source_url")
         if isinstance(item_data, dict)
         else remote_data.get("source_url")

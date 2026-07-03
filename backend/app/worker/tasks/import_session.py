@@ -194,6 +194,7 @@ async def process_import_session(ctx: dict, session_id: str) -> None:
         ImportSourceType,
     )
     from app.models.site_capability import SiteCapability  # noqa: PLC0415
+    from app.storage.link_url import normalize_link_url  # noqa: PLC0415
     from app.storage.scraper import extract_domain, scrape_url  # noqa: PLC0415
     from app.storage.ssrf_guard import sanitize_for_log  # noqa: PLC0415
 
@@ -364,8 +365,10 @@ async def process_import_session(ctx: dict, session_id: str) -> None:
                                 src = raw.get("source") or {}
                                 if isinstance(src, dict):
                                     if not session.source_url and src.get("url"):
-                                        # Update session source URL
-                                        session.source_url = str(src["url"])
+                                        # Update session source URL (drop non-http(s)
+                                        # schemes so a hostile sidecar can't plant a
+                                        # javascript: href — see storage.link_url).
+                                        session.source_url = normalize_link_url(str(src["url"]))
                                     if not scraped_license and src.get("license"):
                                         scraped_license = str(src["license"])
                                     if not scraped_source_site and src.get("site"):
@@ -420,7 +423,8 @@ async def process_import_session(ctx: dict, session_id: str) -> None:
             if not session.creator_name:
                 session.creator_name = scraped_creator
             if not session.creator_profile_url:
-                session.creator_profile_url = scraped_creator_url
+                # Drop non-http(s) schemes from scraped creator URLs (XSS-safe href).
+                session.creator_profile_url = normalize_link_url(scraped_creator_url)
             if not session.creator_source_site and scraped_source_site:
                 session.creator_source_site = scraped_source_site
 

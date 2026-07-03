@@ -15,6 +15,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ExternalLink, User, Box } from 'lucide-react'
 
 import * as api from '@/lib/api'
+import { safeHref } from '@/lib/utils'
 import {
   AdminPage,
   PageHeader,
@@ -158,7 +159,7 @@ export function CreatorPage() {
             actions={
               creator.profile_url ? (
                 <a
-                  href={creator.profile_url}
+                  href={safeHref(creator.profile_url)}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{

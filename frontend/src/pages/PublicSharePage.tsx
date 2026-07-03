@@ -27,6 +27,7 @@ import * as api from '@/lib/api'
 import { ApiError } from '@/lib/api'
 import { mapBundleStatus, shouldContinuePolling, type ZipPollStatus } from '@/lib/catalog-utils'
 import { formatPrintTime, formatFilamentLength, formatFilamentWeight, renderStars } from '@/lib/print-utils'
+import { safeHref } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
 // Style constants
@@ -518,7 +519,7 @@ export function PublicSharePage() {
               <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--aurora-danger)' }}>
                 This is a modified copy — it differs from the original at{' '}
                 <a
-                  href={data.source_url}
+                  href={safeHref(data.source_url)}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{ color: 'var(--aurora-accent)', textDecoration: 'underline', wordBreak: 'break-all' }}
@@ -584,7 +585,7 @@ export function PublicSharePage() {
                   <dt style={{ color: 'var(--aurora-muted)', fontWeight: 600 }}>Source</dt>
                   <dd style={{ margin: 0 }}>
                     <a
-                      href={data.source_url}
+                      href={safeHref(data.source_url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       style={{ color: 'var(--aurora-accent)', textDecoration: 'none', wordBreak: 'break-all' }}

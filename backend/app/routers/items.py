@@ -42,7 +42,7 @@ from fastapi import (
 from fastapi import (
     File as FastAPIFile,
 )
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -67,6 +67,7 @@ from ..services.item_helpers import (
 from ..storage.inventory import FileRecord, hash_file_sha256, infer_role, inventory_item
 from ..storage.journal import MoveError, atomic_rename, move_to_trash
 from ..storage.keys import generate_unique_key
+from ..storage.link_url import validate_link_url
 from ..storage.paths import item_dir_path, item_slug, sidecar_name
 
 log = logging.getLogger(__name__)
@@ -84,6 +85,8 @@ class CreatorIn(BaseModel):
     profile_url: str | None = None
     source_site: str | None = None
 
+    _validate_profile_url = field_validator("profile_url")(validate_link_url)
+
 
 class TagIn(BaseModel):
     name: str
@@ -99,6 +102,8 @@ class ItemCreate(BaseModel):
     creator: CreatorIn | None = None
     tags: list[str] = []
 
+    _validate_source_url = field_validator("source_url")(validate_link_url)
+
 
 class ItemUpdate(BaseModel):
     title: str | None = None
@@ -108,6 +113,8 @@ class ItemUpdate(BaseModel):
     license: str | None = None
     creator: CreatorIn | None = None
     tags: list[str] | None = None
+
+    _validate_source_url = field_validator("source_url")(validate_link_url)
 
 
 class CreatorOut(BaseModel):

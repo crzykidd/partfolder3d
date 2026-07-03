@@ -18,6 +18,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/context/AuthContext'
 import * as api from '@/lib/api'
 import { IMPORT_DEFAULT_LIBRARY_KEY } from '@/lib/api/settings'
+import { safeHref } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
 // Aurora style constants
@@ -235,7 +236,7 @@ function SessionRow({ session }: { session: api.ImportSession }) {
         </p>
         {session.source_url && (
           <a
-            href={session.source_url}
+            href={safeHref(session.source_url)}
             target="_blank"
             rel="noopener noreferrer"
             style={{

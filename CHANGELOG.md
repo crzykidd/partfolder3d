@@ -29,6 +29,14 @@ prefix appears only on git tags and GitHub releases.
   or RFC1918), **streams with a size cap** instead of buffering unbounded response bodies,
   enforces `image/*` on scraped images, and sanitizes URLs before logging. New caps
   `SCRAPE_IMAGE_MAX_MB` (25) and `SCRAPE_HTML_MAX_MB` (5).
+- **`javascript:`-scheme XSS blocked on `source_url` / creator `profile_url`** — these
+  user-set/scraped fields are rendered into anchor `href`s (including the unauthenticated
+  public share page), so a `javascript:`/`data:`/`vbscript:` value was a one-click
+  authenticated request forgery (the CSRF cookie is JS-readable). Defense in depth: the
+  backend now rejects non-`http(s)` URLs at the API schema boundary (item create/PATCH,
+  import-session create/PATCH → **422**) and silently drops them on scraper/share-import
+  ingestion; the frontend gained a `safeHref()` helper applied to every external link so a
+  stored bad value still can't navigate.
 
 ## [0.3.0] — 2026-07-03
 

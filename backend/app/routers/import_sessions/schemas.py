@@ -4,7 +4,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+from ...storage.link_url import validate_link_url
 
 
 class CreateSessionRequest(BaseModel):
@@ -16,6 +18,8 @@ class CreateSessionRequest(BaseModel):
     description: str | None = None
     license: str | None = None
 
+    _validate_source_url = field_validator("source_url")(validate_link_url)
+
 
 class PatchSessionRequest(BaseModel):
     confirmed_title: str | None = None
@@ -26,6 +30,9 @@ class PatchSessionRequest(BaseModel):
     creator_name: str | None = None
     creator_profile_url: str | None = None
     creator_source_site: str | None = None
+
+    _validate_source_url = field_validator("source_url")(validate_link_url)
+    _validate_creator_profile_url = field_validator("creator_profile_url")(validate_link_url)
     creator_is_own_design: bool | None = None
     # Tag reconciliation: user-confirmed final tag list
     confirmed_tags: list[str] | None = None

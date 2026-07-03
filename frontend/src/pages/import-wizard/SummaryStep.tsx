@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as api from '@/lib/api'
+import { safeHref } from '@/lib/utils'
 import { AURORA_CARD, AURORA_BTN_GHOST } from './styles'
 
 // ---------------------------------------------------------------------------
@@ -43,9 +44,9 @@ function SummaryRow({
         {label}
       </td>
       <td style={{ padding: '10px 16px', color: 'var(--aurora-text)', wordBreak: 'break-word', fontSize: 13 }}>
-        {isLink && href ? (
+        {isLink && safeHref(href) ? (
           <a
-            href={href}
+            href={safeHref(href)}
             target="_blank"
             rel="noopener noreferrer"
             style={{ color: 'var(--aurora-accent)', textDecoration: 'none' }}

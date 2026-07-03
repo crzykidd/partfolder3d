@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Maximize2, X } from 'lucide-react'
 
 import * as api from '@/lib/api'
+import { safeHref } from '@/lib/utils'
 
 import { AURORA_CARD, formatDate } from './styles'
 
@@ -114,7 +115,7 @@ export function ItemMetadata({ item, itemKey, isOwnerOrAdmin }: ItemMetadataProp
             <>
               <span style={{ color: 'var(--aurora-muted)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>Source</span>
               <a
-                href={item.source_url}
+                href={safeHref(item.source_url)}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ color: 'var(--aurora-accent)', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}
