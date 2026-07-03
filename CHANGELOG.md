@@ -41,6 +41,14 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **`render` preference on import-session commit paths** — `POST /api/import-sessions/{id}/commit`
+  now accepts an optional JSON body (`CommitOptions`) with `render: "auto" | "off"` (default
+  `"auto"`); `POST /api/import-sessions/bulk-commit` gains the same field on `BulkCommitRequest`.
+  `"off"` suppresses server-side render enqueueing for the session/batch entirely — useful for
+  scripted bulk migrations where renders are deferred or triggered later via browser capture.
+  `"auto"` preserves existing behaviour (still gated by the instance `render.mode` setting).
+  Omitting the body/field is fully backward-compatible. (Closes #15)
+
 - **Bulk commit endpoint** (`POST /api/import-sessions/bulk-commit`) — commits
   multiple pending-wizard import sessions in one call.  Pass `session_ids` (list
   of UUIDs) or `null` to target all visible pending-wizard sessions.  An optional

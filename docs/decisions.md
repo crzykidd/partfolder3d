@@ -2,6 +2,24 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-03 — #15 render preference: caller-side gate vs. instance-side gate
+
+The `render` parameter (`"auto"` | `"off"`) is a **caller-side gate**: when `"off"`,
+`_enqueue_render` is never called at all. This is layered on top of the existing
+**instance-side gate** inside `_enqueue_render` (`settings.RENDER_MODE == "off"`),
+which already short-circuits when the operator has disabled rendering globally.
+
+The two are intentionally independent:
+- Instance `render.mode = "off"` means the server can't render at all (no worker, no GPU).
+- Request `render = "off"` means the caller doesn't want a render now (e.g. bulk migration
+  deferred to browser capture later), even if the server is capable.
+
+Neither gate can be used to *force* rendering past the other: `render="auto"` still
+goes through the instance check; `render.mode="off"` still blocks even if `render="auto"`.
+
+`"auto"` was chosen as the default (not `"on"`) so the value is meaningful as "use the
+instance default policy" rather than "always render", keeping the option additive.
+
 ## 2026-07-03 — #17 asyncio.to_thread placement and timeout strategy
 
 **Why `asyncio.to_thread` at the router level, not inside client.py:** the public

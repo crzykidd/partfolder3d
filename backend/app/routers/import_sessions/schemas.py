@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -130,6 +131,18 @@ class CommitResponse(BaseModel):
     session_id: str
 
 
+class CommitOptions(BaseModel):
+    """Optional request body for POST /api/import-sessions/{id}/commit.
+
+    render: "auto" (default) preserves existing behaviour — server-side render
+            is enqueued when the instance render.mode allows it.
+            "off" suppresses enqueueing entirely for this commit regardless of
+            the instance setting.
+    """
+
+    render: Literal["auto", "off"] = "auto"
+
+
 class BulkCommitRequest(BaseModel):
     """Request body for POST /api/import-sessions/bulk-commit.
 
@@ -138,10 +151,15 @@ class BulkCommitRequest(BaseModel):
     library_id: optional override — if set, this library is used for every
                 session in the batch regardless of the session's own library_id
                 or the default-import-library setting.
+    render: "auto" (default) enqueues server-side render for mesh files when
+            the instance render.mode permits.  "off" suppresses render enqueueing
+            for every session in the batch (e.g. bulk migration where renders will
+            be triggered later via browser capture or a separate job).
     """
 
     session_ids: list[str] | None = None
     library_id: int | None = None
+    render: Literal["auto", "off"] = "auto"
 
 
 class BulkCommitSkipped(BaseModel):

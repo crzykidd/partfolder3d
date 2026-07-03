@@ -59,6 +59,7 @@ from .schemas import (
     BulkCommitRequest,
     BulkCommitResponse,
     BulkCommitSkipped,
+    CommitOptions,
     CommitResponse,
     CreateSessionRequest,
     ImportSessionOut,
@@ -547,11 +548,15 @@ async def _commit_session_inner(
     library: Library,
     user: User,
     db: AsyncSession,
+    render: str = "auto",
 ) -> CommitResponse:
     """Core commit logic shared by single-commit and bulk-commit paths.
 
     Expects `session` and `library` already loaded from `db`.  Caller is
     responsible for the surrounding transaction (commit / rollback on error).
+
+    render: "auto" → enqueue server render (still gated by instance render.mode);
+            "off"  → skip _enqueue_render entirely for this commit.
     """
     session_id_str = str(session.id)
     title = session.confirmed_title or session.suggested_title
@@ -750,7 +755,8 @@ async def _commit_session_inner(
                 log.warning("commit: failed to clean staging dir %s", staging_path)
 
     # ---- 13. Enqueue render (fire-and-forget) ----
-    await _enqueue_render(item.id)
+    if render != "off":
+        await _enqueue_render(item.id)
 
     # ---- 14. Enqueue ZIP extraction when the item contains any ZIP ----
     from ...models.file import FileRole as _FileRole  # noqa: PLC0415
@@ -771,6 +777,7 @@ async def commit_import_session(
     user: Annotated[User, Depends(get_current_user)],
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    body: CommitOptions | None = None,
 ) -> CommitResponse:
     """Finalize an import session into a real Item.
 
@@ -781,6 +788,9 @@ async def commit_import_session(
     The session must be in 'pending_wizard' status and have a confirmed_title and
     library_id set.  On failure, the session is marked 'failed' and no partial item
     is created.
+
+    Optional body: CommitOptions with render="auto"|"off" (default "auto").
+    Omitting the body preserves existing behavior.
     """
     session = await _load_session(session_id, db, user)
 
@@ -811,8 +821,10 @@ async def commit_import_session(
             ),
         )
 
+    render_pref = body.render if body else "auto"
+
     try:
-        return await _commit_session_inner(session, library, user, db)
+        return await _commit_session_inner(session, library, user, db, render=render_pref)
 
     except HTTPException:
         raise
@@ -934,7 +946,7 @@ async def bulk_commit_import_sessions(
                     skipped.append(BulkCommitSkipped(session_id=sid, reason="no_library"))
                     continue
 
-                await _commit_session_inner(session_obj, library, user, iso_db)
+                await _commit_session_inner(session_obj, library, user, iso_db, render=body.render)
                 await iso_db.commit()
                 committed_count += 1
 

@@ -750,3 +750,80 @@ async def test_resolve_library_skips_disabled(
     # Even if it's the only "library", it's disabled → None
     result = await _resolve_import_library(None, lib.id, db_session)
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# D. render preference
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_bulk_commit_render_off_skips_enqueue(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """render='off' in bulk-commit → _enqueue_render is NOT called."""
+    import app.db as db_mod
+    import app.routers.import_sessions.sessions as sessions_mod
+
+    csrf, user_id = await _admin_setup(client, tmp_path)
+    lib_id = await _create_library(client, csrf, "Test Lib", tmp_path / "lib")
+    sess = await _make_pending_session(
+        db_session, user_id, lib_id, confirmed_title="Render Off Item"
+    )
+
+    monkeypatch.setattr(db_mod, "SessionLocal", _make_session_local_patch(db_session))
+
+    render_calls: list[int] = []
+
+    async def fake_enqueue_render(item_id: int, model_extensions=None) -> None:
+        render_calls.append(item_id)
+
+    monkeypatch.setattr(sessions_mod, "_enqueue_render", fake_enqueue_render)
+
+    resp = await client.post(
+        "/api/import-sessions/bulk-commit",
+        json={"session_ids": [str(sess.id)], "render": "off"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["committed"] == 1
+    assert render_calls == []
+
+
+@pytest.mark.asyncio
+async def test_bulk_commit_render_auto_enqueues(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """render='auto' (default) in bulk-commit → _enqueue_render IS called."""
+    import app.db as db_mod
+    import app.routers.import_sessions.sessions as sessions_mod
+
+    csrf, user_id = await _admin_setup(client, tmp_path)
+    lib_id = await _create_library(client, csrf, "Test Lib", tmp_path / "lib")
+    sess = await _make_pending_session(
+        db_session, user_id, lib_id, confirmed_title="Render Auto Item"
+    )
+
+    monkeypatch.setattr(db_mod, "SessionLocal", _make_session_local_patch(db_session))
+
+    render_calls: list[int] = []
+
+    async def fake_enqueue_render(item_id: int, model_extensions=None) -> None:
+        render_calls.append(item_id)
+
+    monkeypatch.setattr(sessions_mod, "_enqueue_render", fake_enqueue_render)
+
+    resp = await client.post(
+        "/api/import-sessions/bulk-commit",
+        json={"session_ids": [str(sess.id)]},  # render omitted → default "auto"
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["committed"] == 1
+    assert len(render_calls) == 1
