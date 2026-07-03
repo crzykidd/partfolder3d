@@ -25,6 +25,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { createPortal } from 'react-dom'
 import { Canvas, useLoader, useThree } from '@react-three/fiber'
 import { OrbitControls, Bounds, Center, Html, useProgress } from '@react-three/drei'
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
@@ -265,8 +266,10 @@ export default function ModelViewer({
     }, 'image/png')
   }, [onCapture])
 
-  return (
-    /* Modal backdrop — click outside the card to close */
+  return createPortal(
+    /* Modal backdrop — click outside the card to close.
+       Portaled to <body> so an ancestor's backdrop-filter/transform (Aurora
+       cards) can't trap this position:fixed overlay inline in the page. */
     <div
       role="dialog"
       aria-modal="true"
@@ -432,7 +435,14 @@ export default function ModelViewer({
             {/* No maxDistance cap; near/far are wide (above) so dollying out never
                 clips the model. `clip` intentionally omitted — it tightens the frustum
                 to the object and made zoom-out clip the mesh. */}
-            <OrbitControls makeDefault enableDamping dampingFactor={0.05} minDistance={0.01} />
+            <OrbitControls
+              makeDefault
+              enableDamping
+              dampingFactor={0.05}
+              minDistance={0.01}
+              zoomToCursor
+              panSpeed={1.2}
+            />
             {/* Suspense is OUTSIDE Bounds so `fit` runs against the loaded geometry, not the
                 loading placeholder — otherwise the default view opens zoomed all the way in. */}
             <LoaderErrorBoundary onError={setLoadError}>
@@ -445,6 +455,7 @@ export default function ModelViewer({
           </Canvas>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
