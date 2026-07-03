@@ -311,7 +311,7 @@ async def retry_job(
         log.exception("retry_job: failed to enqueue %s for job %s", task_name, job_id)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Failed to enqueue retry: {exc}",
+            detail="Failed to enqueue retry.",
         ) from exc
 
 
@@ -411,7 +411,7 @@ async def restart_job(
         log.exception("restart_job: failed to enqueue %s for job %s", task_name, job_id)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Failed to enqueue restart: {exc}",
+            detail="Failed to enqueue restart.",
         ) from exc
 
 

@@ -146,9 +146,12 @@ async def create_import_session(
         try:
             assert_safe_url(body.source_url)
         except SSRFBlockedError as exc:
+            # Log the specific block reason server-side; return a generic message
+            # so we don't leak internal-network topology to the importing user.
+            log.warning("create_import_session: SSRF-blocked source URL: %s", exc)
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Blocked URL: {exc}",
+                detail="URL is not allowed.",
             ) from exc
 
     # Validate library if provided
@@ -875,10 +878,14 @@ async def commit_import_session(
             session.updated_at = datetime.now(UTC)
             await db.flush()
         except Exception:
-            pass
+            log.debug(
+                "commit_import_session: best-effort failed-status flush failed for session %s",
+                session_id,
+                exc_info=True,
+            )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Commit failed: {exc}",
+            detail="Commit failed.",
         ) from exc
 
 

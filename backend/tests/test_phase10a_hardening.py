@@ -274,7 +274,7 @@ async def test_share_link_import_blocked_internal_ip(
         )
 
     assert resp.status_code == 422
-    assert "Blocked" in resp.json().get("detail", "")
+    assert "not allowed" in resp.json().get("detail", "").lower()
 
 
 @pytest.mark.asyncio
@@ -325,7 +325,7 @@ async def test_url_import_session_blocked_internal_ip(
         )
 
     assert resp.status_code == 422
-    assert "Blocked" in resp.json().get("detail", "")
+    assert "not allowed" in resp.json().get("detail", "").lower()
 
 
 # ---------------------------------------------------------------------------

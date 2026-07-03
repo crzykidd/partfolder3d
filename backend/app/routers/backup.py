@@ -134,7 +134,7 @@ async def run_backup_now(
         log.exception("run_backup_now: failed to enqueue backup job")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Failed to enqueue backup: {exc}",
+            detail="Failed to enqueue backup.",
         ) from exc
 
 

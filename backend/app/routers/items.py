@@ -745,9 +745,10 @@ async def update_item(
                 db=db,
             )
         except MoveError as exc:
+            log.warning("update_item: rename failed for item %s: %s", key, exc)
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=str(exc),
+                detail="Failed to rename item directory.",
             ) from exc
 
         # Refresh item after rename (atomic_rename committed the DB update)
@@ -849,9 +850,10 @@ async def delete_item(
         try:
             move_to_trash(item_dir, key)
         except OSError as exc:
+            log.exception("delete_item: failed to move item %s directory to trash", key)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to move item directory to trash: {exc}",
+                detail="Failed to move item directory to trash.",
             ) from exc
 
     # Delete DB row (cascades to files, images, item_tags)
@@ -1530,9 +1532,10 @@ async def rename_file(
         try:
             old_abs.rename(new_abs)
         except OSError as exc:
+            log.exception("rename_file: failed to rename %s on disk", f.path)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to rename file on disk: {exc}",
+                detail="Failed to rename file on disk.",
             ) from exc
     else:
         log.warning(

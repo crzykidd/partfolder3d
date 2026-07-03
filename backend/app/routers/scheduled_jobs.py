@@ -98,5 +98,5 @@ async def run_now(
         log.exception("run_now: failed to enqueue %r", name)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Failed to enqueue job: {exc}",
+            detail="Failed to enqueue job.",
         ) from exc

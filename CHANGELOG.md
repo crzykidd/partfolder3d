@@ -22,6 +22,18 @@ prefix appears only on git tags and GitHub releases.
 
 ### Security
 
+- **Error responses no longer leak raw exception text; added a global exception handler.**
+  A catch-all handler now turns any *unhandled* server error into a fixed generic
+  `500 {"detail": "Internal server error"}` and logs the full traceback server-side, so
+  internal detail can't leak into the HTTP body (as FastAPI's default handler can with debug
+  on). ~12 endpoint sites that interpolated the raw exception into `detail=` (job
+  retry/restart, scheduled-job + backup enqueue, import-session commit, item rename/delete +
+  file rename, issue trash, remote share-link fetch) now log the real error and return a
+  generic action message with the same status code. The **SSRF-block message** on
+  import-session create and share-link import is scrubbed to a generic `"URL is not allowed."`
+  (the resolved internal IP / block reason is logged, not returned), so importers can't probe
+  internal network topology. A best-effort `updated_at` bump in the commit path now logs at
+  debug instead of a silent `except: pass`.
 - **SSRF hardening on the scrape/import fetch path** — every user-influenced outbound fetch
   (URL metadata scrape, `robots.txt`, and the commit-time download of scraped/AgentQL images)
   now goes through one guarded helper that rejects non-`http(s)` schemes, re-validates **every

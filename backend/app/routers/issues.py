@@ -10,6 +10,7 @@ Admin:
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -23,6 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth.deps import csrf_protect, get_db, require_admin
 from ..models.issue import Issue, IssueStatus, IssueType
 from ..models.user import User
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/issues", tags=["issues"])
 
@@ -255,9 +258,10 @@ async def issue_action(
             key_slug = hashlib.sha256(target.encode()).hexdigest()[:12]
             move_to_trash(target_dir, key_slug)
         except OSError as exc:
+            log.exception("issue_action: failed to move directory to trash for issue %s", issue.id)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to move directory to trash: {exc}",
+                detail="Failed to move directory to trash.",
             ) from exc
 
         issue.status = IssueStatus.resolved

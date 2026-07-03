@@ -57,9 +57,10 @@ async def _fetch_remote_share(url: str, timeout: int) -> dict:
             resp.raise_for_status()
             return resp.json()  # type: ignore[return-value]
     except Exception as exc:
+        log.warning("_fetch_remote_share: failed to fetch remote share link: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to fetch remote share link: {exc}",
+            detail="Failed to fetch remote share link.",
         ) from exc
 
 
@@ -148,9 +149,12 @@ async def import_from_share_link(
     try:
         assert_safe_url(api_url)
     except SSRFBlockedError as exc:
+        # Log the specific block reason server-side; return a generic message
+        # so we don't leak internal-network topology to the importing user.
+        log.warning("import_from_share_link: SSRF-blocked share URL: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Blocked: {exc}",
+            detail="URL is not allowed.",
         ) from exc
 
     # Fetch remote metadata

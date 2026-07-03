@@ -147,10 +147,8 @@ class Settings(BaseSettings):
     SCRAPE_HTML_MAX_MB: int = 5
 
     # ---- Sharing (Phase 7) ----
-    # Default expiry for new share links, in days.
-    # Can be overridden per-link.  Set to 0 for "never expires".
-    # Also stored as DB setting "share_default_expiry_days" for per-instance override.
-    SHARE_DEFAULT_EXPIRY_DAYS: int = 30
+    # NOTE: the default share-link expiry is NOT an env var — it lives in the DB
+    # Setting "share_default_expiry_days" (admin UI), read in routers/shares.py.
     # HTTP timeout (seconds) for instance-to-instance import fetch.
     INSTANCE_IMPORT_TIMEOUT: int = 30
 

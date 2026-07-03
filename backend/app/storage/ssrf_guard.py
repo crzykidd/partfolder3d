@@ -26,12 +26,16 @@ Usage::
     try:
         assert_safe_url(url)
     except SSRFBlockedError as exc:
-        # Treat as a user-supplied bad URL; surface the message.
-        raise HTTPException(400, str(exc)) from exc
+        # Log the specific reason server-side; return a GENERIC message so we
+        # don't leak internal-network topology (which private IP was resolved,
+        # etc.) to the (possibly untrusted) importing user.
+        log.warning("SSRF-blocked URL: %s", exc)
+        raise HTTPException(400, "URL is not allowed.") from exc
 
-The guard raises SSRFBlockedError on any rejected URL.  Callers decide whether
-to surface the reason to the user (generally fine — we are not leaking internal
-topology by saying "that IP is not routable").
+The guard raises SSRFBlockedError on any rejected URL.  The block *reason*
+(e.g. which private IP a host resolved to) is diagnostic and must be logged
+server-side only — callers return a generic user-facing message, never
+``str(exc)``, so import users cannot probe internal network topology.
 
 DNS resolution is synchronous (socket.getaddrinfo) which is acceptable for the
 low-frequency import paths where this is called (never in hot loops).  The guard
