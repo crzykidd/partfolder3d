@@ -26,7 +26,7 @@ import {
   AdminPage, PageHeader,
   Button,
   DataTable, TableRow, Td, Pagination,
-  AuroraInput, AuroraSelect,
+  AuroraInput, AuroraSelect, AuroraToggle,
 } from '@/components/ui'
 
 // ---------------------------------------------------------------------------
@@ -88,6 +88,55 @@ function StarterTagsSection() {
         {error && (
           <span style={{ fontSize: 13, color: 'var(--aurora-danger)' }}>{error}</span>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Auto-approve setting (#31)
+// ---------------------------------------------------------------------------
+
+function AutoApproveSection() {
+  const queryClient = useQueryClient()
+
+  const { data: settings = [] } = useQuery({
+    queryKey: ['settings'],
+    queryFn: api.listSettings,
+  })
+
+  const current = settings.find((s) => s.key === api.TAGS_AUTO_APPROVE_KEY)
+  const enabled = current?.value === true
+
+  const mutation = useMutation({
+    mutationFn: (value: boolean) => api.setTagsAutoApprove(value),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
+  })
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--aurora-text)', marginBottom: 4 }}>
+          Auto-approve new tags
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: 0 }}>
+          New tags are approved automatically instead of waiting in this queue.
+          Only affects tags created after this is enabled — use “Approve all” below
+          to clear the existing backlog.
+        </p>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, paddingTop: 2 }}>
+        {mutation.isError && (
+          <span style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>Save failed</span>
+        )}
+        <AuroraToggle
+          checked={enabled}
+          disabled={mutation.isPending}
+          onChange={(value) => mutation.mutate(value)}
+          ariaLabel="Auto-approve new tags"
+        />
       </div>
     </div>
   )
@@ -186,30 +235,64 @@ function PendingTagRow({ tag }: { tag: api.TagAdminOut }) {
 }
 
 function PendingTagsSection() {
+  const queryClient = useQueryClient()
   const { data: pending = [], isLoading, isError, error } = useQuery({
     queryKey: ['admin-tags-pending'],
     queryFn: api.listAdminPendingTags,
   })
 
+  const [approveAllError, setApproveAllError] = useState<string | null>(null)
+
+  const approveAllMutation = useMutation({
+    mutationFn: api.adminApproveAllTags,
+    onSuccess: () => {
+      setApproveAllError(null)
+      void queryClient.invalidateQueries({ queryKey: ['admin-tags-pending'] })
+      void queryClient.invalidateQueries({ queryKey: ['admin-tags-all'] })
+      void queryClient.invalidateQueries({ queryKey: ['tags'] })
+    },
+    onError: (err) =>
+      setApproveAllError(err instanceof Error ? err.message : 'Approve all failed.'),
+  })
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--aurora-text)', marginBottom: 4 }}>
-          Pending tags
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--aurora-text)', marginBottom: 4 }}>
+            Pending tags
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: 0 }}>
+            Tags submitted by the import wizard that need approval before they
+            appear in the catalog tag cloud.{' '}
+            <a
+              href="/admin/pending-tags"
+              style={{ color: 'var(--aurora-accent)', textDecoration: 'none', fontSize: 12 }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none' }}
+            >
+              Focused pending-tags view →
+            </a>
+          </p>
         </div>
-        <p style={{ fontSize: 13, color: 'var(--aurora-muted)', margin: 0 }}>
-          Tags submitted by the import wizard that need approval before they
-          appear in the catalog tag cloud.{' '}
-          <a
-            href="/admin/pending-tags"
-            style={{ color: 'var(--aurora-accent)', textDecoration: 'none', fontSize: 12 }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none' }}
+        {pending.length > 0 && (
+          <Button
+            size="sm"
+            disabled={approveAllMutation.isPending}
+            onClick={() => {
+              setApproveAllError(null)
+              approveAllMutation.mutate()
+            }}
+            extraStyle={{ background: 'rgba(22,163,74,0.1)', border: '1px solid rgba(22,163,74,0.3)', color: '#16A34A', flexShrink: 0 }}
           >
-            Focused pending-tags view →
-          </a>
-        </p>
+            {approveAllMutation.isPending ? 'Approving…' : `Approve all (${pending.length})`}
+          </Button>
+        )}
       </div>
+
+      {approveAllError && (
+        <div style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>{approveAllError}</div>
+      )}
 
       {isError && (
         <div style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>
@@ -812,6 +895,10 @@ export function TagAdminPage() {
       />
 
       <StarterTagsSection />
+
+      <div style={{ borderTop: '1px solid var(--aurora-divider)', margin: '4px 0' }} />
+
+      <AutoApproveSection />
 
       <div style={{ borderTop: '1px solid var(--aurora-divider)', margin: '4px 0' }} />
 

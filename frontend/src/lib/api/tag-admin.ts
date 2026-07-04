@@ -35,6 +35,14 @@ export const listAdminPendingTags = (): Promise<TagAdminOut[]> =>
 export const adminApproveTag = (id: number): Promise<TagAdminOut> =>
   apiFetch<TagAdminOut>(`/api/admin/tags/${id}/approve`, { method: 'POST' })
 
+export interface ApproveAllResponse {
+  approved: number
+}
+
+/** Promote every pending tag to active in one call (admin, idempotent) — #31. */
+export const adminApproveAllTags = (): Promise<ApproveAllResponse> =>
+  apiFetch<ApproveAllResponse>('/api/admin/tags/approve-all', { method: 'POST' })
+
 export const adminRejectTag = (id: number): Promise<void> =>
   apiFetch<void>(`/api/admin/tags/${id}/reject`, { method: 'POST' })
 

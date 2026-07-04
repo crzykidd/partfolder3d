@@ -84,6 +84,10 @@ class DeleteTagResponse(BaseModel):
     items_untagged: int
 
 
+class ApproveAllResponse(BaseModel):
+    approved: int
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -124,6 +128,32 @@ async def list_pending_tags(
         )
         for tag, item_count in result.all()
     ]
+
+
+@router.post(
+    "/approve-all",
+    response_model=ApproveAllResponse,
+    summary="Approve all pending tags",
+)
+async def approve_all_pending_tags(
+    _admin: Annotated[User, Depends(require_admin)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ApproveAllResponse:
+    """Promote every ``pending`` tag to ``active`` in a single call.
+
+    Complements the ``tags.auto_approve`` setting for the existing backlog.
+    Idempotent: with zero pending tags this returns 200 with ``approved: 0``.
+    """
+    result = await db.execute(
+        update(Tag)
+        .where(Tag.status == TagStatus.pending)
+        .values(status=TagStatus.active)
+    )
+    approved = result.rowcount or 0
+    await db.flush()
+    log.info("approve_all_pending_tags: approved %d pending tag(s)", approved)
+    return ApproveAllResponse(approved=approved)
 
 
 @router.post(

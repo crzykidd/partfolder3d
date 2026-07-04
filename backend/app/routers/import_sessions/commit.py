@@ -48,6 +48,7 @@ from ...services.item_helpers import (
     _update_search_vector,
     _write_item_sidecar,
 )
+from ...services.settings_service import get_tags_auto_approve
 from ...storage.inventory import inventory_item
 from ...storage.keys import generate_unique_key
 from ...storage.paths import item_dir_path, item_slug, sidecar_name
@@ -157,6 +158,13 @@ async def _commit_session_inner(
     await db.refresh(item)
 
     # ---- 5. Attach tags ----
+    # When the instance-wide auto-approve setting (#31) is on, brand-new tags land
+    # ``active`` (skipping the admin approval queue); otherwise they enter as
+    # ``pending`` exactly as before.  This only affects tags first created here —
+    # existing tags are matched/reused regardless of their status.
+    new_tag_status = (
+        TagStatus.active if await get_tags_auto_approve(db) else TagStatus.pending
+    )
     confirmed_tags: list[str] = []
     pending_tags: list[str] = []
     if session.tag_state:
@@ -170,14 +178,14 @@ async def _commit_session_inner(
         t_res = await db.execute(select(Tag).where(Tag.name == tag_name))
         tag = t_res.scalar_one_or_none()
         if tag is None:
-            tag = Tag(name=tag_name, status=TagStatus.pending)
+            tag = Tag(name=tag_name, status=new_tag_status)
             db.add(tag)
             await db.flush()
         if tag_name not in confirmed_tags:
             confirmed_tags.append(tag_name)
 
     if confirmed_tags:
-        await _attach_tags(db, item, confirmed_tags, new_tag_status=TagStatus.pending)
+        await _attach_tags(db, item, confirmed_tags, new_tag_status=new_tag_status)
 
     # ---- 6. Inventory files + create File rows ----
     sc_name = sidecar_name(title, key)  # type: ignore[arg-type]

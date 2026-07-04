@@ -315,6 +315,48 @@ async def test_tag_admin_reject(
     assert result.scalar_one_or_none() is None
 
 
+@pytest.mark.asyncio
+async def test_tag_admin_approve_all(
+    client: AsyncClient, tmp_path: Path, db_session: AsyncSession
+) -> None:
+    """POST /api/admin/tags/approve-all promotes every pending tag and reports count."""
+    csrf = await _setup_and_login(client, tmp_path)
+    db_session.add(Tag(name="pending-a", status=TagStatus.pending))
+    db_session.add(Tag(name="pending-b", status=TagStatus.pending))
+    db_session.add(Tag(name="already-active", status=TagStatus.active))
+    await db_session.flush()
+
+    resp = await client.post(
+        "/api/admin/tags/approve-all",
+        headers={"x-csrf-token": csrf},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["approved"] == 2
+
+    # No pending tags remain.
+    result = await db_session.execute(
+        select(Tag).where(Tag.status == TagStatus.pending)
+    )
+    assert result.scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_tag_admin_approve_all_idempotent(
+    client: AsyncClient, tmp_path: Path, db_session: AsyncSession
+) -> None:
+    """approve-all with zero pending tags returns 200 with approved: 0."""
+    csrf = await _setup_and_login(client, tmp_path)
+    db_session.add(Tag(name="active-only", status=TagStatus.active))
+    await db_session.flush()
+
+    resp = await client.post(
+        "/api/admin/tags/approve-all",
+        headers={"x-csrf-token": csrf},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["approved"] == 0
+
+
 # ---------------------------------------------------------------------------
 # Tag admin — category
 # ---------------------------------------------------------------------------

@@ -102,6 +102,14 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **Auto-approve tags — skip the pending review queue (`tags.auto_approve` setting) + bulk
+  "Approve all".** A new admin setting on the Tag Administration page lets new tags minted during an
+  import commit land `active` immediately instead of queuing as `pending` for manual approval; when
+  off (the default), the review workflow is unchanged. The setting only affects tags created *after*
+  it is enabled — it does not retroactively approve the existing queue. For that backlog, a new
+  `POST /api/admin/tags/approve-all` endpoint (and an "Approve all" button on the pending list)
+  promotes every pending tag to active in one idempotent call. (closes #31)
+
 - **Daily disk-reclamation sweep (`orphan_cleanup` cron, 05:00 UTC)** — a new scheduled job
   reclaims space that previously accumulated forever. It **purges soft-deleted items** under
   `/data/trash` older than `TRASH_RETENTION_DAYS` (default **30**; set `0` to disable), logging

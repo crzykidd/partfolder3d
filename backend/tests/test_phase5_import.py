@@ -543,6 +543,83 @@ async def test_commit_new_tag_created_as_pending(
     assert "existing-canonical" not in pending_names
 
 
+@pytest.mark.asyncio
+async def test_commit_new_tag_active_when_auto_approve_on(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+) -> None:
+    """With tags.auto_approve ON, a brand-new import tag lands active, not pending.
+
+    Mirrors ``test_commit_new_tag_created_as_pending`` but flips the setting on
+    first — verifying the auto-approve gate (#31) creates the tag ``active`` and
+    keeps it out of the admin pending queue.
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models.import_session import ImportSession, ImportSessionStatus  # noqa: PLC0415
+    from app.models.tag import Tag, TagStatus  # noqa: PLC0415
+
+    csrf = await _setup_and_login(client, tmp_path)
+
+    # Enable auto-approve for new tags.
+    setting_resp = await client.put(
+        "/api/settings/tags.auto_approve",
+        json={"value": True},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert setting_resp.status_code == 200, setting_resp.text
+
+    lib_path = tmp_path / "lib"
+    lib_path.mkdir()
+    lib_resp = await client.post(
+        "/api/libraries",
+        json={"name": "Auto Approve Lib", "mount_path": str(lib_path)},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert lib_resp.status_code == 201
+    library_id = lib_resp.json()["id"]
+
+    create_resp = await client.post(
+        "/api/import-sessions",
+        json={"source_type": "upload"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert create_resp.status_code == 201
+    session_id = create_resp.json()["id"]
+
+    res = await db_session.execute(
+        select(ImportSession).where(ImportSession.id == session_id)
+    )
+    sess = res.scalar_one()
+    sess.status = ImportSessionStatus.pending_wizard
+    sess.confirmed_title = "Auto Approve Item"
+    sess.library_id = library_id
+    sess.tag_state = {"confirmed": ["auto-approved-tag"], "pending": []}
+    await db_session.flush()
+
+    commit_resp = await client.post(
+        f"/api/import-sessions/{session_id}/commit",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert commit_resp.status_code == 200, commit_resp.text
+
+    res = await db_session.execute(
+        select(Tag).where(Tag.name == "auto-approved-tag")
+    )
+    tag_new = res.scalar_one_or_none()
+    assert tag_new is not None, "New tag should be created at commit time"
+    assert tag_new.status == TagStatus.active, (
+        "With tags.auto_approve ON, a brand-new import tag must land active"
+    )
+
+    # It must NOT appear in the admin pending queue.
+    pending_resp = await client.get("/api/admin/tags/pending")
+    assert pending_resp.status_code == 200
+    pending_names = [t["name"] for t in pending_resp.json()]
+    assert "auto-approved-tag" not in pending_names
+
+
 # ---------------------------------------------------------------------------
 # URL scraper unit tests (no network; fixture-based)
 # ---------------------------------------------------------------------------
