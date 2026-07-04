@@ -2,6 +2,23 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-04 — #27 URL-import: core "no model file attached" issue deferred (owner decision)
+
+Addressed the tractable parts of #27 — title/description SEO-boilerplate stripping, creator
+name/profile-url extraction, full-res image selection over the social `og:image` (#28), tags
+rendering immediately on the Tags step (independent of the AI call), and a **Files row** on
+Review & Commit that flags zero-file (metadata-only) commits. **#27 stays open** for its core
+issue: a URL import attaches **no model file at all** (by design — `create_import_session` for
+`source_type=url` only pre-fills metadata/images), so "paste a URL → add to library" produces a
+committed entry with 0 files. This is a **design fork left to the owner**, not something to pick
+autonomously:
+- **(a) auto-fetch the model file** from the source — but on Printables/MakerWorld/Thingiverse the
+  download is usually login-gated / not directly linkable, so this is site-specific and fragile;
+- **(b) add a manual file-upload step** to the URL wizard (relates to #26 "Try to render file");
+- **(c) accept metadata-only entries** and just keep surfacing the 0-file state (now done via the
+  Files-row warning).
+The Files-row warning ships now so the state is at least never silent; pick (a)/(b)/(c) later.
+
 ## 2026-07-03 — Audit remediation round 2 (security + sweep + refactors): what shipped, what's deferred
 
 Worked `docs/audit-2026-07-03.md` §A/§E/§D end to end (round 1 covered §B/§C/§D-ergonomics). 13
