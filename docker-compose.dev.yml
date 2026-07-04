@@ -116,6 +116,10 @@ services:
       DATABASE_URL: "postgresql+asyncpg://partfolder3d:${POSTGRES_PASSWORD:-changeme}@db:5432/partfolder3d"
       REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
       DATA_DIR: /data
+      # Dev only: allow the default 'changeme' DB password (the backend service
+      # sets this too). The prod compose deliberately omits DEBUG so it fails fast
+      # unless a real POSTGRES_PASSWORD is set.
+      DEBUG: "true"
       # Render thread caps — override the Dockerfile defaults from RENDER_CPU_THREADS.
       # All six vars must be set so every numeric-thread library sees the cap.
       RENDER_CPU_THREADS: "${RENDER_CPU_THREADS:-2}"
