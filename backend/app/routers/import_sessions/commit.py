@@ -337,14 +337,16 @@ async def _commit_session_inner(
                 log.warning("commit: failed to clean staging dir %s", staging_path)
 
     # ---- 13. Enqueue render (fire-and-forget) ----
+    # Pass db so a queued Job row is written now — makes a bulk-import backlog
+    # visible in the Jobs UI before any worker starts (#20).
     if render != "off":
-        await _sessions._enqueue_render(item.id, pool=pool)
+        await _sessions._enqueue_render(item.id, pool=pool, db=db)
 
     # ---- 14. Enqueue ZIP extraction when the item contains any ZIP ----
     from ...models.file import FileRole as _FileRole  # noqa: PLC0415
     has_zip = any(rec.role == _FileRole.zip for rec in records)
     if has_zip:
-        await _enqueue_extract_archives(item.id, pool=pool)
+        await _enqueue_extract_archives(item.id, pool=pool, db=db)
 
     return CommitResponse(
         item_key=item.key,

@@ -149,8 +149,8 @@ async def upload_file(
 
     await _write_item_sidecar(db, item)
 
-    await _enqueue_analyze(item.id, pool=arq)
-    await _enqueue_render(item.id, pool=arq, model_extensions=[suffix])
+    await _enqueue_analyze(item.id, pool=arq, db=db)
+    await _enqueue_render(item.id, pool=arq, db=db, model_extensions=[suffix])
 
     return FileOut(
         id=f.id,

@@ -237,8 +237,13 @@ async def extract_archives(ctx: dict, item_id: int) -> None:
     # ------------------------------------------------------------------ #
     # 4. Enqueue analyze + render for the extracted files                 #
     # ------------------------------------------------------------------ #
-    await _enqueue_analyze(item_id, pool=ctx.get("redis"))
-    await _enqueue_render(item_id, pool=ctx.get("redis"))
+    # The item is already committed here, so a fresh session can safely hold the
+    # queued Job rows written by the enqueue helpers (visible before the workers
+    # start — #20/#30).
+    async with SessionLocal() as db:
+        await _enqueue_analyze(item_id, pool=ctx.get("redis"), db=db)
+        await _enqueue_render(item_id, pool=ctx.get("redis"), db=db)
+        await db.commit()
     log.info(
         "extract_archives: item=%s enqueued analyze + render", item_id
     )

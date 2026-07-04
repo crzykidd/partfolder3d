@@ -192,9 +192,10 @@ async def create_item(
     )
 
     # Phase 4: enqueue render job (fire-and-forget; never blocks item creation)
-    await _enqueue_render(item.id, pool=arq)
+    # Pass db so a queued Job row is written now (visible before the worker runs).
+    await _enqueue_render(item.id, pool=arq, db=db)
     # Phase 16: enqueue mesh analysis alongside render
-    await _enqueue_analyze(item.id, pool=arq)
+    await _enqueue_analyze(item.id, pool=arq, db=db)
 
     return _build_item_detail(item, tags, file_objs, images)
 
@@ -600,7 +601,7 @@ async def rescan_item(
         item.creator = creator_result.scalar_one_or_none()
 
     # Phase 16: re-enqueue analysis on rescan (fire-and-forget)
-    await _enqueue_analyze(item.id, pool=arq)
+    await _enqueue_analyze(item.id, pool=arq, db=db)
 
     return _build_item_detail(item, tags, files, images)
 

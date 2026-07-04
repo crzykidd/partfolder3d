@@ -184,6 +184,36 @@ def _get_render_sem() -> asyncio.Semaphore:
     return _render_sem
 
 
+async def _resolve_skipped_queued_job(ctx: dict, log_text: str) -> None:
+    """Finish a pre-existing queued Job row when the render.mode gate skips work.
+
+    A queued row is written at enqueue time based on the *env* RENDER_MODE, but
+    render_item is gated by the authoritative *DB* render.mode setting.  When
+    they disagree (env allows, DB says off/no_images) a queued row exists that
+    this task would otherwise orphan.  Claim it and mark it succeeded so it does
+    not sit in 'queued' forever.
+
+    Does nothing when there is no arq job id (directly-invoked tasks / tests with
+    an empty ctx) or no matching queued row — so it never fabricates a Job row.
+    """
+    from app.db import SessionLocal  # noqa: PLC0415
+    from app.worker.job_tracker import claim_queued_job, finish_job  # noqa: PLC0415
+
+    arq_job_id = ctx.get("job_id")
+    if not arq_job_id:
+        return
+    try:
+        async with SessionLocal() as db:
+            jid = await claim_queued_job(db, arq_job_id)
+            if jid is not None:
+                await finish_job(db, jid, succeeded=True, log_text=log_text)
+            await db.commit()
+    except Exception:
+        log.exception(
+            "render_item: failed to resolve skipped queued job for %s", arq_job_id
+        )
+
+
 async def render_item(ctx: dict, item_id: int, retry_of_job_id: str | None = None) -> None:
     """Arq entrypoint — throttle concurrent renders (RENDER_CONCURRENCY), then render."""
     async with _get_render_sem():
@@ -224,7 +254,7 @@ async def _render_item_inner(ctx: dict, item_id: int, retry_of_job_id: str | Non
     from app.models.item import Item  # noqa: PLC0415
     from app.models.setting import Setting  # noqa: PLC0415
     from app.worker.job_tracker import (  # noqa: PLC0415
-        create_job,
+        claim_or_create_job,
         finish_job,
         update_job_progress,
     )
@@ -256,6 +286,7 @@ async def _render_item_inner(ctx: dict, item_id: int, retry_of_job_id: str | Non
             log.info(
                 "render_item: render.mode=off — skipping render for item %s", item_id
             )
+            await _resolve_skipped_queued_job(ctx, "render.mode=off — skipped")
             return
 
         if render_mode == "no_images":
@@ -271,11 +302,15 @@ async def _render_item_inner(ctx: dict, item_id: int, retry_of_job_id: str | Non
                     item_id,
                     img_count,
                 )
+                await _resolve_skipped_queued_job(
+                    ctx, "render.mode=no_images — item already has images; skipped"
+                )
                 return
 
-    # Create the Job row
+    # Claim the queued Job row written at enqueue time (→ running); if none
+    # exists (retry / scheduled / direct enqueue) insert a fresh running row.
     async with SessionLocal() as db:
-        job_id = await create_job(
+        job_id = await claim_or_create_job(
             db,
             "render",
             payload={"item_id": item_id},

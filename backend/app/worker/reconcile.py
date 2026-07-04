@@ -554,13 +554,16 @@ async def _behavior_re_render(
     }
 
     if modes.get("re_render") == "auto":
-        # Enqueue render (fire-and-forget)
+        # Enqueue render (fire-and-forget). Route through _enqueue_render with the
+        # active session so a queued Job row is written now, making the re-render
+        # visible in the Jobs UI before the worker starts it (#20).
         try:
+            from ..services.item_helpers import _enqueue_render  # noqa: I001,PLC0415
             from .arq_pool import create_arq_pool  # noqa: I001,PLC0415
 
             redis = await create_arq_pool()
             try:
-                await redis.enqueue_job("render_item", item.id)
+                await _enqueue_render(item.id, pool=redis, db=db)
             finally:
                 await redis.aclose()
         except Exception:
@@ -1061,11 +1064,14 @@ async def apply_review_item_action(
 
     elif act == "enqueue_render" and item_id:
         try:
+            from ..services.item_helpers import _enqueue_render  # noqa: I001,PLC0415
             from .arq_pool import create_arq_pool  # noqa: I001,PLC0415
 
             redis = await create_arq_pool()
             try:
-                await redis.enqueue_job("render_item", item_id)
+                # Route through the helper (with the active session) so a queued
+                # Job row is written and the render is visible in the Jobs UI (#20).
+                await _enqueue_render(item_id, pool=redis, db=db)
             finally:
                 await redis.aclose()
             summary = f"Render enqueued for item {item_id}."

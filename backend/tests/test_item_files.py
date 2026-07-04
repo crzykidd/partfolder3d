@@ -50,8 +50,14 @@ async def _create_library_and_item(
     tmp_path: Path,
     csrf: str,
     item_title: str = "Test Item",
+    *,
+    db_session: AsyncSession | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Create a library (with real dir) and an item. Returns (lib_data, item_data)."""
+    """Create a library (with real dir) and an item. Returns (lib_data, item_data).
+
+    Item creation now writes ``queued`` render+analyze Job rows (#20/#30).  Tests
+    that assert on their own job set pass ``db_session`` to clear those first.
+    """
     mount = str(tmp_path / "library")
     Path(mount).mkdir(parents=True, exist_ok=True)
 
@@ -69,7 +75,17 @@ async def _create_library_and_item(
         headers={"X-CSRF-Token": csrf},
     )
     assert item_resp.status_code == 201, item_resp.text
-    return lib, item_resp.json()
+    item = item_resp.json()
+
+    if db_session is not None:
+        from sqlalchemy import delete  # noqa: PLC0415
+
+        from app.models.job import Job  # noqa: PLC0415
+
+        await db_session.execute(delete(Job).where(Job.item_id == item["id"]))
+        await db_session.commit()
+
+    return lib, item
 
 
 # ---------------------------------------------------------------------------
@@ -358,11 +374,14 @@ async def test_rename_file_collision_returns_409(
 @pytest.mark.asyncio
 async def test_list_item_jobs_empty(
     client: AsyncClient,
+    db_session: AsyncSession,
     tmp_path: Path,
 ) -> None:
     """GET /api/items/{key}/jobs returns [] when no active jobs exist."""
     csrf = await _setup_and_login(client, tmp_path)
-    _, item = await _create_library_and_item(client, tmp_path, csrf)
+    _, item = await _create_library_and_item(
+        client, tmp_path, csrf, db_session=db_session
+    )
     item_key = item["key"]
 
     resp = await client.get(f"/api/items/{item_key}/jobs")
@@ -380,7 +399,9 @@ async def test_list_item_jobs_returns_running(
     from app.worker.job_tracker import create_job  # noqa: PLC0415
 
     csrf = await _setup_and_login(client, tmp_path)
-    _, item = await _create_library_and_item(client, tmp_path, csrf)
+    _, item = await _create_library_and_item(
+        client, tmp_path, csrf, db_session=db_session
+    )
     item_key = item["key"]
     item_id = item["id"]
 

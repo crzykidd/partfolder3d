@@ -65,6 +65,75 @@ async def create_job(
     return job.id
 
 
+async def claim_queued_job(
+    db: Any,
+    arq_job_id: str | None,
+) -> uuid.UUID | None:
+    """Atomically transition an existing *queued* Job row to 'running'.
+
+    Matches the row by ``arq_job_id`` and flips ``queued → running`` in a single
+    UPDATE ... RETURNING so two workers can never both claim the same row.  Sets
+    ``started_at``.  Returns the claimed row's id, or ``None`` when no queued row
+    exists for this ``arq_job_id`` (or when it is None).
+
+    This is the read side of the #20 queued-visibility seam: the enqueue helpers
+    write a ``queued`` row keyed on a self-assigned arq job id, and the worker
+    claims exactly that row here instead of inserting a duplicate.
+    """
+    from ..models.job import Job  # noqa: PLC0415
+
+    if not arq_job_id:
+        return None
+
+    result = await db.execute(
+        sa.update(Job)
+        .where(Job.arq_job_id == arq_job_id, Job.status == "queued")
+        .values(status="running", started_at=datetime.now(UTC))
+        .returning(Job.id)
+    )
+    await db.flush()
+    return result.scalars().first()
+
+
+async def claim_or_create_job(
+    db: Any,
+    job_type: str,
+    payload: dict[str, Any],
+    item_id: int | None = None,
+    arq_job_id: str | None = None,
+    retry_of_job_id: str | uuid.UUID | None = None,
+) -> uuid.UUID:
+    """Claim a pre-existing queued Job row (→ running) or INSERT a running one.
+
+    When the enqueue helper wrote a ``queued`` row for this ``arq_job_id`` the
+    worker claims it (keeping the same row id, so the enqueue-time queued entry
+    and the running entry are the *same* row — no duplicate).  When no queued row
+    is found — retries, scheduled jobs, jobs enqueued without a db session, or
+    (rarely) a caller whose commit lost the race with the worker — we fall back
+    to inserting a fresh ``running`` row so the task is still tracked.
+
+    Race note (#20): the queued row is written inside the *caller's* transaction
+    (it FKs ``item_id`` and, on the create/import path, the item itself is not
+    yet committed), so it cannot be committed before the arq job is enqueued.
+    The enqueue side therefore uses a small ``_defer_by`` so the worker does not
+    pop the job until the caller has committed the queued row — making this claim
+    find it.  The claim is atomic (see :func:`claim_queued_job`), so even in the
+    lost-race fallback at most one running row is produced per arq job id.
+    """
+    claimed = await claim_queued_job(db, arq_job_id)
+    if claimed is not None:
+        return claimed
+
+    return await create_job(
+        db,
+        job_type,
+        payload,
+        item_id=item_id,
+        arq_job_id=arq_job_id,
+        retry_of_job_id=retry_of_job_id,
+    )
+
+
 async def _supersede_ancestors(
     db: Any,
     ancestor_id: uuid.UUID,

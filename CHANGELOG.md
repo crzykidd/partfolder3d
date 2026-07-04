@@ -132,6 +132,19 @@ prefix appears only on git tags and GitHub releases.
 
 ### Fixed
 
+- **Queued and analyze jobs are now visible in the Jobs monitor** (closes #20, closes #30).
+  Background work was previously invisible until a worker *started* it: a `Job` row was only
+  written when the task began, so a backlog of enqueued work (e.g. right after a bulk import)
+  showed nothing, and mesh-analysis (`analyze_item`) created no `Job` row at all — invisible
+  CPU/RAM even while running. A `Job` row is now written at **enqueue** time with status
+  `queued`, and the worker **claims** that same row (→ `running`) instead of inserting a
+  duplicate, keyed on the arq job id. `analyze_item` is wired into the same job-tracker
+  lifecycle (claim-or-create at start, finished on success/failure). To avoid a race where the
+  worker pops the job before the caller's transaction commits the queued row, background jobs
+  are enqueued with a short defer and the claim is atomic (`queued → running` in one
+  `UPDATE … RETURNING`), so at most one running row survives per job. The existing item-jobs
+  and admin jobs endpoints already surface `queued` rows, so the backlog is now visible before
+  any worker starts.
 - **Catalog pagination bounced back to page 1.** Selecting page 2 (or any page) in the catalog
   briefly showed that page then reverted to page 1: the search-input debounce effect ran on
   mount and on every render and unconditionally cleared the `page` URL param. It now rewrites the
