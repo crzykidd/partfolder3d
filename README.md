@@ -568,6 +568,17 @@ or API), so upgrade deliberately:
    `alembic upgrade head` before serving). Watch `docker compose logs -f backend` for the
    startup banner and migration output.
 
+> **Job-queue format changes — drain the worker queue.** Some releases change the internal
+> format arq uses to serialize background jobs (e.g. the **pickle → JSON** switch). When a
+> release note flags this, make sure the worker queue is **empty before you upgrade**: stop
+> kicking off new work and let the worker finish, or upgrade during an idle window (jobs are
+> short-lived and the queue is normally empty). Any job still sitting in Redis in the old format
+> won't deserialize on the new worker — this is **not data loss** (re-scan the item or re-run the
+> action to re-trigger it), but draining first avoids startup error noise. If you want to be
+> certain the queue is clear, stop the worker, then
+> `docker compose exec redis redis-cli -a "$REDIS_PASSWORD" FLUSHDB` before starting the new
+> version (this only clears the transient job queue, not your data).
+
 ---
 
 ## Contributing
