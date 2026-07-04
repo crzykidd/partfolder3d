@@ -456,6 +456,16 @@ docker compose up -d
 #    http://localhost:8973
 ```
 
+> **Database & Redis passwords (required in production).** Set `POSTGRES_PASSWORD` (and
+> `REDIS_PASSWORD`) in `.env`. The backend **and** worker refuse to start if the DB password is
+> left as the shipped default `changeme` — you'll see a startup error `DATABASE_URL is using the
+> insecure default password 'changeme'`. This is a *"don't ship the default"* guard, **not** a
+> strength check: any value other than `changeme` is accepted (`somepassw0rd` is fine), so choose
+> one appropriate for your environment. One caveat — the password is interpolated into a
+> connection URL, so **avoid URL-reserved characters** (`@ : / # ? %`); stick to letters, digits,
+> and `- _ .`, or URL-encode it. The **dev** stack (`docker-compose.dev.yml`) sets `DEBUG=true`,
+> so it runs with `changeme` out of the box for local development.
+
 What happens on first `docker compose up -d`:
 
 - Images are pulled from `ghcr.io/crzykidd/partfolder3d(-frontend|-nginx):latest`.
