@@ -102,6 +102,19 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **Move item asset(s) between libraries — single + bulk (`POST /api/items/{key}/move` +
+  `POST /api/items/move`).** An item can now be relocated from one library mount to another —
+  for reorganizing a collection, or to empty a mis-configured library so it can be hard-deleted
+  (#11). The move is **cross-mount-safe (NFS ↔ local): copy → verify-by-hash → remove**, so a
+  plain `os.rename` `EXDEV` never applies and, critically, an **interrupted move never loses
+  files** — the source directory stays fully intact until every file at the target has been
+  SHA-256-verified against the source, and only then is the source removed (journaled, with a
+  startup recovery sweep). The item's `library_id` + `dir_path` are updated, the File inventory
+  is re-run, and the sidecar is rewritten at the new path, all in one transaction per item; bulk
+  moves are N isolated per-item transactions so one failure never rolls back the rest. A "Move to
+  library" control on the item page (shown only when ≥2 enabled libraries exist) drives the single
+  move; the bulk endpoint is wired for a future catalog multi-select. (closes #25)
+
 - **Auto-approve tags — skip the pending review queue (`tags.auto_approve` setting) + bulk
   "Approve all".** A new admin setting on the Tag Administration page lets new tags minted during an
   import commit land `active` immediately instead of queuing as `pending` for manual approval; when

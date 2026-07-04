@@ -49,7 +49,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         from .db import SessionLocal  # noqa: PLC0415
         from .storage.journal import recover_stale_journals  # noqa: PLC0415
+        from .storage.library_move import recover_stale_library_moves  # noqa: PLC0415
 
+        recover_stale_library_moves()
         async with SessionLocal() as db:
             await recover_stale_journals(db)
     except Exception:

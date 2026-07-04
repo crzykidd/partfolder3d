@@ -2,6 +2,31 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-04 — #25 move assets between libraries: copy→verify→remove, and where safety stops
+
+The cross-mount library move (`storage/library_move.py`) is a **copy → verify-by-hash → remove**,
+not an `os.rename` — source and target libraries can be on different filesystems (NFS ↔ local),
+where a rename would `EXDEV`. Non-obvious choices:
+- **Pure/no-DB storage function.** `move_item_to_library(src, dst, key)` does only the filesystem
+  work (copy to a sibling `<dst>.partial-<key>`, hash-verify every file against the source, atomic
+  `replace` into place, then `rmtree` the source). It stays unit-testable on tmp dirs; the router
+  owns the DB (`library_id`/`dir_path` + re-inventory + sidecar) in its own transaction.
+- **Separate journal sub-dir** (`/data/journal/library_moves/`) so it never collides with the
+  rename journal's top-level `*.json` glob or its `JournalEntry` shape. A dedicated
+  `recover_stale_library_moves()` runs at startup alongside `recover_stale_journals`.
+- **Where the guarantee holds vs. stops.** The ABSOLUTE invariant — *an interrupted move never
+  loses files* — is upheld by construction: the source is removed only after the target is a
+  fully hash-verified copy. The one residual window is a crash **between** a successful filesystem
+  move and the DB commit: files exist only at the new path while the row still points at the old
+  one. That is a **DB/FS inconsistency, never data loss**, and the reconcile engine already
+  surfaces a missing item dir as an Issue for the admin — consistent with how `atomic_rename`
+  treats an irrecoverable post-commit DB update. Recovery reconciles the filesystem to a single
+  canonical copy; it deliberately does **not** touch the DB.
+- **Bulk UI deferred.** The bulk endpoint (`POST /api/items/move`, N isolated per-item
+  transactions) ships, but the catalog has **no multi-select affordance**, so per the prompt we
+  shipped the single-item "Move to library" control well and left bulk-UI (a whole selection
+  system) as a follow-up rather than inventing one.
+
 ## 2026-07-04 — #27 URL-import: core "no model file attached" issue deferred (owner decision)
 
 Addressed the tractable parts of #27 — title/description SEO-boilerplate stripping, creator

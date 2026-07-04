@@ -27,9 +27,12 @@ from .core import router as _core_router
 from .files import router as _files_router
 from .helpers import _effective_is_modified  # noqa: F401 (re-exported for shares.py + tests)
 from .images import router as _images_router
+from .move import router as _move_router
 
-# Combined router — preserves the original in-file route order (core → images → files).
+# Combined router.  The move router is included first so the literal bulk path
+# ``POST /api/items/move`` is registered ahead of any ``/{key}`` patterns.
 router = APIRouter()
+router.include_router(_move_router)
 router.include_router(_core_router)
 router.include_router(_images_router)
 router.include_router(_files_router)

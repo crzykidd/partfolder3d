@@ -346,6 +346,33 @@ export const getItem = (key: string): Promise<ItemDetail> =>
 export const rescanItem = (key: string): Promise<ItemDetail> =>
   apiFetch<ItemDetail>(`/api/items/${key}/rescan`, { method: 'POST' })
 
+/**
+ * Move an item to another library (issue #25). Relocates the on-disk directory
+ * (copy → verify-hash → remove), updates library_id + dir_path, re-inventories.
+ */
+export const moveItem = (key: string, targetLibraryId: number): Promise<ItemDetail> =>
+  apiFetch<ItemDetail>(`/api/items/${key}/move`, {
+    method: 'POST',
+    body: JSON.stringify({ target_library_id: targetLibraryId }),
+  })
+
+export interface BulkMoveResult {
+  total: number
+  moved: number
+  skipped: { key: string; reason: string }[]
+  errors: { key: string; reason: string }[]
+}
+
+/** Bulk-move items to another library (per-item isolation; partial success). */
+export const bulkMoveItems = (
+  keys: string[],
+  targetLibraryId: number,
+): Promise<BulkMoveResult> =>
+  apiFetch<BulkMoveResult>('/api/items/move', {
+    method: 'POST',
+    body: JSON.stringify({ keys, target_library_id: targetLibraryId }),
+  })
+
 export const favoriteItem = (key: string): Promise<FavoriteOut> =>
   apiFetch<FavoriteOut>(`/api/items/${key}/favorite`, { method: 'POST' })
 

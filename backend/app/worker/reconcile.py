@@ -854,6 +854,7 @@ async def reconcile_library_scan(
     from app.models.item import Item  # noqa: PLC0415
     from app.models.library import Library  # noqa: PLC0415
     from app.storage.journal import recover_stale_journals  # noqa: PLC0415
+    from app.storage.library_move import recover_stale_library_moves  # noqa: PLC0415
 
     stats: dict[str, int] = {
         "items_scanned": 0,
@@ -865,6 +866,7 @@ async def reconcile_library_scan(
 
     # Step 1: recover stale journals
     try:
+        recover_stale_library_moves()
         async with SessionLocal() as db:
             await recover_stale_journals(db)
             await db.commit()
