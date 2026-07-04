@@ -132,6 +132,12 @@ prefix appears only on git tags and GitHub releases.
 
 ### Fixed
 
+- **Import wizard: existing tags render immediately + zero-file commits are flagged**
+  (partial #27). Existing catalog tags now render right away on the Tags step as a
+  "Popular tags" quick-pick, independent of the AI suggest-tags call, so a slow or unconfigured
+  AI provider no longer stalls the step. The Review & Commit step now shows a **Files** row that
+  flags zero-file (metadata-only) commits with a warning note, so a URL import that attached no
+  model file is no longer silent.
 - **URL-import scraper: full-resolution images, cleaned title/description, and creator
   pre-fill** (closes #28; partial #27 — backend scraper parts). `_extract_images` now ranks
   candidates by likely resolution — largest-width `<img srcset>` / `<source srcset>` first,
