@@ -820,3 +820,19 @@ async def test_commit_scraped_images_unique_filenames(
         assert dp.exists(), f"Expected file on disk: {dp}"
 
     assert disk_paths[0] != disk_paths[1], "Files must be at distinct paths on disk"
+
+    # Regression: the scraped image files must ALSO appear in the file list (File rows),
+    # not only the thumbnail gallery (Image rows). inventory_item runs before the images
+    # are downloaded, so a re-inventory at commit time is required — otherwise the images
+    # showed as thumbnails but were missing from the file list until a rescan.
+    from app.models.file import File as _FileRow  # noqa: PLC0415
+
+    file_res = await db_session.execute(
+        _select(_FileRow).where(_FileRow.item_id == item_id)
+    )
+    file_paths = {f.path for f in file_res.scalars().all()}
+    for p in paths:
+        assert p in file_paths, (
+            f"scraped image {p!r} missing from the file list (File rows); "
+            f"got {sorted(file_paths)}"
+        )

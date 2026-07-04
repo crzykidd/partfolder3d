@@ -136,6 +136,11 @@ prefix appears only on git tags and GitHub releases.
   briefly showed that page then reverted to page 1: the search-input debounce effect ran on
   mount and on every render and unconditionally cleared the `page` URL param. It now rewrites the
   URL only when the search text actually changed, so pagination sticks.
+- **Scraped/uploaded images missing from an item's file list after import.** They appeared in
+  the thumbnail gallery but not in the Files & Downloads list until a manual (or daily) rescan,
+  because the commit inventoried the folder *before* downloading the images. The commit now
+  re-inventories after writing images and adds the File rows immediately — matching what a rescan
+  produces, so no rescan is needed.
 
 ## [0.3.0] — 2026-07-03
 

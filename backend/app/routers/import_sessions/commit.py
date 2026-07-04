@@ -284,6 +284,30 @@ async def _commit_session_inner(
 
     await db.flush()
 
+    # ---- 7b. Re-inventory so the images just written show in the file list ----
+    # inventory_item ran in step 6, BEFORE the scraped/uploaded images were written to
+    # images/, so those files got Image rows (thumbnails) but no File rows — the file
+    # list only caught up on the next reconcile scan / manual rescan. Re-inventory now
+    # and add File rows for anything new, matching exactly what a rescan produces.
+    _existing_paths = {rec.relative_path for rec in records}
+    records = inventory_item(item_dir, sc_name)
+    for rec in records:
+        if rec.relative_path in _existing_paths:
+            continue
+        db.add(
+            FileModel(
+                item_id=item.id,
+                path=rec.relative_path,
+                role=rec.role,
+                size=rec.size,
+                sha256=rec.sha256,
+                mtime=rec.mtime,
+                last_seen_size=rec.size,
+                last_seen_mtime=rec.mtime,
+            )
+        )
+    await db.flush()
+
     # ---- 8. Set creator on item for sidecar ----
     if creator:
         await db.refresh(creator)
