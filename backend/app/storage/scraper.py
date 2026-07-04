@@ -149,6 +149,114 @@ def _meta_name(tree: object, name: str) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Text cleanup helpers (SEO boilerplate stripping) — issue #27
+# ---------------------------------------------------------------------------
+
+# Trailing " - Something.com" / " | Something.com" site-name suffix (title only).
+# Kept conservative: the leading separator must be surrounded by whitespace, and
+# the site segment must not contain another separator, so we only strip a genuine
+# trailing "<sep> <Site>.<tld>" tail — never legitimate mid-title content.
+_SITE_SUFFIX_RE = re.compile(
+    r"\s+[-–—|]\s+[^|\-–—]*\.(?:com|net|org|io|co)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _strip_pipe_boilerplate(text: str | None) -> str | None:
+    """Strip site SEO boilerplate that follows the first ' | ' separator.
+
+    Aggregator sites (Printables/MakerWorld/Thingiverse) bake share-card
+    boilerplate into their OG tags after a ' | ' pipe, e.g.
+    "NeilMed Sinus Rinse holder by Fuu | Download free STL model | Printables.com".
+    We keep only the leading segment.  Conservative: the separator must be a
+    space-padded pipe so we never split on a bare '|' inside real content.
+    """
+    if not text:
+        return text
+    cleaned = text.split(" | ", 1)[0].strip()
+    return cleaned or None
+
+
+def _clean_title(title: str | None) -> str | None:
+    """Strip after-pipe boilerplate and a trailing ' - <Site>.com' suffix."""
+    cleaned = _strip_pipe_boilerplate(title)
+    if not cleaned:
+        return None
+    cleaned = _SITE_SUFFIX_RE.sub("", cleaned).strip()
+    return cleaned or None
+
+
+def _clean_description(desc: str | None) -> str | None:
+    """Strip trailing SEO boilerplate that follows a ' | ' separator."""
+    return _strip_pipe_boilerplate(desc)
+
+
+def _creator_from_title(title: str | None) -> str | None:
+    """Best-effort creator from the "<name> by <Creator>" title pattern.
+
+    Printables titles read "<Model title> by <Creator> | <boilerplate>".
+    Conservative: only fires when the leading (pre-pipe) segment contains a
+    space-padded ' by '; takes the text after the last such ' by ' and rejects
+    absurdly long captures.  Returns None when the pattern doesn't clearly match.
+    """
+    if not title:
+        return None
+    first_seg = title.split(" | ", 1)[0]
+    if " by " not in first_seg:
+        return None
+    candidate = first_seg.rsplit(" by ", 1)[1].strip()
+    if candidate and len(candidate) <= 80:
+        return candidate
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Image selection helpers — issue #28
+# ---------------------------------------------------------------------------
+
+
+def _srcset_largest(srcset: str) -> str | None:
+    """Return the highest-resolution URL from a srcset attribute.
+
+    srcset format: "url1 320w, url2 640w" (width descriptors) or
+    "url1 1x, url2 2x" (density descriptors).  Prefers the largest width
+    descriptor; falls back to the largest density; then the first entry.
+    """
+    if not srcset:
+        return None
+    best_url: str | None = None
+    best_w = -1
+    best_density = -1.0
+    first_url: str | None = None
+    for part in srcset.split(","):
+        tokens = part.strip().split()
+        if not tokens:
+            continue
+        url = tokens[0]
+        if first_url is None:
+            first_url = url
+        descriptor = tokens[1] if len(tokens) > 1 else ""
+        if descriptor.endswith("w"):
+            try:
+                w = int(descriptor[:-1])
+            except ValueError:
+                continue
+            if w > best_w:
+                best_w = w
+                best_url = url
+        elif descriptor.endswith("x"):
+            try:
+                d = float(descriptor[:-1])
+            except ValueError:
+                continue
+            # Only let density win while no width descriptor has been seen.
+            if best_w < 0 and d > best_density:
+                best_density = d
+                best_url = url
+    return best_url or first_url
+
+
 def _parse_html(html: str) -> object | None:
     """Parse HTML text; returns selectolax HTMLParser or None on failure."""
     try:
@@ -162,25 +270,61 @@ def _parse_html(html: str) -> object | None:
 
 
 def _extract_images(tree: object, base_url: str, max_images: int) -> list[str]:
-    """Extract candidate image URLs from OG tags and <img> tags."""
-    seen: list[str] = []
-    # Open Graph images first (highest quality, explicitly curated)
+    """Extract candidate image URLs, preferring full-resolution over og:image.
+
+    On MakerWorld/Printables/Thingiverse the ``og:image`` is the social-share
+    card — cropped/downscaled to ~1200x630 — not the full-res gallery photo
+    (issue #28).  We therefore rank candidates by likely resolution and keep
+    ``og:image`` only as a fallback so the default (first) image is full-res:
+
+      1. ``<img srcset>`` / ``<source srcset>`` — largest width descriptor.
+      2. Lazy-loaded full-size ``data-src`` / ``data-original`` / ``data-full``.
+      3. ``og:image`` — reliable but often a downscaled social card.
+      4. Plain ``<img src>`` — lowest priority (may be thumbnails/placeholders).
+
+    Buckets are concatenated in that order, de-duplicated preserving first
+    occurrence, then capped at ``max_images``.
+    """
+    srcset_imgs: list[str] = []
+    lazy_imgs: list[str] = []
+    og_imgs: list[str] = []
+    plain_imgs: list[str] = []
+
+    # 1. srcset (img + source): the largest-width candidate per element.
+    for node in tree.css("img[srcset], source[srcset]"):  # type: ignore[union-attr]
+        best = _srcset_largest(node.attributes.get("srcset") or "")
+        if best:
+            srcset_imgs.append(best)
+
+    # 2/4. <img> lazy full-size attrs (high) and plain src (low).
+    for img in tree.css("img"):  # type: ignore[union-attr]
+        attrs = img.attributes
+        lazy = (
+            attrs.get("data-src")
+            or attrs.get("data-original")
+            or attrs.get("data-full")
+        )
+        if lazy:
+            lazy_imgs.append(lazy)
+        src = attrs.get("src")
+        if src:
+            plain_imgs.append(src)
+
+    # 3. og:image — fallback only (curated but usually a downscaled social card).
     for meta in tree.css('meta[property="og:image"]'):  # type: ignore[union-attr]
-        src = meta.attributes.get("content", "")
-        if src and src not in seen:
-            seen.append(src)
-    # Fallback: regular img tags with a reasonable minimum size heuristic
-    if len(seen) < max_images:
-        for img in tree.css("img"):  # type: ignore[union-attr]
-            src = img.attributes.get("src", "") or img.attributes.get("data-src", "")
-            if not src:
-                continue
-            absolute = urljoin(base_url, src)
+        content = meta.attributes.get("content")
+        if content:
+            og_imgs.append(content)
+
+    seen: list[str] = []
+    for bucket in (srcset_imgs, lazy_imgs, og_imgs, plain_imgs):
+        for src in bucket:
+            absolute = urljoin(base_url, src.strip())
             if absolute.startswith("http") and absolute not in seen:
                 seen.append(absolute)
                 if len(seen) >= max_images:
-                    break
-    return seen[:max_images]
+                    return seen
+    return seen
 
 
 def _extract_tags(tree: object) -> list[str]:
@@ -319,21 +463,24 @@ def scrape_url(
         result.note = "HTML parse failed"
         return result
 
-    # Title: OG → <title>
-    result.title = (
+    # Title: OG → <title>.  Keep the raw title for creator extraction (the
+    # "<name> by <Creator>" pattern lives before the boilerplate pipe), then
+    # strip SEO boilerplate for the user-facing value (issue #27).
+    raw_title = (
         _og(tree, "og:title")
         or (_meta_name(tree, "title"))
     )
-    if not result.title:
+    if not raw_title:
         try:
             title_node = tree.css_first("title")  # type: ignore[union-attr]
             if title_node:
-                result.title = (title_node.text() or "").strip() or None
+                raw_title = (title_node.text() or "").strip() or None
         except Exception:
             pass
+    result.title = _clean_title(raw_title)
 
-    # Description
-    result.description = (
+    # Description (strip trailing " | ..." boilerplate — issue #27)
+    result.description = _clean_description(
         _og(tree, "og:description")
         or _meta_name(tree, "description")
     )
@@ -347,12 +494,44 @@ def scrape_url(
     # Tags
     result.raw_tags = _extract_tags(tree)
 
-    # Creator: look for common author meta patterns
-    result.creator_name = (
+    # Creator name: common author meta patterns, then fall back to the
+    # "<name> by <Creator>" title pattern (Printables exposes no author meta
+    # but shows the creator in the title) — issue #27.
+    name = (
         _meta_name(tree, "author")
         or _meta_name(tree, "article:author")
         or _og(tree, "article:author")
     )
+    # article:author is sometimes a profile URL rather than a display name;
+    # that belongs in creator_profile_url, not the name.
+    if name and name.strip().lower().startswith("http"):
+        name = None
+    if not name:
+        name = _creator_from_title(raw_title)
+    result.creator_name = (name or "").strip() or None
+
+    # Creator profile URL: previously modeled but never assigned (issue #27).
+    # Best-effort from rel=author links/anchors or a URL-valued article:author.
+    profile_url: str | None = None
+    for sel in ('link[rel="author"]', 'a[rel="author"]'):
+        try:
+            node = tree.css_first(sel)  # type: ignore[union-attr]
+        except Exception:
+            node = None
+        if node is not None:
+            href = (node.attributes.get("href") or "").strip()
+            if href:
+                absolute = urljoin(url, href)
+                if absolute.startswith("http"):
+                    profile_url = absolute
+                    break
+    if not profile_url:
+        author_meta = (
+            _og(tree, "article:author") or _meta_name(tree, "article:author") or ""
+        ).strip()
+        if author_meta.lower().startswith("http"):
+            profile_url = author_meta
+    result.creator_profile_url = profile_url
 
     # License: try to find a cc/license link or meta
     for a in tree.css('a[rel="license"], link[rel="license"]'):  # type: ignore[union-attr]

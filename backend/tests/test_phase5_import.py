@@ -626,6 +626,171 @@ def test_extract_domain() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Image selection: prefer full-res over og:image (issue #28)
+# ---------------------------------------------------------------------------
+
+
+def test_srcset_largest_prefers_widest() -> None:
+    """_srcset_largest picks the URL with the largest width descriptor."""
+    from app.storage.scraper import _srcset_largest  # noqa: PLC0415
+
+    srcset = (
+        "https://cdn.example.com/small.jpg 320w, "
+        "https://cdn.example.com/large.jpg 1600w, "
+        "https://cdn.example.com/medium.jpg 800w"
+    )
+    assert _srcset_largest(srcset) == "https://cdn.example.com/large.jpg"
+
+
+def test_srcset_largest_density_and_bare() -> None:
+    """Density descriptors and bare single entries are handled."""
+    from app.storage.scraper import _srcset_largest  # noqa: PLC0415
+
+    assert _srcset_largest("https://x/a.jpg 1x, https://x/b.jpg 2x") == "https://x/b.jpg"
+    assert _srcset_largest("https://x/solo.jpg") == "https://x/solo.jpg"
+    assert _srcset_largest("") is None
+
+
+def test_extract_images_prefers_srcset_over_og() -> None:
+    """A larger srcset candidate beats the downscaled og:image (first/default)."""
+    from app.storage.scraper import scrape_url  # noqa: PLC0415
+    from app.storage.ssrf_guard import GuardedResponse  # noqa: PLC0415
+
+    html = """<!DOCTYPE html><html><head>
+      <meta property="og:title" content="Widget" />
+      <meta property="og:image" content="https://cdn.example.com/social-card-1200x630.jpg" />
+    </head><body>
+      <img src="https://cdn.example.com/thumb.jpg"
+           srcset="https://cdn.example.com/w400.jpg 400w,
+                   https://cdn.example.com/w2000.jpg 2000w" />
+    </body></html>"""
+
+    resp = GuardedResponse(
+        status_code=200,
+        headers={"content-type": "text/html; charset=utf-8"},
+        content=html.encode("utf-8"),
+        final_url="https://example.com/thing/1",
+    )
+    with patch("app.storage.scraper.guarded_fetch", return_value=resp):
+        with patch("app.storage.scraper._robots_allows", return_value=True):
+            with patch("socket.getaddrinfo", _fake_public_getaddrinfo):
+                result = scrape_url("https://example.com/thing/1")
+
+    # Full-res srcset image is first; og:image retained only as a fallback.
+    assert result.image_urls[0] == "https://cdn.example.com/w2000.jpg"
+    assert "https://cdn.example.com/social-card-1200x630.jpg" in result.image_urls
+    assert result.image_urls.index("https://cdn.example.com/w2000.jpg") < result.image_urls.index(
+        "https://cdn.example.com/social-card-1200x630.jpg"
+    )
+
+
+def test_extract_images_og_only_fallback() -> None:
+    """When no better image exists, og:image is still collected (no regression)."""
+    from app.storage.scraper import scrape_url  # noqa: PLC0415
+    from app.storage.ssrf_guard import GuardedResponse  # noqa: PLC0415
+
+    html = """<!DOCTYPE html><html><head>
+      <meta property="og:title" content="Widget" />
+      <meta property="og:image" content="https://cdn.example.com/only.jpg" />
+    </head><body><h1>hi</h1></body></html>"""
+
+    resp = GuardedResponse(
+        status_code=200,
+        headers={"content-type": "text/html; charset=utf-8"},
+        content=html.encode("utf-8"),
+        final_url="https://example.com/thing/2",
+    )
+    with patch("app.storage.scraper.guarded_fetch", return_value=resp):
+        with patch("app.storage.scraper._robots_allows", return_value=True):
+            with patch("socket.getaddrinfo", _fake_public_getaddrinfo):
+                result = scrape_url("https://example.com/thing/2")
+
+    assert result.image_urls == ["https://cdn.example.com/only.jpg"]
+
+
+# ---------------------------------------------------------------------------
+# Title / description boilerplate stripping (issue #27)
+# ---------------------------------------------------------------------------
+
+
+def test_clean_title_strips_printables_boilerplate() -> None:
+    """The exact Printables title example is stripped to 'by Fuu'."""
+    from app.storage.scraper import _clean_title  # noqa: PLC0415
+
+    raw = "NeilMed Sinus Rinse holder by Fuu | Download free STL model | Printables.com"
+    assert _clean_title(raw) == "NeilMed Sinus Rinse holder by Fuu"
+
+
+def test_clean_title_strips_dash_site_suffix() -> None:
+    """A trailing ' - <Site>.com' suffix (no pipe) is stripped."""
+    from app.storage.scraper import _clean_title  # noqa: PLC0415
+
+    assert _clean_title("Cool Bracket - MakerWorld.com") == "Cool Bracket"
+    # No boilerplate → unchanged.
+    assert _clean_title("Just A Plain Title") == "Just A Plain Title"
+
+
+def test_clean_description_strips_boilerplate() -> None:
+    """The exact Printables description example stops at the pipe."""
+    from app.storage.scraper import _clean_description  # noqa: PLC0415
+
+    raw = (
+        "A holder for the bottle which I had trouble finding a place to store. "
+        "| Download free 3D printable STL models"
+    )
+    assert _clean_description(raw) == (
+        "A holder for the bottle which I had trouble finding a place to store."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Creator extraction from title (issue #27)
+# ---------------------------------------------------------------------------
+
+
+def test_creator_from_title_printables_pattern() -> None:
+    """'<name> by <Creator> | ...' yields the creator; non-matching yields None."""
+    from app.storage.scraper import _creator_from_title  # noqa: PLC0415
+
+    raw = "NeilMed Sinus Rinse holder by Fuu | Download free STL model | Printables.com"
+    assert _creator_from_title(raw) == "Fuu"
+    # Already-cleaned title still works.
+    assert _creator_from_title("Some Widget by Alice") == "Alice"
+    # No " by " → no false positive.
+    assert _creator_from_title("Standby Power Monitor") is None
+    assert _creator_from_title(None) is None
+
+
+def test_creator_from_title_flows_into_scrape_result() -> None:
+    """scrape_url derives creator_name from the title when no author meta."""
+    from app.storage.scraper import scrape_url  # noqa: PLC0415
+    from app.storage.ssrf_guard import GuardedResponse  # noqa: PLC0415
+
+    og_title = (
+        "NeilMed Sinus Rinse holder by Fuu | Download free STL model | Printables.com"
+    )
+    html = f"""<!DOCTYPE html><html><head>
+      <meta property="og:title" content="{og_title}" />
+      <link rel="author" href="https://printables.com/@Fuu_123" />
+    </head><body><h1>hi</h1></body></html>"""
+
+    resp = GuardedResponse(
+        status_code=200,
+        headers={"content-type": "text/html; charset=utf-8"},
+        content=html.encode("utf-8"),
+        final_url="https://printables.com/model/123",
+    )
+    with patch("app.storage.scraper.guarded_fetch", return_value=resp):
+        with patch("app.storage.scraper._robots_allows", return_value=True):
+            with patch("socket.getaddrinfo", _fake_public_getaddrinfo):
+                result = scrape_url("https://printables.com/model/123")
+
+    assert result.title == "NeilMed Sinus Rinse holder by Fuu"
+    assert result.creator_name == "Fuu"
+    assert result.creator_profile_url == "https://printables.com/@Fuu_123"
+
+
+# ---------------------------------------------------------------------------
 # Inbox scan safety (unit)
 # ---------------------------------------------------------------------------
 

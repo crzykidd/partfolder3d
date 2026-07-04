@@ -132,6 +132,21 @@ prefix appears only on git tags and GitHub releases.
 
 ### Fixed
 
+- **URL-import scraper: full-resolution images, cleaned title/description, and creator
+  pre-fill** (closes #28; partial #27 — backend scraper parts). `_extract_images` now ranks
+  candidates by likely resolution — largest-width `<img srcset>` / `<source srcset>` first,
+  then lazy-loaded `data-src`/`data-original`/`data-full`, with the `og:image` social card
+  demoted to a fallback and plain `<img src>` last — so the stored/default image is the
+  full-res gallery photo instead of the ~1200x630 share card (still stored verbatim, no
+  resize). `scrape_url` now strips SEO boilerplate that aggregator sites (Printables/MakerWorld/
+  Thingiverse) bake into their OG tags: titles are cut at the first ` | ` (plus a trailing
+  ` - <Site>.com` suffix) and descriptions at the first ` | `, so e.g. `NeilMed Sinus Rinse
+  holder by Fuu | Download free STL model | Printables.com` becomes `NeilMed Sinus Rinse holder
+  by Fuu`. Creator pre-fill is fixed too: `creator_name` now falls back to the `<name> by
+  <Creator>` title pattern when no author meta exists (Printables exposes none), and the
+  previously-dead `creator_profile_url` field is now populated from `rel="author"`
+  links/anchors or a URL-valued `article:author`. All values flow through `process_session`
+  into the wizard's Creator/Title steps.
 - **Queued and analyze jobs are now visible in the Jobs monitor** (closes #20, closes #30).
   Background work was previously invisible until a worker *started* it: a `Job` row was only
   written when the task began, so a backlog of enqueued work (e.g. right after a bulk import)
