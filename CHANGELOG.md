@@ -130,6 +130,13 @@ prefix appears only on git tags and GitHub releases.
   shutdown; job names and args are unchanged. The two worker-internal enqueue sites still open
   a short-lived pool but now wrap it in `try/finally`. (audit §A / §E)
 
+### Fixed
+
+- **Catalog pagination bounced back to page 1.** Selecting page 2 (or any page) in the catalog
+  briefly showed that page then reverted to page 1: the search-input debounce effect ran on
+  mount and on every render and unconditionally cleared the `page` URL param. It now rewrites the
+  URL only when the search text actually changed, so pagination sticks.
+
 ## [0.3.0] — 2026-07-03
 
 ### Added

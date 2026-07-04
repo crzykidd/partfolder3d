@@ -160,6 +160,39 @@ describe('CatalogPage', () => {
     expect(screen.getByText('Browse your 3D print library.')).toBeInTheDocument()
   })
 
+  it('stays on the selected page when paginating (does not bounce back to page 1)', async () => {
+    // total 50 @ per_page 20 → 3 pages, so the Pagination control renders.
+    vi.mocked(api.listItems).mockResolvedValue({
+      total: 50,
+      page: 1,
+      per_page: 20,
+      items: [makeItem({ key: 'aaa1111', title: 'Benchy Boat' })],
+    })
+
+    renderCatalog('/catalog?view=table')
+
+    const next = await screen.findByRole('button', { name: /Next/i })
+    expect(screen.getByText('1 / 3')).toBeInTheDocument()
+
+    fireEvent.click(next)
+
+    // Advances to page 2 and re-queries with page: 2.
+    await waitFor(() => {
+      expect(screen.getByText('2 / 3')).toBeInTheDocument()
+      expect(vi.mocked(api.listItems)).toHaveBeenCalledWith(
+        expect.objectContaining({ page: 2 }),
+      )
+    })
+
+    // Regression guard: the search-debounce effect must NOT strip ?page and bounce
+    // back to page 1. Wait past DEBOUNCE_MS (300) and confirm we're still on page 2.
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(screen.getByText('2 / 3')).toBeInTheDocument()
+    expect(vi.mocked(api.listItems)).not.toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1 }),
+    )
+  })
+
   it('activates a tag filter when a tag-cloud pill is clicked', async () => {
     vi.mocked(api.listItems).mockResolvedValue(
       itemsResponse([makeItem({ key: 'aaa1111', title: 'Benchy Boat' })]),

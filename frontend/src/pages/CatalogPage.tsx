@@ -132,8 +132,13 @@ export function CatalogPage() {
     setInputValue(urlQ)
   }, [urlQ])
 
-  // Debounce: sync input → URL after DEBOUNCE_MS
+  // Debounce: sync input → URL after DEBOUNCE_MS.
+  // Guard on an actual change: without this, the debounced writer runs on mount
+  // and on every render and unconditionally deletes the `page` param, bouncing the
+  // user back to page 1 moments after they paginate. Only rewrite the URL (and reset
+  // to page 1) when the search text genuinely differs from what's in the URL.
   useEffect(() => {
+    if (inputValue === urlQ) return
     const t = setTimeout(() => {
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev)
@@ -147,7 +152,7 @@ export function CatalogPage() {
       }, { replace: true })
     }, DEBOUNCE_MS)
     return () => clearTimeout(t)
-  }, [inputValue, setSearchParams])
+  }, [inputValue, urlQ, setSearchParams])
 
   // --- Helpers to update URL params ---
   const setPage = useCallback(
