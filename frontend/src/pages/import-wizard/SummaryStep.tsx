@@ -1,15 +1,16 @@
 /**
  * SummaryStep — Step 5 of the import wizard.
  *
- * Read-only review of all session data. Commit (→ item page) or Cancel import.
+ * Read-only review of all session data plus a mid-wizard file-attach affordance
+ * for URL and upload sessions (#27).  Commit (→ item page) or Cancel import.
  */
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as api from '@/lib/api'
 import { safeHref } from '@/lib/utils'
-import { AURORA_CARD, AURORA_BTN_GHOST } from './styles'
+import { AURORA_CARD, AURORA_BTN_GHOST, AURORA_BTN_GHOST_SM } from './styles'
 
 // ---------------------------------------------------------------------------
 // SummaryRow helper
@@ -87,6 +88,8 @@ export function SummaryStep({ session, onPrev, onCancelled }: SummaryStepProps) 
   const queryClient = useQueryClient()
   const [commitError, setCommitError] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
+  const [attachError, setAttachError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Fetch libraries to display name instead of raw ID in the summary.
   // Uses the shared ['libraries'] key so the result is served from cache if
@@ -121,6 +124,38 @@ export function SummaryStep({ session, onPrev, onCancelled }: SummaryStepProps) 
       navigate('/catalog')
     },
   })
+
+  const attachMutation = useMutation({
+    mutationFn: (files: File[]) => api.uploadSessionFiles(session.id, files),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['import-session', session.id], updated)
+      void queryClient.invalidateQueries({ queryKey: ['import-session', session.id] })
+      setAttachError(null)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    },
+    onError: (err) =>
+      setAttachError(err instanceof Error ? err.message : 'Upload failed.'),
+  })
+
+  const deleteFileMutation = useMutation({
+    mutationFn: (fileId: number) => api.deleteSessionFile(session.id, fileId),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['import-session', session.id], updated)
+      void queryClient.invalidateQueries({ queryKey: ['import-session', session.id] })
+    },
+    onError: (err) =>
+      setAttachError(err instanceof Error ? err.message : 'Remove failed.'),
+  })
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(e.target.files ?? [])
+    if (selected.length === 0) return
+    setAttachError(null)
+    attachMutation.mutate(selected)
+  }
+
+  // File attach affordance is available for url and upload sessions.
+  const canAttach = session.source_type === 'url' || session.source_type === 'upload'
 
   const handleCancel = () => {
     if (!window.confirm('Discard this import session?')) return
@@ -166,7 +201,9 @@ export function SummaryStep({ session, onPrev, onCancelled }: SummaryStepProps) 
               warn={session.files.length === 0}
               note={
                 session.files.length === 0
-                  ? 'No model file attached — this will be a metadata-only entry.'
+                  ? session.source_type === 'url'
+                    ? 'No model files attached — attach the file you downloaded from the source site, or commit metadata-only.'
+                    : 'No model file attached — this will be a metadata-only entry.'
                   : undefined
               }
             />
@@ -177,6 +214,82 @@ export function SummaryStep({ session, onPrev, onCancelled }: SummaryStepProps) 
           </tbody>
         </table>
       </div>
+
+      {/* Attach files section (url + upload sessions) */}
+      {canAttach && (
+        <div style={{ ...AURORA_CARD, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--aurora-muted)' }}>
+            Attach Model Files
+          </div>
+
+          {/* Staged file list */}
+          {session.files.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {session.files.map((f) => (
+                <div
+                  key={f.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                    padding: '5px 8px',
+                    background: 'var(--aurora-glass)',
+                    border: '1px solid var(--aurora-glass-border)',
+                    borderRadius: 6,
+                  }}
+                >
+                  <span style={{ fontSize: 12, color: 'var(--aurora-text)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 1 }}>
+                    {f.original_name}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--aurora-muted)', flexShrink: 0 }}>
+                    {f.role}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Remove file"
+                    disabled={deleteFileMutation.isPending}
+                    onClick={() => deleteFileMutation.mutate(f.id)}
+                    style={{
+                      ...AURORA_BTN_GHOST_SM,
+                      padding: '2px 8px',
+                      color: 'var(--aurora-danger)',
+                      border: '1px solid rgba(220,38,38,0.25)',
+                      flexShrink: 0,
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Attach affordance */}
+          <div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              style={{ display: 'none' }}
+              onChange={handleFileSelect}
+            />
+            <button
+              type="button"
+              disabled={attachMutation.isPending}
+              onClick={() => fileInputRef.current?.click()}
+              style={{ ...AURORA_BTN_GHOST, fontSize: 12, padding: '6px 14px', opacity: attachMutation.isPending ? 0.5 : 1 }}
+            >
+              {attachMutation.isPending ? 'Uploading…' : '+ Attach files'}
+            </button>
+          </div>
+
+          {/* Attach error */}
+          {attachError && (
+            <div style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>{attachError}</div>
+          )}
+        </div>
+      )}
 
       {/* No library warning */}
       {!session.library_id && (

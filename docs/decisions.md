@@ -2,6 +2,28 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-05 — #27 resolution: manual mid-wizard file attach (option b; auto-fetch deferred to #23)
+
+Owner chose **option b**: let the user download the model file themselves from the source site and
+drop it into the wizard before committing.  Auto-fetch of model files (directly from the source URL)
+is deferred to the #23 pluggable-scraper work.
+
+Non-obvious choices:
+- **Guard relaxation contract.** `POST /api/import-sessions/{id}/files` now accepts:
+  - `source_type` in `{upload, url}` — `inbox` and anything else still return 422.
+  - `status` in `{draft, pending_wizard}` — `processing`, `committed`, `failed`, `cancelled` still
+    return 409.
+  Any other combination is still rejected at the old boundary.
+- **Lazy staging dir for URL sessions.** URL sessions are created with `staging_dir=None` (the scrape
+  job doesn't need one).  The upload endpoint creates it on first use (`_get_staging_dir() / uuid4()`)
+  and persists it to the session row.  No migration needed — the column already exists and allows NULL.
+- **No re-processing after attach.** Uploading a file to a `pending_wizard` session does NOT trigger
+  a new `/process` call — the file sits staged and commit ingests it through the existing generic
+  `session.files` loop in `_commit_session_inner`.
+- **New DELETE endpoint.** `DELETE /api/import-sessions/{id}/files/{file_id}` mirrors the shape of
+  `delete_import_session_image`: CSRF-protected, allowed in `draft`/`pending_wizard`, best-effort FS
+  unlink, 404 on foreign file_id.
+
 ## 2026-07-04 — #26 wizard viewport capture: a real session-image save path (not `uploadSessionFiles`)
 
 The #26 handoff assumed a capture could be saved by reusing `uploadSessionFiles`

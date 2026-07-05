@@ -218,31 +218,43 @@ async def create_import_session(
 async def upload_session_files(
     session_id: str,
     user: Annotated[User, Depends(get_current_user)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
     files: list[UploadFile] = File(...),
 ) -> ImportSessionOut:
-    """Upload files to a draft upload-type import session.
+    """Upload model files to an import session while it is still editable.
 
-    Files are saved to the session's staging_dir.  Allowed in draft status only.
-    After uploading, call POST /api/import-sessions/{id}/process to kick off pre-fill.
+    Allowed source_types: 'upload' and 'url'.
+    Allowed statuses: 'draft' and 'pending_wizard'.
+
+    For URL sessions the staging dir is created on first use (lazy init).
+    Files sit staged until the session is committed; no re-processing is triggered.
+    After uploading to an 'upload' draft session, call POST /{id}/process to kick off pre-fill.
     """
     session = await _load_session(session_id, db, user)
 
-    if session.status != ImportSessionStatus.draft:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Files can only be uploaded to a 'draft' session.",
-        )
-    if session.source_type != ImportSourceType.upload:
+    if session.source_type not in (ImportSourceType.upload, ImportSourceType.url):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="File upload only supported for source_type='upload'.",
+            detail="File upload only supported for source_type='upload' or 'url'.",
         )
-    if not session.staging_dir:
+    if session.status not in (ImportSessionStatus.draft, ImportSessionStatus.pending_wizard):
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Session has no staging_dir.",
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Files can only be uploaded to a session in 'draft' or 'pending_wizard' status "
+                f"(current: '{session.status}')."
+            ),
         )
+
+    # Lazily create staging dir for URL sessions (upload sessions always have one).
+    if not session.staging_dir:
+        from uuid import uuid4  # noqa: PLC0415
+
+        staging_path = _get_staging_dir() / str(uuid4())
+        staging_path.mkdir(parents=True, exist_ok=True)
+        session.staging_dir = str(staging_path)
+        await db.flush()
 
     staging = Path(session.staging_dir)
     staging.mkdir(parents=True, exist_ok=True)
@@ -269,6 +281,12 @@ async def upload_session_files(
     session.updated_at = datetime.now(UTC)
     await db.flush()
 
+    # Expire the relationship collections so the reload SELECT re-fetches them
+    # with the newly added ImportSessionFile rows.  Without this the identity-map
+    # cached collection is returned unchanged.
+    session_id_pk = session.id
+    db.expire(session, ["files", "images"])
+
     from sqlalchemy.orm import selectinload  # noqa: PLC0415
 
     result = await db.execute(
@@ -277,7 +295,88 @@ async def upload_session_files(
             selectinload(ImportSession.files),
             selectinload(ImportSession.images),
         )
-        .where(ImportSession.id == session.id)
+        .where(ImportSession.id == session_id_pk)
+    )
+    return _session_out(result.scalar_one())
+
+
+@router.delete(
+    "/api/import-sessions/{session_id}/files/{file_id}",
+    response_model=ImportSessionOut,
+    status_code=status.HTTP_200_OK,
+)
+async def delete_session_file(
+    session_id: str,
+    file_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ImportSessionOut:
+    """Remove a staged file from an import session.
+
+    Deletes the ImportSessionFile row and best-effort unlinks the staged file
+    from the session's staging_dir (logs a warning on FS failure, does not 500).
+
+    Allowed in 'draft' or 'pending_wizard' status only.
+    Returns 404 if the file_id doesn't belong to this session.
+    """
+    session = await _load_session(session_id, db, user)
+
+    if session.status not in (ImportSessionStatus.draft, ImportSessionStatus.pending_wizard):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Cannot remove a file from a session in status '{session.status}'."
+            ),
+        )
+
+    sf_result = await db.execute(
+        select(ImportSessionFile).where(
+            ImportSessionFile.id == file_id,
+            ImportSessionFile.session_id == session.id,
+        )
+    )
+    sf = sf_result.scalar_one_or_none()
+    if sf is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found in this session.",
+        )
+
+    staged_path = sf.staged_path
+    await db.delete(sf)
+    await db.flush()
+
+    # Best-effort: remove the staged file from disk.
+    if staged_path and session.staging_dir:
+        try:
+            file_path = Path(staged_path)
+            staging_path = Path(session.staging_dir)
+            file_path.relative_to(staging_path)  # containment check
+            if file_path.is_file():
+                file_path.unlink()
+        except ValueError:
+            pass  # file is outside staging_dir — don't touch it
+        except Exception:
+            log.warning(
+                "delete_session_file: could not remove staged file %s", staged_path
+            )
+
+    session.updated_at = datetime.now(UTC)
+    await db.flush()
+
+    session_id_pk = session.id
+    db.expire(session, ["files", "images"])
+
+    from sqlalchemy.orm import selectinload  # noqa: PLC0415
+
+    result = await db.execute(
+        select(ImportSession)
+        .options(
+            selectinload(ImportSession.files),
+            selectinload(ImportSession.images),
+        )
+        .where(ImportSession.id == session_id_pk)
     )
     return _session_out(result.scalar_one())
 

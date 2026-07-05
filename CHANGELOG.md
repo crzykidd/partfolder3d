@@ -20,6 +20,17 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Fixed
+
+- **URL-import wizard can now attach model files before commit** (closes #27). The
+  Review & Commit step now shows a mid-wizard "Attach Model Files" section for `url`
+  and `upload` sessions: staged files are listed with name, role, and a per-file
+  remove button; an "Attach files" button opens a file picker that uploads to the
+  new `POST /api/import-sessions/{id}/files` (relaxed to allow `url` source type and
+  `pending_wizard` status; staging dir is created on-demand for URL sessions). A new
+  `DELETE /api/import-sessions/{id}/files/{file_id}` endpoint removes a staged file.
+  The zero-file warning for URL sessions is reworded to point at this affordance.
+
 ## [0.4.0] — 2026-07-05
 
 > ⚠️ **nginx config changed** — if you are running a custom nginx config

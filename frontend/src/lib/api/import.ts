@@ -229,6 +229,14 @@ export const deleteImportSessionImage = (
     method: 'DELETE',
   })
 
+export const deleteSessionFile = (
+  sessionId: string,
+  fileId: number,
+): Promise<ImportSession> =>
+  apiFetch<ImportSession>(`/api/import-sessions/${sessionId}/files/${fileId}`, {
+    method: 'DELETE',
+  })
+
 export const listSiteCapabilities = (): Promise<SiteCapability[]> =>
   apiFetch<SiteCapability[]>('/api/site-capabilities')
 
