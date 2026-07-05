@@ -11,7 +11,7 @@
 </div>
 
 > [!WARNING]
-> **Early alpha (v0.3.0) — under active development.** This is an early release: expect rough
+> **Early alpha (v0.4.0) — under active development.** This is an early release: expect rough
 > edges, and **breaking changes can land between releases** (database schema, config, or API).
 > It's usable and published — pull the images and follow [Getting started](#getting-started) — but
 > **pin a specific version, back up your data, and read the release notes before upgrading.**
@@ -19,7 +19,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.3.0-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.4.0-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 
@@ -28,6 +28,22 @@
 ---
 
 ## What's New
+
+### v0.4.0 (2026-07-05)
+
+Security + features release. **Security hardening** — the scrape/import path is guarded against
+SSRF (internal-network fetches blocked, size-capped, redirect-re-checked), `javascript:`-scheme XSS
+is blocked on item/creator links, **Redis now requires a password**, nginx sends security headers
+(CSP, X-Frame-Options, nosniff), ZIP/3MF parsing is hardened, print-record and auth checks were
+tightened, and the backend **fails fast if the DB password is left at the default**. **Jobs
+monitor** now shows **queued** and **analyze** jobs (previously invisible). **Libraries** — move
+items between libraries, **filter the catalog by library** (multi-select), and mount **multiple
+library roots**. **Import wizard** — full-resolution scraped images, cleaned titles/descriptions,
+creator pre-fill, a **"Try to render file"** viewport capture, tags shown immediately, and a Files
+row that flags metadata-only commits. **Tags** — an **auto-approve** setting + bulk "Approve all".
+Plus fixes: catalog pagination, scraped images now appear in the file list, and imported items are
+analyzed automatically. **Upgrading:** set `POSTGRES_PASSWORD` **and** `REDIS_PASSWORD` in `.env`
+(now required) and drain the worker queue across the upgrade — see [CHANGELOG.md](CHANGELOG.md).
 
 ### v0.3.0 (2026-07-03)
 
@@ -140,7 +156,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.3.0 alpha) — see the
+> The full feature set below is **built and released** (v0.4.0 alpha) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -404,7 +420,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is at the **alpha** stage (v0.3.0).
+Honest snapshot — this project is at the **alpha** stage (v0.4.0).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -550,7 +566,7 @@ This is alpha software — **breaking changes can land between releases** (schem
 or API), so upgrade deliberately:
 
 1. **Pin a specific version.** Set explicit image tags in `docker-compose.yml` (e.g.
-   `:0.3.0` instead of `:latest`) so a `pull` never surprises you.
+   `:0.4.0` instead of `:latest`) so a `pull` never surprises you.
 2. **Read the release notes first.** Check the [CHANGELOG](CHANGELOG.md) / the GitHub
    release for the version you're moving to — watch for **⚠️ nginx config changed** and
    other migration callouts.
@@ -617,6 +633,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — alpha (v0.3.0) · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — alpha (v0.4.0) · built by <code>crzykidd</code></sub>
 
 </div>
