@@ -290,6 +290,60 @@ async def test_list_items_tag_filter(client: AsyncClient, tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_list_items_library_filter(client: AsyncClient, tmp_path: Path) -> None:
+    """GET /api/items?library_ids=... filters items by one or more libraries."""
+    csrf = await _login_admin(client, tmp_path)
+
+    lib_ids: list[int] = []
+    for i in range(3):
+        mount = str(tmp_path / f"lib{i}")
+        Path(mount).mkdir(parents=True, exist_ok=True)
+        lib_resp = await client.post(
+            "/api/libraries",
+            json={"name": f"Lib{i}", "mount_path": mount},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert lib_resp.status_code == 201, lib_resp.text
+        lib_id = lib_resp.json()["id"]
+        lib_ids.append(lib_id)
+        await client.post(
+            "/api/items",
+            json={"title": f"Item in Lib{i}", "library_id": lib_id},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    # No filter → all three libraries' items are returned.
+    resp = await client.get("/api/items")
+    assert resp.status_code == 200
+    all_titles = {i["title"] for i in resp.json()["items"]}
+    assert {"Item in Lib0", "Item in Lib1", "Item in Lib2"} <= all_titles
+
+    # Filter by one library id → only that library's items.
+    resp = await client.get("/api/items", params={"library_ids": lib_ids[0]})
+    assert resp.status_code == 200
+    titles = {i["title"] for i in resp.json()["items"]}
+    assert titles == {"Item in Lib0"}
+
+    # Filter by two library ids (repeat param) → the union of both.
+    resp = await client.get(
+        "/api/items",
+        params=[("library_ids", lib_ids[0]), ("library_ids", lib_ids[2])],
+    )
+    assert resp.status_code == 200
+    titles = {i["title"] for i in resp.json()["items"]}
+    assert titles == {"Item in Lib0", "Item in Lib2"}
+
+    # Legacy single library_id still works and combines (union) with library_ids.
+    resp = await client.get(
+        "/api/items",
+        params=[("library_id", lib_ids[1]), ("library_ids", lib_ids[2])],
+    )
+    assert resp.status_code == 200
+    titles = {i["title"] for i in resp.json()["items"]}
+    assert titles == {"Item in Lib1", "Item in Lib2"}
+
+
+@pytest.mark.asyncio
 async def test_list_items_sort_title(client: AsyncClient, tmp_path: Path) -> None:
     """GET /api/items?sort=title_asc returns items in title order."""
     csrf = await _login_admin(client, tmp_path)

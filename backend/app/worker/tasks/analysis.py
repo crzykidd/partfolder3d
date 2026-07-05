@@ -219,6 +219,67 @@ async def _analyze_item_inner(ctx: dict, item_id: int) -> None:
 
     Enqueued alongside render_item on item create / file change / rescan.
     """
+    from app.db import SessionLocal  # noqa: PLC0415
+    from app.worker.job_tracker import claim_or_create_job, finish_job  # noqa: PLC0415
+
+    # Issue #30: claim the queued Job row written at enqueue time (→ running), or
+    # insert a fresh running row when none exists, so mesh-analysis work is
+    # visible in the Jobs monitor.  Failure to track must never block analysis.
+    job_id = None
+    try:
+        async with SessionLocal() as db:
+            job_id = await claim_or_create_job(
+                db,
+                "analyze",
+                payload={"item_id": item_id},
+                item_id=item_id,
+                arq_job_id=ctx.get("job_id"),
+            )
+            await db.commit()
+    except Exception:
+        log.exception(
+            "analyze_item: failed to claim/create Job row for item %s"
+            " — continuing without tracking",
+            item_id,
+        )
+
+    async def _finish(
+        succeeded: bool,
+        error: str | None = None,
+        log_text: str | None = None,
+    ) -> None:
+        if job_id is None:
+            return
+        try:
+            async with SessionLocal() as db:
+                await finish_job(
+                    db, job_id, succeeded=succeeded, error=error, log_text=log_text
+                )
+                await db.commit()
+        except Exception:
+            log.exception("analyze_item: failed to finalize Job row %s", job_id)
+
+    try:
+        await _analyze_item_body(ctx, item_id, _finish)
+    except Exception as exc:
+        log.exception("analyze_item: unexpected error for item %s", item_id)
+        await _finish(succeeded=False, error=str(exc))
+    except BaseException:
+        log.error(
+            "analyze_item: cancelled/shutdown for item %s — finalizing job as failed",
+            item_id,
+        )
+        await _finish(succeeded=False, error="worker stopped / cancelled")
+        raise
+
+
+async def _analyze_item_body(ctx: dict, item_id: int, _finish: Any) -> None:
+    """Core analysis body; the caller finalizes the tracked Job row via *_finish*.
+
+    *_finish* is an ``async (succeeded, error=None, log_text=None)`` callback that
+    marks the claimed Job row terminal.  Every exit path here calls it so the row
+    never sits in 'running' after the task ends.
+    """
     import json  # noqa: PLC0415
 
     import sqlalchemy as sa  # noqa: PLC0415
@@ -260,6 +321,7 @@ async def _analyze_item_inner(ctx: dict, item_id: int) -> None:
         item = item_result.scalar_one_or_none()
         if item is None:
             log.warning("analyze_item: item %s not found", item_id)
+            await _finish(succeeded=False, error=f"Item {item_id} not found")
             return
 
         item_dir = Path(item.dir_path)
@@ -274,6 +336,7 @@ async def _analyze_item_inner(ctx: dict, item_id: int) -> None:
 
     if not model_files:
         log.debug("analyze_item: item %s has no model files", item_id)
+        await _finish(succeeded=True, log_text="No model files to analyze.")
         return
 
     analyzed = 0
@@ -396,4 +459,13 @@ async def _analyze_item_inner(ctx: dict, item_id: int) -> None:
     log.info(
         "analyze_item: item=%s done — analyzed=%d skipped=%d errors=%d",
         item_id, analyzed, skipped, errors,
+    )
+
+    # An item whose files ALL failed is a failure; otherwise (some analysed, or
+    # only unsupported/cached skips) the job succeeded.
+    succeeded = not (errors and analyzed == 0)
+    await _finish(
+        succeeded=succeeded,
+        error=(f"{errors} file(s) failed analysis" if not succeeded else None),
+        log_text=f"analyzed={analyzed} skipped={skipped} errors={errors}",
     )

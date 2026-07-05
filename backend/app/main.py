@@ -25,8 +25,9 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .config import settings
 from .crypto import ensure_key
@@ -48,7 +49,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         from .db import SessionLocal  # noqa: PLC0415
         from .storage.journal import recover_stale_journals  # noqa: PLC0415
+        from .storage.library_move import recover_stale_library_moves  # noqa: PLC0415
 
+        recover_stale_library_moves()
         async with SessionLocal() as db:
             await recover_stale_journals(db)
     except Exception:
@@ -65,7 +68,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "Startup: could not create inbox dir %s (non-fatal)", settings.INBOX_DIR
         )
 
-    yield
+    # One shared arq Redis pool for the whole process, injected via get_arq_pool.
+    # Replaces the old per-request create_pool/aclose pattern (leaked on error).
+    from .worker.arq_pool import create_arq_pool  # noqa: PLC0415
+
+    app.state.arq_pool = await create_arq_pool()
+    log.info("Startup: arq Redis pool created")
+
+    try:
+        yield
+    finally:
+        pool = getattr(app.state, "arq_pool", None)
+        if pool is not None:
+            await pool.aclose()
+            log.info("Shutdown: arq Redis pool closed")
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +104,42 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ---------------------------------------------------------------------------
+# Global catch-all exception handler
+# ---------------------------------------------------------------------------
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(
+    request: Request, exc: Exception
+) -> JSONResponse:
+    """Return a generic 500 for any *unhandled* exception; log the real cause.
+
+    Why this is safe re: HTTPException / RequestValidationError — Starlette
+    installs a bare ``Exception`` handler on the OUTER ``ServerErrorMiddleware``,
+    while ``HTTPException`` and ``RequestValidationError`` are handled first by
+    the INNER ``ExceptionMiddleware`` (via their own dedicated handlers) and
+    return their response before it can propagate outward. So this handler only
+    ever sees genuinely unhandled errors — well-formed 4xx responses keep their
+    status and detail untouched, and never reach here.
+
+    The full traceback goes to the server log (``log.exception``); the client
+    gets a fixed generic body so no internal exception text / stack detail can
+    leak into the HTTP response (which FastAPI's default handler can do when
+    debug mode is on).
+
+    CORS note: like FastAPI's built-in 500 handler, this runs in the outer
+    ``ServerErrorMiddleware`` (outside ``CORSMiddleware``), so 500 bodies carry
+    no CORS headers — identical to the prior default behavior; nothing regresses.
+    Well-formed HTTPException responses still pass back through CORSMiddleware.
+    """
+    log.exception(
+        "Unhandled exception on %s %s", request.method, request.url.path
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
 
 
 # ---------------------------------------------------------------------------

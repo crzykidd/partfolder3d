@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
+from typing import Any
 
 import pytest
 from httpx import AsyncClient
@@ -291,10 +292,9 @@ async def test_retry_failed_render_job(
     client: AsyncClient,
     db_session: AsyncSession,
     tmp_path: object,
+    arq_pool: Any,
 ) -> None:
     """POST /api/jobs/{id}/retry on a failed render job re-enqueues render_item."""
-    from unittest.mock import AsyncMock, patch  # noqa: PLC0415
-
     from app.worker.job_tracker import create_job, finish_job  # noqa: PLC0415
 
     # Create a failed render job with item_id in payload.
@@ -307,24 +307,18 @@ async def test_retry_failed_render_job(
     await _setup_and_login(client, tmp_path)  # type: ignore[arg-type]
     csrf = client.cookies.get("pf3d_csrf", "")
 
-    # Patch the Redis pool so no real Redis connection is needed.
-    # create_pool is lazily imported inside the endpoint body, so patch it
-    # at the arq module where it lives.
-    mock_redis = AsyncMock()
-    mock_pool = AsyncMock(return_value=mock_redis)
-
-    with patch("arq.create_pool", mock_pool):
-        resp = await client.post(
-            f"/api/jobs/{jid}/retry",
-            headers={"X-CSRF-Token": csrf},
-        )
+    # Enqueue goes through the injected shared pool (get_arq_pool override).
+    resp = await client.post(
+        f"/api/jobs/{jid}/retry",
+        headers={"X-CSRF-Token": csrf},
+    )
 
     assert resp.status_code == 202, resp.text
     body = resp.json()
     assert body["queued"] is True
 
     # Verify that enqueue_job was called with the correct task, item_id, and retry link
-    mock_redis.enqueue_job.assert_called_once_with("render_item", 42, retry_of_job_id=str(jid))
+    arq_pool.enqueue_job.assert_called_once_with("render_item", 42, retry_of_job_id=str(jid))
 
 
 @pytest.mark.asyncio

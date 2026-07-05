@@ -106,6 +106,42 @@ async def test_new_password_works(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_reset_invalidates_existing_sessions(client: AsyncClient) -> None:
+    """Consuming a reset token deactivates the user's existing sessions."""
+    csrf, user_email = await _setup_with_user(client)
+
+    # Admin mints a reset token while still logged in as admin.
+    reset_resp = await client.post(
+        "/api/password-reset",
+        json={"email": user_email},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert reset_resp.status_code == 201
+    token = reset_resp.json()["token"]
+
+    # The user logs in, establishing a session in the shared cookie jar.
+    login = await client.post(
+        "/api/auth/login",
+        json={"email": user_email, "password": "oldpassword1"},
+    )
+    assert login.status_code == 200
+    me_before = await client.get("/api/auth/me")
+    assert me_before.status_code == 200
+    assert me_before.json()["email"] == user_email
+
+    # Consume the reset token (public endpoint) — sets a new password.
+    use = await client.post(
+        f"/api/password-reset/{token}",
+        json={"new_password": "brandnewpass1"},
+    )
+    assert use.status_code == 200
+
+    # The previously issued session cookie is now rejected (session killed).
+    me_after = await client.get("/api/auth/me")
+    assert me_after.status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_reset_token_single_use(client: AsyncClient) -> None:
     """A reset token can only be used once."""
     csrf, user_email = await _setup_with_user(client)

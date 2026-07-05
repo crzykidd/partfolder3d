@@ -7,7 +7,7 @@
  */
 
 import { type KeyboardEvent, useEffect, useRef, useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as api from '@/lib/api'
 import {
   acceptPendingTag,
@@ -51,6 +51,17 @@ export function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
   const [tagProviderAvailable, setTagProviderAvailable] = useState<boolean | null>(null)
   const [aiTagSuggestions, setAiTagSuggestions] = useState<api.AiTagSuggestionOut | null>(null)
   const [tagAiStatus, setTagAiStatus] = useState<string | null>(null)
+
+  // Existing catalog tags — an INDEPENDENT query from the AI suggest-tags call.
+  // Renders as soon as GET /api/tags resolves so a slow/unconfigured AI provider
+  // can never stall this step. AI suggestions (below) layer in asynchronously.
+  const existingTagsQuery = useQuery({
+    queryKey: ['import-tags-catalog'],
+    queryFn: () => api.listTags({ in_use_only: true, per_page: 24 }),
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  })
+  const existingTags = existingTagsQuery.data?.tags ?? []
 
   // Autocomplete state
   const [acResults, setAcResults] = useState<api.TagSummary[]>([])
@@ -375,6 +386,59 @@ export function TagsStep({ session, onNext, onPrev }: TagsStepProps) {
           </div>
         )}
       </div>
+
+      {/* Existing catalog tags — independent of AI; renders as soon as
+          listTags resolves, so the step is fully usable without an AI provider. */}
+      {(() => {
+        if (existingTagsQuery.isLoading) {
+          return (
+            <p style={{ fontSize: 11, color: 'var(--aurora-muted)', margin: 0 }}>
+              Loading existing tags…
+            </p>
+          )
+        }
+        const available = existingTags.filter(
+          (t) => !confirmed.includes(t.name) && !pending.includes(t.name),
+        )
+        if (available.length === 0) return null
+        return (
+          <div>
+            <span style={SECTION_LABEL}>Popular tags — click to add</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {available.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setConfirmed((c) => addConfirmedTag(c, t.name))}
+                  title={`Add tag "${t.name}"`}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    borderRadius: 20,
+                    padding: '4px 12px',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                    userSelect: 'none',
+                    background: 'rgba(15,164,171,0.08)',
+                    border: '1px solid var(--aurora-pill-border)',
+                    color: 'var(--aurora-accent)',
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(15,164,171,0.18)'
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(15,164,171,0.08)'
+                  }}
+                >
+                  + #{t.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* AI tag suggestions card — click-to-add; chips disappear once added */}
       {(() => {

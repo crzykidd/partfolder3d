@@ -334,6 +334,44 @@ def test_project_settings_enriches_filament_colors(tmp_path: Path) -> None:
     assert fil["type"] == "ABS"
 
 
+def test_xxe_external_entity_not_resolved(tmp_path: Path) -> None:
+    """XXE-style external-entity slice_info is parsed inertly — entity unresolved.
+
+    The hardened parser (resolve_entities=False, load_dtd=False, no_network=True)
+    must not read the referenced file or reach out to the network; read_3mf still
+    returns safely and the file contents never surface in the result.
+    """
+    from app.worker.threemf import read_3mf
+
+    secret = tmp_path / "secret.txt"
+    secret.write_text("TOP-SECRET-XXE-CANARY")
+
+    xxe_slice = (
+        b'<?xml version="1.0"?>\n'
+        b'<!DOCTYPE config [ <!ENTITY xxe SYSTEM "file://'
+        + str(secret).encode()
+        + b'"> ]>\n'
+        b"<config><plate>"
+        b'<metadata key="index" value="1"/>'
+        b'<metadata key="weight" value="&xxe;"/>'
+        b"</plate></config>"
+    )
+
+    content = _make_3mf({
+        "Metadata/plate_1.gcode": b"G28\n",
+        "Metadata/slice_info.config": xxe_slice,
+    })
+    p = tmp_path / "xxe.3mf"
+    p.write_bytes(content)
+
+    info = read_3mf(p)  # must not raise, must not leak the referenced file
+
+    # The external entity is never resolved: the canary appears nowhere.
+    assert "TOP-SECRET-XXE-CANARY" not in json.dumps(info, default=str)
+    # gcode still flags sliced; the hardened parse simply yields no plate data.
+    assert info["sliced"] is True
+
+
 def test_return_schema_completeness(tmp_path: Path) -> None:
     """All required keys are present in the return dict."""
     from app.worker.threemf import read_3mf

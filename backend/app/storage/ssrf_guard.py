@@ -26,12 +26,16 @@ Usage::
     try:
         assert_safe_url(url)
     except SSRFBlockedError as exc:
-        # Treat as a user-supplied bad URL; surface the message.
-        raise HTTPException(400, str(exc)) from exc
+        # Log the specific reason server-side; return a GENERIC message so we
+        # don't leak internal-network topology (which private IP was resolved,
+        # etc.) to the (possibly untrusted) importing user.
+        log.warning("SSRF-blocked URL: %s", exc)
+        raise HTTPException(400, "URL is not allowed.") from exc
 
-The guard raises SSRFBlockedError on any rejected URL.  Callers decide whether
-to surface the reason to the user (generally fine — we are not leaking internal
-topology by saying "that IP is not routable").
+The guard raises SSRFBlockedError on any rejected URL.  The block *reason*
+(e.g. which private IP a host resolved to) is diagnostic and must be logged
+server-side only — callers return a generic user-facing message, never
+``str(exc)``, so import users cannot probe internal network topology.
 
 DNS resolution is synchronous (socket.getaddrinfo) which is acceptable for the
 low-frequency import paths where this is called (never in hot loops).  The guard
@@ -43,7 +47,10 @@ from __future__ import annotations
 import ipaddress
 import logging
 import socket
-from urllib.parse import urlparse
+from dataclasses import dataclass
+from urllib.parse import urljoin, urlparse
+
+import httpx
 
 log = logging.getLogger(__name__)
 
@@ -101,7 +108,30 @@ def _is_blocked_ip(addr_str: str) -> bool:
 
 
 class SSRFBlockedError(ValueError):
-    """Raised when a URL is blocked by the SSRF guard."""
+    """Raised when a URL is blocked by the SSRF guard.
+
+    Covers a disallowed scheme, a host resolving to a restricted IP range, a
+    failed DNS resolution, or a redirect target that fails the same checks.
+    """
+
+
+class GuardedFetchError(Exception):
+    """Raised by :func:`guarded_fetch` for non-SSRF failures.
+
+    Distinct from SSRFBlockedError so callers can tell "blocked for safety"
+    apart from "response too large / disallowed content-type / too many
+    redirects".  Both are treated as a failed fetch by callers.
+    """
+
+
+def sanitize_for_log(value: str) -> str:
+    """Escape CR/LF in a user-supplied string before it is logged.
+
+    Prevents log-injection / forged log lines when an attacker-controlled URL,
+    host, or title is interpolated into a log record.  Reuse this everywhere a
+    scraped/user URL reaches ``log.*`` — do not re-implement the replace inline.
+    """
+    return value.replace("\r", "\\r").replace("\n", "\\n")
 
 
 def assert_safe_url(url: str) -> None:
@@ -135,7 +165,7 @@ def assert_safe_url(url: str) -> None:
         raise SSRFBlockedError(f"No DNS records for hostname {hostname!r}.")
 
     # Sanitize URL for logging: strip CR/LF to prevent log injection.
-    _safe_url = url.replace("\r", "\\r").replace("\n", "\\n")
+    _safe_url = sanitize_for_log(url)
 
     for _fam, _type, _proto, _canonname, sockaddr in addr_infos:
         ip_str = sockaddr[0]
@@ -150,3 +180,154 @@ def assert_safe_url(url: str) -> None:
             )
 
     log.debug("ssrf_guard: URL %s passed (hosts=%s)", _safe_url, [s[4][0] for s in addr_infos])
+
+
+# ---------------------------------------------------------------------------
+# Guarded outbound fetch — the single chokepoint for user-influenced fetches
+# ---------------------------------------------------------------------------
+
+_REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
+
+# Default UA used by outbound fetches that don't override it.
+_DEFAULT_UA = "PartFolder3D/1 (+https://github.com/crzykidd/partfolder3d)"
+
+
+@dataclass
+class GuardedResponse:
+    """The outcome of a successful :func:`guarded_fetch`.
+
+    ``content`` holds the (capped) response body; ``text`` decodes it lazily.
+    The full redirect chain has already been validated hop-by-hop.
+    """
+
+    status_code: int
+    headers: dict[str, str]
+    content: bytes
+    final_url: str
+    encoding: str = "utf-8"
+
+    @property
+    def content_type(self) -> str:
+        return self.headers.get("content-type", "")
+
+    @property
+    def text(self) -> str:
+        return self.content.decode(self.encoding, errors="replace")
+
+
+def _charset_from_content_type(content_type: str) -> str:
+    for part in content_type.split(";"):
+        part = part.strip().lower()
+        if part.startswith("charset="):
+            enc = part.split("=", 1)[1].strip().strip('"').strip("'")
+            if enc:
+                return enc
+    return "utf-8"
+
+
+def guarded_fetch(
+    url: str,
+    *,
+    max_bytes: int,
+    timeout: float = 15.0,
+    headers: dict[str, str] | None = None,
+    max_redirects: int = 5,
+    allowed_content_types: tuple[str, ...] | None = None,
+    transport: httpx.BaseTransport | None = None,
+) -> GuardedResponse:
+    """Fetch *url* with full SSRF hardening.  The single outbound chokepoint.
+
+    Guarantees, in order, on every hop (initial request AND each redirect):
+      1. Scheme is http/https only (rejected before any socket is opened).
+      2. The host resolves ONLY to routable public IPs (``assert_safe_url``).
+    Redirects are NOT auto-followed by httpx (``follow_redirects=False``); each
+    ``Location`` is re-validated through the full scheme+DNS+IP checks before
+    the next hop, capped at *max_redirects* hops.  The body is streamed and the
+    read is aborted the moment it exceeds *max_bytes* (never buffers unbounded).
+
+    Args:
+        max_bytes: hard cap on the response body; exceeding it raises
+            GuardedFetchError before the whole body is materialized.
+        allowed_content_types: if given, the final response's Content-Type must
+            start with one of these prefixes (e.g. ``("image/",)``); otherwise
+            GuardedFetchError is raised.
+
+    Raises:
+        SSRFBlockedError: bad scheme / restricted IP on any hop.
+        GuardedFetchError: too many redirects, missing redirect target,
+            disallowed content-type, or body over the cap.
+
+    Note — DNS-rebinding (TOCTOU) residual: ``assert_safe_url`` resolves+checks
+    the host, then httpx resolves again when it connects.  A hostile resolver
+    could return a public IP to the pre-check and a private IP to httpx.  Full
+    closure requires pinning the connection to the vetted IP (custom transport;
+    complicated by HTTPS SNI/cert validation) and is deliberately NOT done here
+    — the redirect + scheme + cap guards are the must-have.  Recorded as a
+    residual in docs/decisions.md.
+    """
+    req_headers = {"User-Agent": _DEFAULT_UA}
+    if headers:
+        req_headers.update(headers)
+
+    current_url = url
+    with httpx.Client(
+        timeout=timeout, follow_redirects=False, transport=transport
+    ) as client:
+        for _hop in range(max_redirects + 1):
+            # Re-run the FULL scheme + DNS + IP validation on every hop.
+            assert_safe_url(current_url)
+
+            with client.stream("GET", current_url, headers=req_headers) as resp:
+                if resp.status_code in _REDIRECT_CODES:
+                    location = resp.headers.get("location")
+                    if not location:
+                        # A 3xx with no Location — nothing to follow; treat as final.
+                        resp.read()
+                        return _finalize(resp, current_url, max_bytes, allowed_content_types)
+                    current_url = urljoin(current_url, location)
+                    log.debug(
+                        "guarded_fetch: redirect → %s", sanitize_for_log(current_url)
+                    )
+                    continue
+
+                return _finalize(resp, current_url, max_bytes, allowed_content_types)
+
+    raise GuardedFetchError(
+        f"Too many redirects (>{max_redirects}) fetching {sanitize_for_log(url)}"
+    )
+
+
+def _finalize(
+    resp: httpx.Response,
+    final_url: str,
+    max_bytes: int,
+    allowed_content_types: tuple[str, ...] | None,
+) -> GuardedResponse:
+    """Enforce content-type + size cap while streaming, then build the result."""
+    content_type = resp.headers.get("content-type", "")
+    if allowed_content_types is not None:
+        ct_main = content_type.split(";")[0].strip().lower()
+        if not any(ct_main.startswith(p) for p in allowed_content_types):
+            raise GuardedFetchError(
+                f"Disallowed content-type {content_type!r} for "
+                f"{sanitize_for_log(final_url)}"
+            )
+
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in resp.iter_bytes():
+        total += len(chunk)
+        if total > max_bytes:
+            raise GuardedFetchError(
+                f"Response body exceeded {max_bytes} bytes fetching "
+                f"{sanitize_for_log(final_url)}"
+            )
+        chunks.append(chunk)
+
+    return GuardedResponse(
+        status_code=resp.status_code,
+        headers={k.lower(): v for k, v in resp.headers.items()},
+        content=b"".join(chunks),
+        final_url=final_url,
+        encoding=_charset_from_content_type(content_type),
+    )

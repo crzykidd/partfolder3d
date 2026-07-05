@@ -20,6 +20,217 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-07-05
+
+> ⚠️ **nginx config changed** — if you are running a custom nginx config
+> (the `./nginx/nginx.conf` bind-mount in `docker-compose.yml`), compare your
+> copy against the updated `nginx/nginx.conf` in this release and reconcile any
+> differences before upgrading.
+
+### Security
+
+- **Data-safety hardening: ZIP runtime byte budget, 3MF XXE-hardened parser, and backup-at-rest
+  permissions.** ZIP extraction (`storage/archive.py`) now enforces a *running* byte budget while
+  decompressing — counting real bytes per entry and across the archive — so a crafted ZIP that
+  under-declares its central-directory sizes to slip past the pre-scan caps is aborted mid-extraction
+  (all in-flight files are written to a temp dir and only moved into place once every entry is within
+  budget, so nothing partial is left behind). Untrusted `.3mf` XML (`worker/threemf.py`) is now parsed
+  with an explicit hardened lxml parser (`resolve_entities=False`, `no_network=True`, `load_dtd=False`,
+  `dtd_validation=False`, `huge_tree=False`) at every parse site, making XXE/entity-expansion
+  mitigation explicit and fail-closed. Backup archives (`worker/backup.py`) — which bundle the Fernet
+  key with all encrypted secrets — are now written `0600` in a `0700` `/data/backups` directory so
+  other local host users can't read them; the sensitivity note in `docs/backup-restore.md` documents
+  the enforced permissions.
+- **Error responses no longer leak raw exception text; added a global exception handler.**
+  A catch-all handler now turns any *unhandled* server error into a fixed generic
+  `500 {"detail": "Internal server error"}` and logs the full traceback server-side, so
+  internal detail can't leak into the HTTP body (as FastAPI's default handler can with debug
+  on). ~12 endpoint sites that interpolated the raw exception into `detail=` (job
+  retry/restart, scheduled-job + backup enqueue, import-session commit, item rename/delete +
+  file rename, issue trash, remote share-link fetch) now log the real error and return a
+  generic action message with the same status code. The **SSRF-block message** on
+  import-session create and share-link import is scrubbed to a generic `"URL is not allowed."`
+  (the resolved internal IP / block reason is logged, not returned), so importers can't probe
+  internal network topology. A best-effort `updated_at` bump in the commit path now logs at
+  debug instead of a silent `except: pass`.
+- **SSRF hardening on the scrape/import fetch path** — every user-influenced outbound fetch
+  (URL metadata scrape, `robots.txt`, and the commit-time download of scraped/AgentQL images)
+  now goes through one guarded helper that rejects non-`http(s)` schemes, re-validates **every
+  redirect hop** against the internal-IP block-list (no silent auto-follow into `169.254.169.254`
+  or RFC1918), **streams with a size cap** instead of buffering unbounded response bodies,
+  enforces `image/*` on scraped images, and sanitizes URLs before logging. New caps
+  `SCRAPE_IMAGE_MAX_MB` (25) and `SCRAPE_HTML_MAX_MB` (5).
+- **`javascript:`-scheme XSS blocked on `source_url` / creator `profile_url`** — these
+  user-set/scraped fields are rendered into anchor `href`s (including the unauthenticated
+  public share page), so a `javascript:`/`data:`/`vbscript:` value was a one-click
+  authenticated request forgery (the CSRF cookie is JS-readable). Defense in depth: the
+  backend now rejects non-`http(s)` URLs at the API schema boundary (item create/PATCH,
+  import-session create/PATCH → **422**) and silently drops them on scraper/share-import
+  ingestion; the frontend gained a `safeHref()` helper applied to every external link so a
+  stored bad value still can't navigate.
+- **Authorization hardening on print records, first-run setup, sessions, and login.**
+  Print-record **edit / delete / gcode / photo** endpoints now require the record's owner or
+  an admin — previously any authenticated user could modify another member's records
+  (→ **403**); read access stays shared within the household. First-run **setup** serializes
+  its check-then-insert with a Postgres advisory lock, closing a TOCTOU window in which two
+  concurrent requests could each mint an admin. Consuming a **password-reset** token now
+  deactivates all of that user's existing sessions. **Login** runs a dummy argon2 verify on
+  unknown emails so a missing account no longer responds measurably faster (removes the
+  user-enumeration timing oracle).
+- **Redis now requires a password** — the broker runs with `--requirepass` and both the
+  backend and worker authenticate via `REDIS_URL` (`redis://:<pw>@redis:6379/0`), injected by
+  compose from the new `REDIS_PASSWORD` env var. arq deserializes job bodies, so queue write
+  access is code execution in the worker; this is defense-in-depth even though Redis is not
+  network-published. Set a strong `REDIS_PASSWORD` in `.env` for production.
+- **arq jobs are JSON-serialized, not pickled** — the worker previously used arq's default
+  `pickle` (de)serializer for job bodies, so any write to the Redis queue key was arbitrary
+  code execution in the worker (which can write the whole library + `secret.key`). Both the
+  enqueue side (the API's shared pool) and the dequeue side (`WorkerSettings`) now use a JSON
+  (de)serializer; all job args are ints/strings. The worker's `REDIS_URL` fallback also now
+  comes from the same password-bearing `settings.REDIS_URL` default as the API instead of a
+  bare `redis://localhost:6379`, so a bare-metal worker run can't silently bypass Redis auth.
+  **Upgrade note:** any pickled jobs still sitting in the Redis queue at upgrade time will
+  fail to deserialize under JSON — **drain the worker queue across this upgrade** (jobs are
+  short-lived and the queue is normally empty, so this is a non-event in practice).
+- **nginx sends security headers** — the reverse proxy now emits `X-Frame-Options: DENY`,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and a conservative
+  `Content-Security-Policy` (`default-src 'self'`; same-origin scripts, no `eval`; `data:`/
+  `blob:` images; inline styles only) on the served SPA — mitigating clickjacking and
+  MIME-sniffing. Don't assume the outer TLS proxy adds these.
+- **Fail-fast on the default DB password** — the backend refuses to start if `DATABASE_URL`
+  still uses the placeholder `changeme` password while `DEBUG` is not `true`, so a production
+  deploy can't silently run with the weak default (dev keeps working with `DEBUG=true`).
+- **CORS wildcard rejected with credentials** — `ALLOWED_ORIGINS` now raises a clear startup
+  error if set to `*`, since the API sends credentials and browsers reject a wildcard CORS
+  origin when credentials are enabled (previously it produced a silently broken config).
+- **CI/CD supply-chain hardening** — all third-party GitHub Actions are pinned to a full
+  commit SHA (checkout, setup-python/node, docker/*, codeql-action), and `ci.yml` /
+  `dev-checks.yml` gained a top-level least-privilege `permissions: contents: read` block.
+- **Log-injection hardening on user-facing endpoints** — several endpoints logged raw user-supplied
+  path params (import-session `session_id`; item `key` on rename / delete / move-between-libraries).
+  They now sanitize CR/LF before logging, closing the CodeQL `py/log-injection` findings. (The
+  `py/path-injection` findings on the same PR are guarded by existing `resolve()` +
+  `is_relative_to()` containment barriers and were confirmed false positives.)
+
+### Added
+
+- **Catalog "filter by library" control (default All, multi-select).** The catalog toolbar now has a
+  library filter that defaults to All (every library) and lets you pick one or more enabled libraries
+  from a checkbox popover; the selection persists in the URL (`libs=1,2`, deep-linkable), shows active
+  chips, and resets to page 1 on change. The control is hidden when only one enabled library exists.
+  Backend `GET /api/items` gains a repeatable `library_ids` query param (combined with the legacy
+  single `library_id` into one `IN(...)` set; empty = all libraries).
+- **"Try to render file" viewport capture in the Add Asset wizard's Images step.** During an upload
+  import — before the item exists — you can now open a staged model file (`.stl`/`.obj`/`.3mf`) in the
+  in-browser 3D viewer and capture the current view as a session image, which flows through to the
+  committed item (browser capture, reusing the #21 `preserveDrawingBuffer`/`toBlob` mechanics). This
+  is especially useful because 3MF uploads skip server-side rendering and may lack an embedded
+  thumbnail. Multiple captures (different angles / multi-part models) are supported, and the control
+  only appears when the session has a browser-renderable staged model. Backed by a new staged-file
+  serve endpoint (`GET /api/import-sessions/{id}/files/{filename}`, path-traversal-guarded and
+  owner-scoped) and a session-image save endpoint (`POST /api/import-sessions/{id}/images`) that
+  materializes the capture as a session image; the 3D viewer stays lazy-loaded so three.js is never
+  pulled into the wizard's main bundle. (closes #26)
+- **Move item asset(s) between libraries — single + bulk (`POST /api/items/{key}/move` +
+  `POST /api/items/move`).** An item can now be relocated from one library mount to another —
+  for reorganizing a collection, or to empty a mis-configured library so it can be hard-deleted
+  (#11). The move is **cross-mount-safe (NFS ↔ local): copy → verify-by-hash → remove**, so a
+  plain `os.rename` `EXDEV` never applies and, critically, an **interrupted move never loses
+  files** — the source directory stays fully intact until every file at the target has been
+  SHA-256-verified against the source, and only then is the source removed (journaled, with a
+  startup recovery sweep). The item's `library_id` + `dir_path` are updated, the File inventory
+  is re-run, and the sidecar is rewritten at the new path, all in one transaction per item; bulk
+  moves are N isolated per-item transactions so one failure never rolls back the rest. A "Move to
+  library" control on the item page (shown only when ≥2 enabled libraries exist) drives the single
+  move; the bulk endpoint is wired for a future catalog multi-select. (closes #25)
+
+- **Auto-approve tags — skip the pending review queue (`tags.auto_approve` setting) + bulk
+  "Approve all".** A new admin setting on the Tag Administration page lets new tags minted during an
+  import commit land `active` immediately instead of queuing as `pending` for manual approval; when
+  off (the default), the review workflow is unchanged. The setting only affects tags created *after*
+  it is enabled — it does not retroactively approve the existing queue. For that backlog, a new
+  `POST /api/admin/tags/approve-all` endpoint (and an "Approve all" button on the pending list)
+  promotes every pending tag to active in one idempotent call. (closes #31)
+
+- **Daily disk-reclamation sweep (`orphan_cleanup` cron, 05:00 UTC)** — a new scheduled job
+  reclaims space that previously accumulated forever. It **purges soft-deleted items** under
+  `/data/trash` older than `TRASH_RETENTION_DAYS` (default **30**; set `0` to disable), logging
+  every deletion (path + age) and a summary (entries purged, bytes reclaimed). It also finds
+  **orphaned print files** under items' `prints/` dirs — gcode/photos left behind because
+  deleting a print record intentionally keeps its files — and, by default, **reports them only**
+  (count + sample paths + bytes; nothing deleted) so you can review first. Set
+  `ORPHAN_PRINTS_DELETE=true` to have it delete an orphan only when it is both unreferenced and
+  older than `TRASH_RETENTION_DAYS`, with per-file logging. Both knobs are in `.env.example`
+  with risk notes. (audit §E)
+
+### Changed
+
+- **Startup crash recovery now covers every job type, not just renders** — when the worker
+  restarts, any job left `running` by the previous (crashed) worker is reaped instead of only
+  `render` rows. Idempotent types (`render`, `analyze`, `extract_archives`) are marked failed and
+  **re-enqueued** (deduped per item); non-idempotent/side-effecting types are marked failed **only**
+  (with a clear error) so a half-finished job is surfaced rather than silently re-run. `queued`
+  rows are intentionally left untouched. (audit §E)
+- **One shared arq Redis pool instead of ~32 per-request pools** — routers and services that
+  enqueue background jobs (render, analyze, extract-archives, ZIP bundle, import-session,
+  review-apply, scheduled-job run, backup, job retry/cancel/restart) used to open a fresh
+  `create_pool()` and `aclose()` it per request; if `enqueue_job()` raised, the `aclose()` was
+  skipped and the connection leaked. The API now creates a single pool at app startup
+  (`app.state.arq_pool`) and injects it via a `get_arq_pool` dependency, closing it once at
+  shutdown; job names and args are unchanged. The two worker-internal enqueue sites still open
+  a short-lived pool but now wrap it in `try/finally`. (audit §A / §E)
+
+### Fixed
+
+- **Imported items are now analyzed automatically.** The import-commit path enqueued render
+  and ZIP-extraction jobs but not **analyze**, so an item imported as a direct `.stl`/`.3mf`
+  (no ZIP to trigger it indirectly) was never mesh-analyzed until a manual **Rescan disk** —
+  its object breakdown / slice details stayed empty. Commit now enqueues analyze like every
+  other create/upload/rescan path.
+- **Import wizard: existing tags render immediately + zero-file commits are flagged**
+  (partial #27). Existing catalog tags now render right away on the Tags step as a
+  "Popular tags" quick-pick, independent of the AI suggest-tags call, so a slow or unconfigured
+  AI provider no longer stalls the step. The Review & Commit step now shows a **Files** row that
+  flags zero-file (metadata-only) commits with a warning note, so a URL import that attached no
+  model file is no longer silent.
+- **URL-import scraper: full-resolution images, cleaned title/description, and creator
+  pre-fill** (closes #28; partial #27 — backend scraper parts). `_extract_images` now ranks
+  candidates by likely resolution — largest-width `<img srcset>` / `<source srcset>` first,
+  then lazy-loaded `data-src`/`data-original`/`data-full`, with the `og:image` social card
+  demoted to a fallback and plain `<img src>` last — so the stored/default image is the
+  full-res gallery photo instead of the ~1200x630 share card (still stored verbatim, no
+  resize). `scrape_url` now strips SEO boilerplate that aggregator sites (Printables/MakerWorld/
+  Thingiverse) bake into their OG tags: titles are cut at the first ` | ` (plus a trailing
+  ` - <Site>.com` suffix) and descriptions at the first ` | `, so e.g. `NeilMed Sinus Rinse
+  holder by Fuu | Download free STL model | Printables.com` becomes `NeilMed Sinus Rinse holder
+  by Fuu`. Creator pre-fill is fixed too: `creator_name` now falls back to the `<name> by
+  <Creator>` title pattern when no author meta exists (Printables exposes none), and the
+  previously-dead `creator_profile_url` field is now populated from `rel="author"`
+  links/anchors or a URL-valued `article:author`. All values flow through `process_session`
+  into the wizard's Creator/Title steps.
+- **Queued and analyze jobs are now visible in the Jobs monitor** (closes #20, closes #30).
+  Background work was previously invisible until a worker *started* it: a `Job` row was only
+  written when the task began, so a backlog of enqueued work (e.g. right after a bulk import)
+  showed nothing, and mesh-analysis (`analyze_item`) created no `Job` row at all — invisible
+  CPU/RAM even while running. A `Job` row is now written at **enqueue** time with status
+  `queued`, and the worker **claims** that same row (→ `running`) instead of inserting a
+  duplicate, keyed on the arq job id. `analyze_item` is wired into the same job-tracker
+  lifecycle (claim-or-create at start, finished on success/failure). To avoid a race where the
+  worker pops the job before the caller's transaction commits the queued row, background jobs
+  are enqueued with a short defer and the claim is atomic (`queued → running` in one
+  `UPDATE … RETURNING`), so at most one running row survives per job. The existing item-jobs
+  and admin jobs endpoints already surface `queued` rows, so the backlog is now visible before
+  any worker starts.
+- **Catalog pagination bounced back to page 1.** Selecting page 2 (or any page) in the catalog
+  briefly showed that page then reverted to page 1: the search-input debounce effect ran on
+  mount and on every render and unconditionally cleared the `page` URL param. It now rewrites the
+  URL only when the search text actually changed, so pagination sticks.
+- **Scraped/uploaded images missing from an item's file list after import.** They appeared in
+  the thumbnail gallery but not in the Files & Downloads list until a manual (or daily) rescan,
+  because the commit inventoried the folder *before* downloading the images. The commit now
+  re-inventories after writing images and adds the File rows immediately — matching what a rescan
+  produces, so no rescan is needed.
+
 ## [0.3.0] — 2026-07-03
 
 ### Added
@@ -372,12 +583,6 @@ prefix appears only on git tags and GitHub releases.
   wrong-image bug when an item has two or more `.3mf` files. Existing cached
   analyses are backfilled on the next analysis run. The field is generic
   (`thumbnail_path`) so STL/OBJ server renders can populate it in the future.
-
-### Fixed
-
-- 3MF panels no longer share one thumbnail when an item has multiple `.3mf`
-  files — each panel now shows the thumbnail extracted from its own file.
-
 - **File-tree browser** — the flat file list in the "Files & Downloads" section
   is replaced with a collapsible folder hierarchy built client-side from each
   file's path. Folders expand/collapse with chevron controls; top-level folders
@@ -410,7 +615,6 @@ prefix appears only on git tags and GitHub releases.
   Breakdown" section uses the same expand/collapse pattern as the 3MF panel,
   with each analyzed file starting collapsed. When all model files are sliced
   3MFs the section shows a note directing users to the inline panels above.
-
 - **ZIP auto-extraction** — uploaded or imported ZIP files are automatically
   extracted into the item directory when the import is committed. Internal folder
   structure is preserved; a lone top-level wrapper folder is stripped; filenames
@@ -460,18 +664,6 @@ prefix appears only on git tags and GitHub releases.
   are regenerated deterministically on scan and are not written to `sidecar.yaml`.
 - **`ImageSource.embedded` added** — migration 0021 adds the new enum value to
   PostgreSQL via `ALTER TYPE … ADD VALUE` (outside the transaction, as required by PG).
-
-### Fixed
-
-- **README production-install guide** — `## Getting started` now documents the
-  primary production path (pull published images, configure `.env` + library mounts,
-  `docker compose up -d`) and prominently links the in-app **Quick Start** guide at
-  `/quick-start` for guided first steps (add a library, load Starter Tags, enable AI,
-  schedule backups). A "Build from source (dev)" subsection for contributors is kept as
-  a collapsible secondary path.
-
-### Changed
-
 - **`docker-compose.yml` is now a production, image-based deploy** — `build:` blocks
   removed; `backend` and `worker` pull `ghcr.io/crzykidd/partfolder3d:latest`; `frontend`
   pulls `ghcr.io/crzykidd/partfolder3d-frontend:latest`. A version-pin comment (`:0.1.1`)
@@ -483,6 +675,14 @@ prefix appears only on git tags and GitHub releases.
 
 ### Fixed
 
+- 3MF panels no longer share one thumbnail when an item has multiple `.3mf`
+  files — each panel now shows the thumbnail extracted from its own file.
+- **README production-install guide** — `## Getting started` now documents the
+  primary production path (pull published images, configure `.env` + library mounts,
+  `docker compose up -d`) and prominently links the in-app **Quick Start** guide at
+  `/quick-start` for guided first steps (add a library, load Starter Tags, enable AI,
+  schedule backups). A "Build from source (dev)" subsection for contributors is kept as
+  a collapsible secondary path.
 - **Sidebar over-highlighting** — a nav item is now highlighted only for its own route:
   selecting "API Keys" (`/settings/api-keys`) no longer also highlights the parent
   "Settings" (`/settings`). Section items still highlight across their sub-tabs.
@@ -584,6 +784,10 @@ prefix appears only on git tags and GitHub releases.
 
 ## [0.1.0] — 2026-07-01
 
+> **Shipped untagged** — no `v0.1.0` git tag or GitHub release was ever cut; the first
+> published tag is **v0.1.1**, which superseded it the same day. This entry is retained
+> for the full feature record.
+>
 > First full-stack alpha release covering Phases 0–10 of the build plan.
 
 ### Added
@@ -803,9 +1007,23 @@ prefix appears only on git tags and GitHub releases.
 
 ---
 
-## Archived releases
+## Release history policy
 
-_No archived releases yet. When v0.2.0 or later ships, the v0.1.x detail is moved to
-[`docs/CHANGELOG-0.1.x.md`](docs/CHANGELOG-0.1.x.md) and a summary block replaces it
-here. See Step 3 of [`/release-prep`](.claude/commands/release-prep.md) for the
-archive trigger rules._
+This is a **single living changelog** — old release series are **not** archived or split
+out into separate files. Every release, from the oldest to the newest, stays in full
+detail in this one file. (An earlier plan to archive closed minor series into
+`docs/CHANGELOG-<minor>.x.md` was dropped; there is no archive file to look for.)
+
+<!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
+     earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
+
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/crzykidd/partfolder3d/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/crzykidd/partfolder3d/compare/v0.2.5...v0.3.0
+[0.2.5]: https://github.com/crzykidd/partfolder3d/compare/v0.2.4...v0.2.5
+[0.2.4]: https://github.com/crzykidd/partfolder3d/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/crzykidd/partfolder3d/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/crzykidd/partfolder3d/compare/v0.2.0...v0.2.2
+[0.2.0]: https://github.com/crzykidd/partfolder3d/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/crzykidd/partfolder3d/releases/tag/v0.1.1
+[0.1.0]: https://github.com/crzykidd/partfolder3d/releases/tag/v0.1.1

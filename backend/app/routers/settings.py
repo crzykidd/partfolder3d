@@ -29,6 +29,7 @@ from ..auth.deps import csrf_protect, get_current_user, get_db, require_admin
 from ..models.library import Library
 from ..models.setting import Setting
 from ..models.user import User
+from ..services.settings_service import TAGS_AUTO_APPROVE_KEY
 
 router = APIRouter(tags=["settings"])
 
@@ -40,6 +41,10 @@ _VALID_RENDER_MODES = {"all", "no_images", "off"}
 _KEY_ALLOWED_VALUES: dict[str, set[str]] = {
     "render.mode": _VALID_RENDER_MODES,
 }
+
+# Keys whose value MUST be a JSON boolean (true/false).  Stored/read via
+# services.settings_service.get_bool_setting.
+_BOOL_KEYS: set[str] = {TAGS_AUTO_APPROVE_KEY}
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +134,14 @@ async def upsert_setting(
                     f"Must be one of {sorted(allowed)}."
                 ),
             )
+
+    # Boolean-typed keys: reject anything that is not a real JSON boolean.  bool is
+    # a subclass of int, so this check must come before any int handling.
+    if key in _BOOL_KEYS and not isinstance(body.value, bool):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid value for {key!r}: must be a boolean (true or false).",
+        )
 
     # import.default_library_id: must be int (or null) referencing an enabled library.
     # Explicitly exclude bool: bool is a subclass of int in Python, so isinstance(True, int)

@@ -554,15 +554,18 @@ async def _behavior_re_render(
     }
 
     if modes.get("re_render") == "auto":
-        # Enqueue render (fire-and-forget)
+        # Enqueue render (fire-and-forget). Route through _enqueue_render with the
+        # active session so a queued Job row is written now, making the re-render
+        # visible in the Jobs UI before the worker starts it (#20).
         try:
-            from arq import create_pool  # noqa: I001,PLC0415
-            from arq.connections import RedisSettings  # noqa: PLC0415
-            from ..config import settings  # noqa: PLC0415
+            from ..services.item_helpers import _enqueue_render  # noqa: I001,PLC0415
+            from .arq_pool import create_arq_pool  # noqa: I001,PLC0415
 
-            redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-            await redis.enqueue_job("render_item", item.id)
-            await redis.aclose()
+            redis = await create_arq_pool()
+            try:
+                await _enqueue_render(item.id, pool=redis, db=db)
+            finally:
+                await redis.aclose()
         except Exception:
             log.exception("reconcile re_render: failed to enqueue render for item %s", item.id)
 
@@ -851,6 +854,7 @@ async def reconcile_library_scan(
     from app.models.item import Item  # noqa: PLC0415
     from app.models.library import Library  # noqa: PLC0415
     from app.storage.journal import recover_stale_journals  # noqa: PLC0415
+    from app.storage.library_move import recover_stale_library_moves  # noqa: PLC0415
 
     stats: dict[str, int] = {
         "items_scanned": 0,
@@ -862,6 +866,7 @@ async def reconcile_library_scan(
 
     # Step 1: recover stale journals
     try:
+        recover_stale_library_moves()
         async with SessionLocal() as db:
             await recover_stale_journals(db)
             await db.commit()
@@ -1061,13 +1066,16 @@ async def apply_review_item_action(
 
     elif act == "enqueue_render" and item_id:
         try:
-            from arq import create_pool  # noqa: I001,PLC0415
-            from arq.connections import RedisSettings  # noqa: PLC0415
-            from app.config import settings  # noqa: PLC0415
+            from ..services.item_helpers import _enqueue_render  # noqa: I001,PLC0415
+            from .arq_pool import create_arq_pool  # noqa: I001,PLC0415
 
-            redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-            await redis.enqueue_job("render_item", item_id)
-            await redis.aclose()
+            redis = await create_arq_pool()
+            try:
+                # Route through the helper (with the active session) so a queued
+                # Job row is written and the render is visible in the Jobs UI (#20).
+                await _enqueue_render(item_id, pool=redis, db=db)
+            finally:
+                await redis.aclose()
             summary = f"Render enqueued for item {item_id}."
         except Exception:
             log.exception("apply_review_item_action: failed to enqueue render for item %s", item_id)

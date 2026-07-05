@@ -10,7 +10,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.csrf import set_csrf_cookie
@@ -21,6 +21,13 @@ from ..config import settings
 from ..models.user import User, UserRole
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
+
+# Fixed key for the Postgres transaction-level advisory lock that serializes
+# first-run setup. Two concurrent POST /api/setup requests both passing the
+# count()==0 check would each mint an admin (TOCTOU); holding this lock for the
+# check+insert window forces the second request to wait, then see the admin the
+# first created and 409. The lock auto-releases at transaction end.
+_SETUP_ADVISORY_LOCK_KEY = 0x50463344  # "PF3D"
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +84,14 @@ async def run_setup(
 
     Locked once initialized — subsequent calls return 409.
     """
+    # Serialize the check-then-insert against concurrent first-run requests.
+    # pg_advisory_xact_lock blocks a second caller until this transaction
+    # commits, closing the TOCTOU window that could otherwise mint two admins.
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(:k)"),
+        {"k": _SETUP_ADVISORY_LOCK_KEY},
+    )
+
     if await _is_initialized(db):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

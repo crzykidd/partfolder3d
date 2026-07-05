@@ -6,8 +6,9 @@ Scrape-related tests use local fixtures — no real network calls.
 
 from __future__ import annotations
 
+import socket
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient
@@ -16,6 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.site_capability import SiteToken
 from app.models.tag import Tag, TagAlias, TagStatus
+
+
+def _fake_public_getaddrinfo(host, port, *a, **kw):  # type: ignore[no-untyped-def]
+    """Resolve any hostname to a public IP so the SSRF pre-flight passes offline."""
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port or 0))]
 
 # ---------------------------------------------------------------------------
 # Auth helper
@@ -537,6 +543,83 @@ async def test_commit_new_tag_created_as_pending(
     assert "existing-canonical" not in pending_names
 
 
+@pytest.mark.asyncio
+async def test_commit_new_tag_active_when_auto_approve_on(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+) -> None:
+    """With tags.auto_approve ON, a brand-new import tag lands active, not pending.
+
+    Mirrors ``test_commit_new_tag_created_as_pending`` but flips the setting on
+    first — verifying the auto-approve gate (#31) creates the tag ``active`` and
+    keeps it out of the admin pending queue.
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models.import_session import ImportSession, ImportSessionStatus  # noqa: PLC0415
+    from app.models.tag import Tag, TagStatus  # noqa: PLC0415
+
+    csrf = await _setup_and_login(client, tmp_path)
+
+    # Enable auto-approve for new tags.
+    setting_resp = await client.put(
+        "/api/settings/tags.auto_approve",
+        json={"value": True},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert setting_resp.status_code == 200, setting_resp.text
+
+    lib_path = tmp_path / "lib"
+    lib_path.mkdir()
+    lib_resp = await client.post(
+        "/api/libraries",
+        json={"name": "Auto Approve Lib", "mount_path": str(lib_path)},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert lib_resp.status_code == 201
+    library_id = lib_resp.json()["id"]
+
+    create_resp = await client.post(
+        "/api/import-sessions",
+        json={"source_type": "upload"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert create_resp.status_code == 201
+    session_id = create_resp.json()["id"]
+
+    res = await db_session.execute(
+        select(ImportSession).where(ImportSession.id == session_id)
+    )
+    sess = res.scalar_one()
+    sess.status = ImportSessionStatus.pending_wizard
+    sess.confirmed_title = "Auto Approve Item"
+    sess.library_id = library_id
+    sess.tag_state = {"confirmed": ["auto-approved-tag"], "pending": []}
+    await db_session.flush()
+
+    commit_resp = await client.post(
+        f"/api/import-sessions/{session_id}/commit",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert commit_resp.status_code == 200, commit_resp.text
+
+    res = await db_session.execute(
+        select(Tag).where(Tag.name == "auto-approved-tag")
+    )
+    tag_new = res.scalar_one_or_none()
+    assert tag_new is not None, "New tag should be created at commit time"
+    assert tag_new.status == TagStatus.active, (
+        "With tags.auto_approve ON, a brand-new import tag must land active"
+    )
+
+    # It must NOT appear in the admin pending queue.
+    pending_resp = await client.get("/api/admin/tags/pending")
+    assert pending_resp.status_code == 200
+    pending_names = [t["name"] for t in pending_resp.json()]
+    assert "auto-approved-tag" not in pending_names
+
+
 # ---------------------------------------------------------------------------
 # URL scraper unit tests (no network; fixture-based)
 # ---------------------------------------------------------------------------
@@ -558,19 +641,19 @@ def test_scrape_url_extracts_og_metadata() -> None:
 <body><h1>Benchy</h1></body>
 </html>"""
 
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.headers = {"content-type": "text/html; charset=utf-8"}
-    mock_response.text = html
+    from app.storage.ssrf_guard import GuardedResponse  # noqa: PLC0415
 
-    mock_client = MagicMock()
-    mock_client.__enter__ = MagicMock(return_value=mock_client)
-    mock_client.__exit__ = MagicMock(return_value=False)
-    mock_client.get = MagicMock(return_value=mock_response)
+    resp = GuardedResponse(
+        status_code=200,
+        headers={"content-type": "text/html; charset=utf-8"},
+        content=html.encode("utf-8"),
+        final_url="https://example.com/thing/123",
+    )
 
-    with patch("app.storage.scraper.httpx.Client", return_value=mock_client):
+    with patch("app.storage.scraper.guarded_fetch", return_value=resp):
         with patch("app.storage.scraper._robots_allows", return_value=True):
-            result = scrape_url("https://example.com/thing/123")
+            with patch("socket.getaddrinfo", _fake_public_getaddrinfo):
+                result = scrape_url("https://example.com/thing/123")
 
     assert result.title == "Awesome 3D Benchy"
     assert result.description == "The 3D printing torture test boat."
@@ -596,14 +679,13 @@ def test_scrape_url_http_timeout() -> None:
 
     from app.storage.scraper import scrape_url  # noqa: PLC0415
 
-    mock_client = MagicMock()
-    mock_client.__enter__ = MagicMock(return_value=mock_client)
-    mock_client.__exit__ = MagicMock(return_value=False)
-    mock_client.get = MagicMock(side_effect=httpx.TimeoutException("timeout"))
-
-    with patch("app.storage.scraper.httpx.Client", return_value=mock_client):
+    with patch(
+        "app.storage.scraper.guarded_fetch",
+        side_effect=httpx.TimeoutException("timeout"),
+    ):
         with patch("app.storage.scraper._robots_allows", return_value=True):
-            result = scrape_url("https://slow-site.com/thing")
+            with patch("socket.getaddrinfo", _fake_public_getaddrinfo):
+                result = scrape_url("https://slow-site.com/thing")
 
     assert result.blocked is False
     assert result.title is None
@@ -618,6 +700,171 @@ def test_extract_domain() -> None:
     assert extract_domain("https://www.thingiverse.com/thing:123") == "thingiverse.com"
     assert extract_domain("https://printables.com/model/456") == "printables.com"
     assert extract_domain("https://MAKERWORLD.COM/en/models/1") == "makerworld.com"
+
+
+# ---------------------------------------------------------------------------
+# Image selection: prefer full-res over og:image (issue #28)
+# ---------------------------------------------------------------------------
+
+
+def test_srcset_largest_prefers_widest() -> None:
+    """_srcset_largest picks the URL with the largest width descriptor."""
+    from app.storage.scraper import _srcset_largest  # noqa: PLC0415
+
+    srcset = (
+        "https://cdn.example.com/small.jpg 320w, "
+        "https://cdn.example.com/large.jpg 1600w, "
+        "https://cdn.example.com/medium.jpg 800w"
+    )
+    assert _srcset_largest(srcset) == "https://cdn.example.com/large.jpg"
+
+
+def test_srcset_largest_density_and_bare() -> None:
+    """Density descriptors and bare single entries are handled."""
+    from app.storage.scraper import _srcset_largest  # noqa: PLC0415
+
+    assert _srcset_largest("https://x/a.jpg 1x, https://x/b.jpg 2x") == "https://x/b.jpg"
+    assert _srcset_largest("https://x/solo.jpg") == "https://x/solo.jpg"
+    assert _srcset_largest("") is None
+
+
+def test_extract_images_prefers_srcset_over_og() -> None:
+    """A larger srcset candidate beats the downscaled og:image (first/default)."""
+    from app.storage.scraper import scrape_url  # noqa: PLC0415
+    from app.storage.ssrf_guard import GuardedResponse  # noqa: PLC0415
+
+    html = """<!DOCTYPE html><html><head>
+      <meta property="og:title" content="Widget" />
+      <meta property="og:image" content="https://cdn.example.com/social-card-1200x630.jpg" />
+    </head><body>
+      <img src="https://cdn.example.com/thumb.jpg"
+           srcset="https://cdn.example.com/w400.jpg 400w,
+                   https://cdn.example.com/w2000.jpg 2000w" />
+    </body></html>"""
+
+    resp = GuardedResponse(
+        status_code=200,
+        headers={"content-type": "text/html; charset=utf-8"},
+        content=html.encode("utf-8"),
+        final_url="https://example.com/thing/1",
+    )
+    with patch("app.storage.scraper.guarded_fetch", return_value=resp):
+        with patch("app.storage.scraper._robots_allows", return_value=True):
+            with patch("socket.getaddrinfo", _fake_public_getaddrinfo):
+                result = scrape_url("https://example.com/thing/1")
+
+    # Full-res srcset image is first; og:image retained only as a fallback.
+    assert result.image_urls[0] == "https://cdn.example.com/w2000.jpg"
+    assert "https://cdn.example.com/social-card-1200x630.jpg" in result.image_urls
+    assert result.image_urls.index("https://cdn.example.com/w2000.jpg") < result.image_urls.index(
+        "https://cdn.example.com/social-card-1200x630.jpg"
+    )
+
+
+def test_extract_images_og_only_fallback() -> None:
+    """When no better image exists, og:image is still collected (no regression)."""
+    from app.storage.scraper import scrape_url  # noqa: PLC0415
+    from app.storage.ssrf_guard import GuardedResponse  # noqa: PLC0415
+
+    html = """<!DOCTYPE html><html><head>
+      <meta property="og:title" content="Widget" />
+      <meta property="og:image" content="https://cdn.example.com/only.jpg" />
+    </head><body><h1>hi</h1></body></html>"""
+
+    resp = GuardedResponse(
+        status_code=200,
+        headers={"content-type": "text/html; charset=utf-8"},
+        content=html.encode("utf-8"),
+        final_url="https://example.com/thing/2",
+    )
+    with patch("app.storage.scraper.guarded_fetch", return_value=resp):
+        with patch("app.storage.scraper._robots_allows", return_value=True):
+            with patch("socket.getaddrinfo", _fake_public_getaddrinfo):
+                result = scrape_url("https://example.com/thing/2")
+
+    assert result.image_urls == ["https://cdn.example.com/only.jpg"]
+
+
+# ---------------------------------------------------------------------------
+# Title / description boilerplate stripping (issue #27)
+# ---------------------------------------------------------------------------
+
+
+def test_clean_title_strips_printables_boilerplate() -> None:
+    """The exact Printables title example is stripped to 'by Fuu'."""
+    from app.storage.scraper import _clean_title  # noqa: PLC0415
+
+    raw = "NeilMed Sinus Rinse holder by Fuu | Download free STL model | Printables.com"
+    assert _clean_title(raw) == "NeilMed Sinus Rinse holder by Fuu"
+
+
+def test_clean_title_strips_dash_site_suffix() -> None:
+    """A trailing ' - <Site>.com' suffix (no pipe) is stripped."""
+    from app.storage.scraper import _clean_title  # noqa: PLC0415
+
+    assert _clean_title("Cool Bracket - MakerWorld.com") == "Cool Bracket"
+    # No boilerplate → unchanged.
+    assert _clean_title("Just A Plain Title") == "Just A Plain Title"
+
+
+def test_clean_description_strips_boilerplate() -> None:
+    """The exact Printables description example stops at the pipe."""
+    from app.storage.scraper import _clean_description  # noqa: PLC0415
+
+    raw = (
+        "A holder for the bottle which I had trouble finding a place to store. "
+        "| Download free 3D printable STL models"
+    )
+    assert _clean_description(raw) == (
+        "A holder for the bottle which I had trouble finding a place to store."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Creator extraction from title (issue #27)
+# ---------------------------------------------------------------------------
+
+
+def test_creator_from_title_printables_pattern() -> None:
+    """'<name> by <Creator> | ...' yields the creator; non-matching yields None."""
+    from app.storage.scraper import _creator_from_title  # noqa: PLC0415
+
+    raw = "NeilMed Sinus Rinse holder by Fuu | Download free STL model | Printables.com"
+    assert _creator_from_title(raw) == "Fuu"
+    # Already-cleaned title still works.
+    assert _creator_from_title("Some Widget by Alice") == "Alice"
+    # No " by " → no false positive.
+    assert _creator_from_title("Standby Power Monitor") is None
+    assert _creator_from_title(None) is None
+
+
+def test_creator_from_title_flows_into_scrape_result() -> None:
+    """scrape_url derives creator_name from the title when no author meta."""
+    from app.storage.scraper import scrape_url  # noqa: PLC0415
+    from app.storage.ssrf_guard import GuardedResponse  # noqa: PLC0415
+
+    og_title = (
+        "NeilMed Sinus Rinse holder by Fuu | Download free STL model | Printables.com"
+    )
+    html = f"""<!DOCTYPE html><html><head>
+      <meta property="og:title" content="{og_title}" />
+      <link rel="author" href="https://printables.com/@Fuu_123" />
+    </head><body><h1>hi</h1></body></html>"""
+
+    resp = GuardedResponse(
+        status_code=200,
+        headers={"content-type": "text/html; charset=utf-8"},
+        content=html.encode("utf-8"),
+        final_url="https://printables.com/model/123",
+    )
+    with patch("app.storage.scraper.guarded_fetch", return_value=resp):
+        with patch("app.storage.scraper._robots_allows", return_value=True):
+            with patch("socket.getaddrinfo", _fake_public_getaddrinfo):
+                result = scrape_url("https://printables.com/model/123")
+
+    assert result.title == "NeilMed Sinus Rinse holder by Fuu"
+    assert result.creator_name == "Fuu"
+    assert result.creator_profile_url == "https://printables.com/@Fuu_123"
 
 
 # ---------------------------------------------------------------------------
@@ -767,23 +1014,22 @@ async def test_commit_scraped_images_unique_filenames(
     db_session.add(img_b)
     await db_session.flush()
 
-    # Mock httpx.Client so both URLs return 200 with webp content-type.
-    # Patch the global httpx.Client because the lazy import inside the function
-    # pulls the already-cached module from sys.modules.
+    # Stub the guarded image fetch so both URLs return 200 with webp content-type.
     fake_img_bytes = b"\x00\x00\x00\x0c"  # minimal placeholder bytes
 
-    def _make_mock_client(*args: object, **kwargs: object) -> MagicMock:  # type: ignore[return]
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "image/webp"}
-        mock_response.content = fake_img_bytes
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get = MagicMock(return_value=mock_response)
-        return mock_client
+    from app.storage.ssrf_guard import GuardedResponse  # noqa: PLC0415
 
-    with patch("httpx.Client", side_effect=_make_mock_client):
+    def _fake_guarded_fetch(url: str, **kwargs: object) -> GuardedResponse:
+        return GuardedResponse(
+            status_code=200,
+            headers={"content-type": "image/webp"},
+            content=fake_img_bytes,
+            final_url=url,
+        )
+
+    with patch(
+        "app.routers.import_sessions.sessions.guarded_fetch", _fake_guarded_fetch
+    ):
         commit_resp = await client.post(
             f"/api/import-sessions/{session_id}/commit",
             headers={"X-CSRF-Token": csrf},
@@ -816,3 +1062,31 @@ async def test_commit_scraped_images_unique_filenames(
         assert dp.exists(), f"Expected file on disk: {dp}"
 
     assert disk_paths[0] != disk_paths[1], "Files must be at distinct paths on disk"
+
+    # Regression: the scraped image files must ALSO appear in the file list (File rows),
+    # not only the thumbnail gallery (Image rows). inventory_item runs before the images
+    # are downloaded, so a re-inventory at commit time is required — otherwise the images
+    # showed as thumbnails but were missing from the file list until a rescan.
+    from app.models.file import File as _FileRow  # noqa: PLC0415
+
+    file_res = await db_session.execute(
+        _select(_FileRow).where(_FileRow.item_id == item_id)
+    )
+    file_paths = {f.path for f in file_res.scalars().all()}
+    for p in paths:
+        assert p in file_paths, (
+            f"scraped image {p!r} missing from the file list (File rows); "
+            f"got {sorted(file_paths)}"
+        )
+
+    # Commit must enqueue an analyze job (a queued Job row of type 'analyze') — every
+    # other create/upload/rescan path does. Without this an imported item with no ZIP
+    # was never analyzed until a manual rescan.
+    from app.models.job import Job as _JobRow  # noqa: PLC0415
+
+    job_res = await db_session.execute(
+        _select(_JobRow).where(_JobRow.item_id == item_id, _JobRow.type == "analyze")
+    )
+    assert job_res.scalars().first() is not None, (
+        "commit did not enqueue an analyze job for the item"
+    )

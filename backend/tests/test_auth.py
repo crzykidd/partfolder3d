@@ -1,5 +1,7 @@
 """Tests for login/logout/me and CSRF protection."""
 
+from typing import Any
+
 import pytest
 from httpx import AsyncClient
 
@@ -78,6 +80,45 @@ async def test_login_unknown_email(client: AsyncClient) -> None:
         json={"email": "nobody@example.com", "password": "securepassword1"},
     )
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_login_unknown_email_runs_dummy_verify(
+    client: AsyncClient, monkeypatch: Any
+) -> None:
+    """Unknown-email login still runs a password verify (no timing oracle).
+
+    The authenticate() path must NOT short-circuit before hashing when the email
+    is missing, otherwise response time leaks account existence. We spy on
+    verify_password and assert it is invoked once against the fixed dummy hash.
+    """
+    import app.auth.provider as provider_mod
+
+    calls: list[str] = []
+    real_verify = provider_mod.verify_password
+
+    def spy(password: str, hashed: str) -> bool:
+        calls.append(hashed)
+        return real_verify(password, hashed)
+
+    monkeypatch.setattr(provider_mod, "verify_password", spy)
+
+    await client.post(
+        "/api/setup",
+        json={
+            "admin_email": "admin@example.com",
+            "admin_name": "Admin",
+            "admin_password": "securepassword1",
+        },
+    )
+
+    resp = await client.post(
+        "/api/auth/login",
+        json={"email": "nobody@example.com", "password": "whatever12"},
+    )
+    assert resp.status_code == 401
+    # verify ran exactly once, against the dummy hash (not short-circuited).
+    assert calls == [provider_mod._DUMMY_PASSWORD_HASH]
 
 
 @pytest.mark.asyncio

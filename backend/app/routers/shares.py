@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Annotated
 
 import sqlalchemy as sa
+from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -41,7 +42,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import csrf_protect, get_current_user, get_db, require_admin
-from ..config import settings
 from ..models.download_bundle import DownloadBundle
 from ..models.file import File
 from ..models.item import Item
@@ -50,6 +50,7 @@ from ..models.share_audit_event import ShareAuditEvent
 from ..models.share_link import ShareLink
 from ..models.tag import ItemTag, Tag
 from ..models.user import User, UserRole
+from ..worker.arq_pool import get_arq_pool
 
 log = logging.getLogger(__name__)
 
@@ -388,6 +389,7 @@ async def public_share_queue_zip(
     token: str,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
+    arq: Annotated[ArqRedis, Depends(get_arq_pool)],
 ) -> BundleOut:
     """Queue a ZIP download for a public share link.
 
@@ -443,12 +445,7 @@ async def public_share_queue_zip(
     await db.refresh(bundle)
 
     try:
-        from arq import create_pool  # noqa: PLC0415
-        from arq.connections import RedisSettings  # noqa: PLC0415
-
-        redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-        await redis.enqueue_job("build_zip_bundle", str(bundle.id))
-        await redis.aclose()
+        await arq.enqueue_job("build_zip_bundle", str(bundle.id))
     except Exception:
         log.exception("Failed to enqueue build_zip_bundle for public bundle %s", bundle.id)
 

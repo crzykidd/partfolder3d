@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as api from '@/lib/api'
+import { safeHref } from '@/lib/utils'
 import { AURORA_CARD, AURORA_BTN_GHOST } from './styles'
 
 // ---------------------------------------------------------------------------
@@ -19,11 +20,17 @@ function SummaryRow({
   value,
   isLink,
   href,
+  warn,
+  note,
 }: {
   label: string
   value: string
   isLink?: boolean
   href?: string
+  /** Amber-highlight the value to flag a state the user should notice (e.g. zero files). */
+  warn?: boolean
+  /** Optional muted sub-line rendered under the value. */
+  note?: string
 }) {
   return (
     <tr style={{ borderBottom: '1px solid var(--aurora-divider)' }}>
@@ -43,9 +50,9 @@ function SummaryRow({
         {label}
       </td>
       <td style={{ padding: '10px 16px', color: 'var(--aurora-text)', wordBreak: 'break-word', fontSize: 13 }}>
-        {isLink && href ? (
+        {isLink && safeHref(href) ? (
           <a
-            href={href}
+            href={safeHref(href)}
             target="_blank"
             rel="noopener noreferrer"
             style={{ color: 'var(--aurora-accent)', textDecoration: 'none' }}
@@ -55,7 +62,10 @@ function SummaryRow({
             {value}
           </a>
         ) : (
-          <span>{value}</span>
+          <span style={warn ? { color: '#D97706', fontWeight: 600 } : undefined}>{value}</span>
+        )}
+        {note && (
+          <div style={{ fontSize: 11, color: 'var(--aurora-muted)', marginTop: 3 }}>{note}</div>
         )}
       </td>
     </tr>
@@ -149,6 +159,16 @@ export function SummaryStep({ session, onPrev, onCancelled }: SummaryStepProps) 
               value={session.source_url ?? '—'}
               isLink={!!session.source_url}
               href={session.source_url ?? undefined}
+            />
+            <SummaryRow
+              label="Files"
+              value={`${session.files.length} file(s)`}
+              warn={session.files.length === 0}
+              note={
+                session.files.length === 0
+                  ? 'No model file attached — this will be a metadata-only entry.'
+                  : undefined
+              }
             />
             <SummaryRow
               label="Images"

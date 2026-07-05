@@ -11,7 +11,7 @@
 </div>
 
 > [!WARNING]
-> **Early alpha (v0.3.0) — under active development.** This is an early release: expect rough
+> **Early alpha (v0.4.0) — under active development.** This is an early release: expect rough
 > edges, and **breaking changes can land between releases** (database schema, config, or API).
 > It's usable and published — pull the images and follow [Getting started](#getting-started) — but
 > **pin a specific version, back up your data, and read the release notes before upgrading.**
@@ -19,18 +19,31 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.3.0-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.4.0-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
-![Stage](https://img.shields.io/badge/stage-alpha-orange)
-![Code](https://img.shields.io/badge/code-yes-brightgreen)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
-![PRs](https://img.shields.io/badge/PRs-not%20yet-inactive)
 
 </div>
 
 ---
 
 ## What's New
+
+### v0.4.0 (2026-07-05)
+
+Security + features release. **Security hardening** — the scrape/import path is guarded against
+SSRF (internal-network fetches blocked, size-capped, redirect-re-checked), `javascript:`-scheme XSS
+is blocked on item/creator links, **Redis now requires a password**, nginx sends security headers
+(CSP, X-Frame-Options, nosniff), ZIP/3MF parsing is hardened, print-record and auth checks were
+tightened, and the backend **fails fast if the DB password is left at the default**. **Jobs
+monitor** now shows **queued** and **analyze** jobs (previously invisible). **Libraries** — move
+items between libraries, **filter the catalog by library** (multi-select), and mount **multiple
+library roots**. **Import wizard** — full-resolution scraped images, cleaned titles/descriptions,
+creator pre-fill, a **"Try to render file"** viewport capture, tags shown immediately, and a Files
+row that flags metadata-only commits. **Tags** — an **auto-approve** setting + bulk "Approve all".
+Plus fixes: catalog pagination, scraped images now appear in the file list, and imported items are
+analyzed automatically. **Upgrading:** set `POSTGRES_PASSWORD` **and** `REDIS_PASSWORD` in `.env`
+(now required) and drain the worker queue across the upgrade — see [CHANGELOG.md](CHANGELOG.md).
 
 ### v0.3.0 (2026-07-03)
 
@@ -114,6 +127,9 @@ See [CHANGELOG.md](CHANGELOG.md) for the full details.
 
 ### v0.1.0 (2026-07-01)
 
+> **Note:** v0.1.0 shipped untagged — the first published git tag is **v0.1.1**, which
+> superseded it the same day. It's kept here for the historical feature record.
+
 First full-stack alpha covering all core features: multi-user catalog with full-text
 search and tag cloud browse; item library with YAML sidecars and atomic renames;
 import/inbox wizard with URL scraping and tag reconciliation; headless CPU mesh
@@ -140,7 +156,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.3.0 alpha) — see the
+> The full feature set below is **built and released** (v0.4.0 alpha) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -404,7 +420,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is at the **alpha** stage (v0.3.0).
+Honest snapshot — this project is at the **alpha** stage (v0.4.0).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -455,6 +471,16 @@ docker compose up -d
 # 5. Open the app and complete the first-run wizard
 #    http://localhost:8973
 ```
+
+> **Database & Redis passwords (required in production).** Set `POSTGRES_PASSWORD` (and
+> `REDIS_PASSWORD`) in `.env`. The backend **and** worker refuse to start if the DB password is
+> left as the shipped default `changeme` — you'll see a startup error `DATABASE_URL is using the
+> insecure default password 'changeme'`. This is a *"don't ship the default"* guard, **not** a
+> strength check: any value other than `changeme` is accepted (`somepassw0rd` is fine), so choose
+> one appropriate for your environment. One caveat — the password is interpolated into a
+> connection URL, so **avoid URL-reserved characters** (`@ : / # ? %`); stick to letters, digits,
+> and `- _ .`, or URL-encode it. The **dev** stack (`docker-compose.dev.yml`) sets `DEBUG=true`,
+> so it runs with `changeme` out of the box for local development.
 
 What happens on first `docker compose up -d`:
 
@@ -534,12 +560,50 @@ After setup, visit **http://localhost:8973/quick-start** for the in-app Quick St
 
 ---
 
+## Upgrading
+
+This is alpha software — **breaking changes can land between releases** (schema, config,
+or API), so upgrade deliberately:
+
+1. **Pin a specific version.** Set explicit image tags in `docker-compose.yml` (e.g.
+   `:0.4.0` instead of `:latest`) so a `pull` never surprises you.
+2. **Read the release notes first.** Check the [CHANGELOG](CHANGELOG.md) / the GitHub
+   release for the version you're moving to — watch for **⚠️ nginx config changed** and
+   other migration callouts.
+3. **Back up.** Run a backup from **Admin → Data & Backups** (DB + `secret.key`) and
+   snapshot your library mount. See [`docs/backup-restore.md`](docs/backup-restore.md).
+4. **Bump the pins and pull:**
+
+   ```bash
+   # edit docker-compose.yml image tags to the new version, then:
+   docker compose pull
+   docker compose up -d
+   ```
+
+   Migrations run automatically on startup (the backend entrypoint runs
+   `alembic upgrade head` before serving). Watch `docker compose logs -f backend` for the
+   startup banner and migration output.
+
+> **Job-queue format changes — drain the worker queue.** Some releases change the internal
+> format arq uses to serialize background jobs (e.g. the **pickle → JSON** switch). When a
+> release note flags this, make sure the worker queue is **empty before you upgrade**: stop
+> kicking off new work and let the worker finish, or upgrade during an idle window (jobs are
+> short-lived and the queue is normally empty). Any job still sitting in Redis in the old format
+> won't deserialize on the new worker — this is **not data loss** (re-scan the item or re-run the
+> action to re-trigger it), but draining first avoids startup error noise. If you want to be
+> certain the queue is clear, stop the worker, then
+> `docker compose exec redis redis-cli -a "$REDIS_PASSWORD" FLUSHDB` before starting the new
+> version (this only clears the transient job queue, not your data).
+
+---
+
 ## Contributing
 
 Early days! 🌱 Ideas, questions, and use-case feedback are **very welcome** — please
-open an issue or start a discussion. There is **no code to contribute to yet**, so
-we are not accepting code PRs at this stage. Watch or star the repo to follow
-progress.
+open an issue or start a discussion. The full stack is built and released, but the
+project is still moving fast on a single-maintainer roadmap, so we're **not accepting
+external code PRs yet** — the architecture and priorities are still settling. That will
+open up as things stabilise; watch or star the repo to follow progress.
 
 ---
 
@@ -569,6 +633,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — alpha (v0.3.0) · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — alpha (v0.4.0) · built by <code>crzykidd</code></sub>
 
 </div>

@@ -43,3 +43,12 @@ export const setDefaultImportLibrary = (
   libraryId: number | null,
 ): Promise<SettingOut> =>
   upsertSetting(IMPORT_DEFAULT_LIBRARY_KEY, libraryId)
+
+// ---------------------------------------------------------------------------
+// Auto-approve tags (admin) — key: "tags.auto_approve" (#31)
+// ---------------------------------------------------------------------------
+
+export const TAGS_AUTO_APPROVE_KEY = 'tags.auto_approve'
+
+export const setTagsAutoApprove = (value: boolean): Promise<SettingOut> =>
+  upsertSetting(TAGS_AUTO_APPROVE_KEY, value)

@@ -40,9 +40,20 @@ async def _setup_and_login(client: AsyncClient) -> str:
 
 
 async def _create_item(
-    client: AsyncClient, tmp_path: Path, csrf: str, title: str = "Test Item"
+    client: AsyncClient,
+    tmp_path: Path,
+    csrf: str,
+    title: str = "Test Item",
+    *,
+    db_session: AsyncSession | None = None,
 ) -> dict:
-    """Create a library + item; return the item JSON dict."""
+    """Create a library + item; return the item JSON dict.
+
+    Item creation now enqueues render+analyze and writes matching ``queued`` Job
+    rows (#20/#30).  These tests assert on the jobs THEY create, so when a
+    db_session is supplied we clear those auto-created queued rows first to keep
+    each test's expected job set exact.
+    """
     # Use a unique mount dir per call so multiple items can be created in one test
     import uuid as _uuid  # noqa: PLC0415
     mount = str(tmp_path / f"library-{_uuid.uuid4().hex[:8]}")
@@ -62,7 +73,17 @@ async def _create_item(
         headers={"X-CSRF-Token": csrf},
     )
     assert item_resp.status_code == 201, item_resp.text
-    return item_resp.json()
+    item = item_resp.json()
+
+    if db_session is not None:
+        from sqlalchemy import delete  # noqa: PLC0415
+
+        from app.models.job import Job  # noqa: PLC0415
+
+        await db_session.execute(delete(Job).where(Job.item_id == item["id"]))
+        await db_session.commit()
+
+    return item
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +101,7 @@ async def test_list_item_jobs_failed_job(
     from app.worker.job_tracker import create_job, finish_job  # noqa: PLC0415
 
     csrf = await _setup_and_login(client)
-    item = await _create_item(client, tmp_path, csrf)
+    item = await _create_item(client, tmp_path, csrf, db_session=db_session)
     item_key = item["key"]
     item_id = item["id"]
 
@@ -119,7 +140,7 @@ async def test_list_item_jobs_running_job(
     from app.worker.job_tracker import create_job, update_job_progress  # noqa: PLC0415
 
     csrf = await _setup_and_login(client)
-    item = await _create_item(client, tmp_path, csrf)
+    item = await _create_item(client, tmp_path, csrf, db_session=db_session)
     item_key = item["key"]
     item_id = item["id"]
 
@@ -159,7 +180,7 @@ async def test_list_item_jobs_excludes_succeeded_and_archived(
     from app.worker.job_tracker import create_job, finish_job  # noqa: PLC0415
 
     csrf = await _setup_and_login(client)
-    item = await _create_item(client, tmp_path, csrf)
+    item = await _create_item(client, tmp_path, csrf, db_session=db_session)
     item_key = item["key"]
     item_id = item["id"]
 
@@ -198,8 +219,8 @@ async def test_list_item_jobs_excludes_other_item_jobs(
     from app.worker.job_tracker import create_job  # noqa: PLC0415
 
     csrf = await _setup_and_login(client)
-    item1 = await _create_item(client, tmp_path, csrf, title="Item One")
-    item2 = await _create_item(client, tmp_path, csrf, title="Item Two")
+    item1 = await _create_item(client, tmp_path, csrf, title="Item One", db_session=db_session)
+    item2 = await _create_item(client, tmp_path, csrf, title="Item Two", db_session=db_session)
     item1_key = item1["key"]
     item2_id = item2["id"]
 

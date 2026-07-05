@@ -18,6 +18,19 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: Record<string, ReleaseNote> = {
+  '0.4.0': {
+    title: "What's New in v0.4.0",
+    bullets: [
+      'Security hardening — SSRF-guarded scraping, javascript:-link XSS blocked, Redis now requires a password, nginx security headers, and a fail-fast on the default DB password',
+      'Jobs monitor now shows queued and analyze jobs (previously invisible)',
+      'Libraries — move items between libraries, filter the catalog by library, and mount multiple library roots',
+      'Import wizard — full-resolution scraped images, cleaned title/description, creator pre-fill, and a "Try to render file" viewport capture',
+      'Tags — auto-approve setting + bulk "Approve all"',
+      'Fixes — catalog pagination, scraped images now appear in the file list, and imported items are analyzed automatically',
+      'Upgrading — set POSTGRES_PASSWORD and REDIS_PASSWORD (now required) and drain the worker queue',
+    ],
+    githubReleaseUrl: 'https://github.com/crzykidd/partfolder3d/releases/tag/v0.4.0',
+  },
   '0.3.0': {
     title: "What's New in v0.3.0",
     bullets: [

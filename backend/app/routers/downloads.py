@@ -37,6 +37,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
+from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -44,11 +45,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import csrf_protect, get_current_user, get_db
-from ..config import settings
 from ..models.download_bundle import DownloadBundle
 from ..models.file import File
 from ..models.item import Item
 from ..models.user import User
+from ..worker.arq_pool import get_arq_pool
 
 log = logging.getLogger(__name__)
 
@@ -145,6 +146,7 @@ async def queue_zip(
     user: Annotated[User, Depends(get_current_user)],
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    arq: Annotated[ArqRedis, Depends(get_arq_pool)],
     include_history: bool = Query(
         default=False,
         description=(
@@ -214,14 +216,9 @@ async def queue_zip(
     await db.flush()
     await db.refresh(bundle)
 
-    # Enqueue the arq task
+    # Enqueue the arq task via the shared pool
     try:
-        from arq import create_pool  # noqa: PLC0415
-        from arq.connections import RedisSettings  # noqa: PLC0415
-
-        redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-        await redis.enqueue_job("build_zip_bundle", str(bundle.id))
-        await redis.aclose()
+        await arq.enqueue_job("build_zip_bundle", str(bundle.id))
     except Exception:
         log.exception(
             "Failed to enqueue build_zip_bundle for bundle %s — "

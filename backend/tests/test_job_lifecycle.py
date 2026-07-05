@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from httpx import AsyncClient
@@ -154,10 +155,9 @@ async def test_retry_endpoint_passes_retry_of_job_id(
     client: AsyncClient,
     db_session: AsyncSession,
     tmp_path: Path,
+    arq_pool: Any,
 ) -> None:
     """POST /api/jobs/{id}/retry enqueues with retry_of_job_id=str(job.id)."""
-    from unittest.mock import AsyncMock, patch  # noqa: PLC0415
-
     from app.worker.job_tracker import create_job, finish_job  # noqa: PLC0415
 
     jid = await create_job(db_session, "render", payload={"item_id": 77}, item_id=None)
@@ -166,17 +166,14 @@ async def test_retry_endpoint_passes_retry_of_job_id(
 
     csrf = await _setup_and_login(client, tmp_path)
 
-    mock_redis = AsyncMock()
-    mock_pool = AsyncMock(return_value=mock_redis)
-
-    with patch("arq.create_pool", mock_pool):
-        resp = await client.post(
-            f"/api/jobs/{jid}/retry",
-            headers={"X-CSRF-Token": csrf},
-        )
+    resp = await client.post(
+        f"/api/jobs/{jid}/retry",
+        headers={"X-CSRF-Token": csrf},
+    )
 
     assert resp.status_code == 202, resp.text
-    mock_redis.enqueue_job.assert_called_once_with(
+    # Enqueue goes through the injected shared pool (get_arq_pool override).
+    arq_pool.enqueue_job.assert_called_once_with(
         "render_item", 77, retry_of_job_id=str(jid)
     )
 
@@ -205,16 +202,12 @@ async def test_cancel_running_job_via_endpoint(
 
     csrf = await _setup_and_login(client, tmp_path)
 
-    # Patch arq imports — no real Redis in tests
-    mock_redis = AsyncMock()
-    mock_pool = AsyncMock(return_value=mock_redis)
+    # The abort path builds ArqJob(arq_job_id, <injected pool>).abort(); the pool
+    # is the get_arq_pool override, so we only patch the ArqJob class.
     mock_arq_job = MagicMock()
     mock_arq_job.abort = AsyncMock(return_value=True)
 
-    with (
-        patch("arq.create_pool", mock_pool),
-        patch("arq.jobs.Job", return_value=mock_arq_job),
-    ):
+    with patch("arq.jobs.Job", return_value=mock_arq_job):
         resp = await client.post(
             f"/api/jobs/{jid}/cancel",
             headers={"X-CSRF-Token": csrf},

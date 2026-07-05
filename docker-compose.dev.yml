@@ -40,10 +40,13 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    # Password-protect Redis (mirrors production). REDIS_PASSWORD defaults to
+    # "changeme" so the dev stack works with no .env; override in .env.
+    command: redis-server --requirepass "${REDIS_PASSWORD:-changeme}"
     volumes:
       - ./private_data/data/redis:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -65,8 +68,12 @@ services:
         required: false
     environment:
       DATABASE_URL: "postgresql+asyncpg://partfolder3d:${POSTGRES_PASSWORD:-changeme}@db:5432/partfolder3d"
-      REDIS_URL: "redis://redis:6379"
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
       DATA_DIR: /data
+      # Folders the admin "Add library" browser may pick from. Main lives at /library;
+      # /library2 is a second, separate root (see the extra volume below). Add each
+      # extra library's container mount path here or it won't appear in the picker.
+      FS_BROWSE_ROOTS: '["/library","/library2"]'
       DEBUG: "true"
       RUN_MIGRATIONS: "true"
       # Dev runs over plain HTTP, so session/CSRF cookies must NOT be Secure
@@ -78,6 +85,7 @@ services:
       - ./backend:/app                       # source bind-mount for live reload
       - ./private_data/data/app:/data        # app data (config, thumbnails, inbox, renders…)
       - ./private_data/data/library:/library # dev library mount (add more via Admin → Libraries)
+      - ./private_data/data/library2:/library2 # second, separate library root (browsable via FS_BROWSE_ROOTS)
     depends_on:
       db:
         condition: service_healthy
@@ -111,8 +119,12 @@ services:
         required: false
     environment:
       DATABASE_URL: "postgresql+asyncpg://partfolder3d:${POSTGRES_PASSWORD:-changeme}@db:5432/partfolder3d"
-      REDIS_URL: "redis://redis:6379"
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
       DATA_DIR: /data
+      # Dev only: allow the default 'changeme' DB password (the backend service
+      # sets this too). The prod compose deliberately omits DEBUG so it fails fast
+      # unless a real POSTGRES_PASSWORD is set.
+      DEBUG: "true"
       # Render thread caps — override the Dockerfile defaults from RENDER_CPU_THREADS.
       # All six vars must be set so every numeric-thread library sees the cap.
       RENDER_CPU_THREADS: "${RENDER_CPU_THREADS:-2}"
@@ -126,6 +138,7 @@ services:
       - ./backend:/app
       - ./private_data/data/app:/data
       - ./private_data/data/library:/library # dev library mount (same as backend)
+      - ./private_data/data/library2:/library2 # second library root (mirror backend)
     depends_on:
       db:
         condition: service_healthy

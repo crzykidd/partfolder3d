@@ -24,7 +24,7 @@ no return for production images — verify before tagging.
 | Version source-of-truth | `backend/app/version.py` (`__version__ = "<version>"`) |
 | Main CI workflow | `CI` |
 | Publish workflow | `Build and publish Docker images` |
-| Image registry | `ghcr.io/crzykidd/partfolder3d` (backend) + `ghcr.io/crzykidd/partfolder3d-frontend` |
+| Image registry | `ghcr.io/crzykidd/partfolder3d` (backend) + `ghcr.io/crzykidd/partfolder3d-frontend` + `ghcr.io/crzykidd/partfolder3d-nginx` (3-image publish matrix) |
 | Release image tags | `:latest`, `:<semver>`, `:<major>` (e.g. `:0.3.6`, `:0`) |
 
 ## Execution rules
@@ -102,8 +102,9 @@ Print:
 - The release URL.
 - The tag created (`v$ARGUMENTS`).
 - The status of the production image build.
-- A reminder of the expected image tags once the build finishes:
-  `ghcr.io/crzykidd/partfolder3d` and `ghcr.io/crzykidd/partfolder3d-frontend`
-  will receive `:latest`, `:$ARGUMENTS`, and `:<major>` (e.g. `:0`).
+- A reminder of the expected image tags once the build finishes: all three published
+  images — `ghcr.io/crzykidd/partfolder3d`, `ghcr.io/crzykidd/partfolder3d-frontend`,
+  and `ghcr.io/crzykidd/partfolder3d-nginx` — will receive `:latest`, `:$ARGUMENTS`,
+  and `:<major>` (e.g. `:0`).
 
 Done — the release is live.

@@ -168,3 +168,32 @@ async def test_render_mode_setting_non_string_rejected(client: AsyncClient) -> N
         headers={"X-CSRF-Token": csrf},
     )
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_tags_auto_approve_setting_accepts_bool(client: AsyncClient) -> None:
+    """PUT /api/settings/tags.auto_approve accepts true and false booleans."""
+    csrf = await _admin_setup(client)
+
+    for value in (True, False):
+        resp = await client.put(
+            "/api/settings/tags.auto_approve",
+            json={"value": value},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 200, f"Expected 200 for tags.auto_approve={value!r}"
+        assert resp.json()["value"] is value
+
+
+@pytest.mark.asyncio
+async def test_tags_auto_approve_setting_non_bool_rejected(client: AsyncClient) -> None:
+    """PUT /api/settings/tags.auto_approve rejects non-boolean values (str/int)."""
+    csrf = await _admin_setup(client)
+
+    for bad in ("true", 1, None):
+        resp = await client.put(
+            "/api/settings/tags.auto_approve",
+            json={"value": bad},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert resp.status_code == 422, f"Expected 422 for tags.auto_approve={bad!r}"

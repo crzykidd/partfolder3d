@@ -4,8 +4,9 @@ These tests exercise the hardened render pipeline introduced alongside
 render_subprocess.py:
   - render_item: RenderTimeout → job ends 'failed', not stuck 'running'.
   - render_item: RenderError  → job ends 'failed', no duplicate Job rows.
-  - _recover_orphaned_render_jobs: orphaned 'running' render jobs are marked
-    'failed' and re-enqueued (dedup by item_id).
+  - _recover_orphaned_jobs: orphaned 'running' jobs are marked 'failed' and,
+    for idempotent types, re-enqueued (dedup by item_id); non-idempotent types
+    are failed only. See also test_orphan_cleanup.py for the trash/prints sweep.
 
 No real GL or mesh files are required: run_render_subprocess is mocked at the
 source module level so tests can inject RenderTimeout / RenderError without
@@ -232,7 +233,7 @@ async def test_recover_orphaned_render_jobs_marks_failed_and_reenqueues(
     db_session: AsyncSession,
 ) -> None:
     """Orphaned 'running' render job is marked 'failed' and re-enqueued."""
-    from worker import _recover_orphaned_render_jobs  # noqa: PLC0415
+    from worker import _recover_orphaned_jobs  # noqa: PLC0415
 
     item_id = 777001
 
@@ -253,7 +254,7 @@ async def test_recover_orphaned_render_jobs_marks_failed_and_reenqueues(
     mock_redis = AsyncMock()
     ctx = {"redis": mock_redis}
 
-    await _recover_orphaned_render_jobs(ctx, _db=db_session)
+    await _recover_orphaned_jobs(ctx, _db=db_session)
 
     # Re-check the row
     result = await db_session.execute(sa.select(Job).where(Job.id == orphan_id))
@@ -269,7 +270,7 @@ async def test_recover_orphaned_render_jobs_dedup_by_item_id(
     db_session: AsyncSession,
 ) -> None:
     """Multiple orphaned jobs for the same item_id → only one enqueue."""
-    from worker import _recover_orphaned_render_jobs  # noqa: PLC0415
+    from worker import _recover_orphaned_jobs  # noqa: PLC0415
 
     item_id = 777002
 
@@ -300,7 +301,7 @@ async def test_recover_orphaned_render_jobs_dedup_by_item_id(
     mock_redis = AsyncMock()
     ctx = {"redis": mock_redis}
 
-    await _recover_orphaned_render_jobs(ctx, _db=db_session)
+    await _recover_orphaned_jobs(ctx, _db=db_session)
 
     # Both item_ids enqueued; item_id 777002 deduped to one call
     calls = {call.args for call in mock_redis.enqueue_job.call_args_list}
@@ -326,13 +327,74 @@ async def test_recover_orphaned_render_jobs_noop_when_clean(
     db_session: AsyncSession,
 ) -> None:
     """No orphaned jobs → recovery is a no-op; redis is not called."""
-    from worker import _recover_orphaned_render_jobs  # noqa: PLC0415
+    from worker import _recover_orphaned_jobs  # noqa: PLC0415
 
     mock_redis = AsyncMock()
     ctx = {"redis": mock_redis}
 
-    await _recover_orphaned_render_jobs(ctx, _db=db_session)
+    await _recover_orphaned_jobs(ctx, _db=db_session)
 
+    mock_redis.enqueue_job.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_recover_orphaned_analyze_job_reenqueued(
+    db_session: AsyncSession,
+) -> None:
+    """A non-render IDEMPOTENT orphan (analyze) is failed AND re-enqueued."""
+    from worker import _recover_orphaned_jobs  # noqa: PLC0415
+
+    item_id = 778001
+    orphan = Job(
+        type="analyze",
+        status="running",
+        progress=10,
+        payload={"item_id": item_id},
+        item_id=None,
+        started_at=datetime.now(UTC),
+    )
+    db_session.add(orphan)
+    await db_session.flush()
+    orphan_id: uuid.UUID = orphan.id
+
+    mock_redis = AsyncMock()
+    await _recover_orphaned_jobs({"redis": mock_redis}, _db=db_session)
+
+    result = await db_session.execute(sa.select(Job).where(Job.id == orphan_id))
+    updated = result.scalar_one()
+    assert updated.status == "failed"
+    assert updated.finished_at is not None
+    assert "re-queued" in (updated.error or "")
+    mock_redis.enqueue_job.assert_called_once_with("analyze_item", item_id)
+
+
+@pytest.mark.asyncio
+async def test_recover_orphaned_nonidempotent_job_failed_not_reenqueued(
+    db_session: AsyncSession,
+) -> None:
+    """A NON-idempotent orphan (backup) is marked failed but NOT re-enqueued."""
+    from worker import _recover_orphaned_jobs  # noqa: PLC0415
+
+    orphan = Job(
+        type="backup",
+        status="running",
+        progress=50,
+        payload={},
+        item_id=None,
+        started_at=datetime.now(UTC),
+    )
+    db_session.add(orphan)
+    await db_session.flush()
+    orphan_id: uuid.UUID = orphan.id
+
+    mock_redis = AsyncMock()
+    await _recover_orphaned_jobs({"redis": mock_redis}, _db=db_session)
+
+    result = await db_session.execute(sa.select(Job).where(Job.id == orphan_id))
+    updated = result.scalar_one()
+    assert updated.status == "failed"
+    assert updated.finished_at is not None
+    assert "not auto-retried" in (updated.error or "")
     mock_redis.enqueue_job.assert_not_called()
 
 

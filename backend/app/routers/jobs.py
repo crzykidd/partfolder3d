@@ -23,15 +23,16 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 import sqlalchemy as sa
+from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import csrf_protect, get_db, require_admin
-from ..config import settings
 from ..models.job import Job
 from ..models.user import User
+from ..worker.arq_pool import get_arq_pool
 
 log = logging.getLogger(__name__)
 
@@ -275,6 +276,7 @@ async def retry_job(
     _admin: Annotated[User, Depends(require_admin)],
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    arq: Annotated[ArqRedis, Depends(get_arq_pool)],
 ) -> RetryOut:
     """Re-enqueue a failed job.
 
@@ -297,12 +299,7 @@ async def retry_job(
     task_name, task_args = _enqueue_args_for(job)
 
     try:
-        from arq import create_pool  # noqa: PLC0415
-        from arq.connections import RedisSettings  # noqa: PLC0415
-
-        redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-        await redis.enqueue_job(task_name, *task_args, retry_of_job_id=str(job.id))
-        await redis.aclose()
+        await arq.enqueue_job(task_name, *task_args, retry_of_job_id=str(job.id))
         log.info(
             "retry_job: re-enqueued %s(%s) for failed job %s",
             task_name, task_args, job_id,
@@ -314,7 +311,7 @@ async def retry_job(
         log.exception("retry_job: failed to enqueue %s for job %s", task_name, job_id)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Failed to enqueue retry: {exc}",
+            detail="Failed to enqueue retry.",
         ) from exc
 
 
@@ -324,6 +321,7 @@ async def cancel_job(
     _admin: Annotated[User, Depends(require_admin)],
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    arq: Annotated[ArqRedis, Depends(get_arq_pool)],
 ) -> JobOut:
     """Cancel a running job.
 
@@ -349,13 +347,9 @@ async def cancel_job(
     # Best-effort abort the arq task (requires allow_abort_jobs=True on the worker).
     if job.arq_job_id:
         try:
-            from arq import create_pool  # noqa: PLC0415
-            from arq.connections import RedisSettings  # noqa: PLC0415
             from arq.jobs import Job as ArqJob  # noqa: PLC0415
 
-            redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-            await ArqJob(job.arq_job_id, redis).abort()
-            await redis.aclose()
+            await ArqJob(job.arq_job_id, arq).abort()
         except Exception:
             log.exception(
                 "cancel_job: failed to abort arq job %s (non-fatal; row already cancelled)",
@@ -365,7 +359,7 @@ async def cancel_job(
     return _job_out(job)
 
 
-async def _cancel_running_job(db: AsyncSession, job: Job) -> None:
+async def _cancel_running_job(db: AsyncSession, job: Job, arq: ArqRedis) -> None:
     """Internal: cancel a running job (no 409 check — caller has already verified intent)."""
     job.status = "cancelled"
     job.finished_at = datetime.now(UTC)
@@ -373,13 +367,9 @@ async def _cancel_running_job(db: AsyncSession, job: Job) -> None:
 
     if job.arq_job_id:
         try:
-            from arq import create_pool  # noqa: PLC0415
-            from arq.connections import RedisSettings  # noqa: PLC0415
             from arq.jobs import Job as ArqJob  # noqa: PLC0415
 
-            redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-            await ArqJob(job.arq_job_id, redis).abort()
-            await redis.aclose()
+            await ArqJob(job.arq_job_id, arq).abort()
         except Exception:
             log.exception(
                 "_cancel_running_job: abort arq job %s failed (non-fatal)", job.arq_job_id
@@ -392,6 +382,7 @@ async def restart_job(
     _admin: Annotated[User, Depends(require_admin)],
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    arq: Annotated[ArqRedis, Depends(get_arq_pool)],
 ) -> RetryOut:
     """Restart a job of any status.
 
@@ -403,17 +394,12 @@ async def restart_job(
 
     # Cancel in-flight work before re-enqueueing
     if job.status == "running":
-        await _cancel_running_job(db, job)
+        await _cancel_running_job(db, job, arq)
 
     task_name, task_args = _enqueue_args_for(job)
 
     try:
-        from arq import create_pool  # noqa: PLC0415
-        from arq.connections import RedisSettings  # noqa: PLC0415
-
-        redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-        await redis.enqueue_job(task_name, *task_args, retry_of_job_id=str(job.id))
-        await redis.aclose()
+        await arq.enqueue_job(task_name, *task_args, retry_of_job_id=str(job.id))
         log.info(
             "restart_job: re-enqueued %s(%s) for job %s (was %s)",
             task_name, task_args, job_id, job.status,
@@ -425,7 +411,7 @@ async def restart_job(
         log.exception("restart_job: failed to enqueue %s for job %s", task_name, job_id)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Failed to enqueue restart: {exc}",
+            detail="Failed to enqueue restart.",
         ) from exc
 
 

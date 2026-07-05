@@ -20,3 +20,17 @@ export function isSafeHttpUrl(url: string): boolean {
     return false
   }
 }
+
+/**
+ * Returns `url` only when it is a safe http/https absolute URL, otherwise
+ * `undefined`.
+ *
+ * Bind this to every `href` that renders a user-supplied or scraped URL
+ * (source_url, profile_url, …).  When it returns `undefined`, React omits the
+ * attribute entirely, so the `<a>` renders as non-navigating text instead of a
+ * live `javascript:`/`data:` link.  Handles null/undefined/relative gracefully.
+ */
+export function safeHref(url?: string | null): string | undefined {
+  if (!url) return undefined
+  return isSafeHttpUrl(url) ? url : undefined
+}

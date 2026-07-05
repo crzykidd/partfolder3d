@@ -318,16 +318,12 @@ async def _inbox_scan_core(ctx: dict) -> None:
             session.status = ImportSessionStatus.processing
             await db.commit()
 
-            # Enqueue the processing job
+            # Enqueue the processing job via the worker's own arq pool (ctx),
+            # which is already wired to the JSON job serializer.
             try:
-                from arq import create_pool  # noqa: PLC0415
-                from arq.connections import RedisSettings  # noqa: PLC0415
-
-                redis = await create_pool(
-                    RedisSettings.from_dsn(_settings.REDIS_URL)
+                await ctx["redis"].enqueue_job(
+                    "process_import_session", str(session.id)
                 )
-                await redis.enqueue_job("process_import_session", str(session.id))
-                await redis.aclose()
                 enqueued += 1
             except Exception:
                 log.exception(
@@ -383,6 +379,228 @@ async def _job_history_retention_core(_ctx: dict) -> None:
     log.info("job_history_retention: deleted %d old job row(s)", deleted)
 
 
+def _dir_size_bytes(path: Path) -> int:
+    """Sum the size of every regular file under *path* (best-effort)."""
+    total = 0
+    if path.is_file():
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
+    for child in path.rglob("*"):
+        try:
+            if child.is_file():
+                total += child.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+async def _purge_trash(now: datetime) -> tuple[int, int]:
+    """Hard-delete trash entries older than TRASH_RETENTION_DAYS.
+
+    Trash lives at DATA_DIR/trash/<ts>-<key>/ (see storage.journal.move_to_trash).
+    Each entry's age is taken from its filesystem mtime.  Returns
+    (entries_purged, bytes_reclaimed).  Disabled (skipped) when
+    TRASH_RETENTION_DAYS <= 0.
+    """
+    import shutil  # noqa: PLC0415
+
+    from app.config import settings as _settings  # noqa: PLC0415
+
+    retention_days = _settings.TRASH_RETENTION_DAYS
+    if retention_days <= 0:
+        log.info(
+            "orphan_cleanup: trash purge disabled (TRASH_RETENTION_DAYS=%d)", retention_days
+        )
+        return (0, 0)
+
+    trash_dir = Path(_settings.DATA_DIR) / "trash"
+    if not trash_dir.is_dir():
+        return (0, 0)
+
+    cutoff = now - timedelta(days=retention_days)
+    purged = 0
+    bytes_reclaimed = 0
+
+    for entry in sorted(trash_dir.iterdir()):
+        try:
+            mtime = datetime.fromtimestamp(entry.stat().st_mtime, tz=UTC)
+        except OSError:
+            continue
+        if mtime >= cutoff:
+            continue
+
+        age_days = (now - mtime).days
+        size = _dir_size_bytes(entry)
+        try:
+            if entry.is_dir():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
+        except OSError:
+            log.exception("orphan_cleanup: failed to purge trash entry %s", entry.name)
+            continue
+
+        purged += 1
+        bytes_reclaimed += size
+        log.info(
+            "orphan_cleanup: purged trash entry %s (age=%dd, %d bytes)",
+            entry.name,
+            age_days,
+            size,
+        )
+
+    log.info(
+        "orphan_cleanup: trash purge complete — %d entr(ies) purged, %d bytes reclaimed",
+        purged,
+        bytes_reclaimed,
+    )
+    return (purged, bytes_reclaimed)
+
+
+async def _reclaim_orphaned_prints(now: datetime) -> tuple[int, int]:
+    """Find files under items' prints/ dirs with no referencing PrintRecord.
+
+    A print file is orphaned when its path (relative to the item dir) is not
+    referenced by any PrintRecord.gcode_file_path / print_photo_path for that
+    item.  This happens because DELETE .../print-records/{id} intentionally
+    leaves the file on disk.
+
+    Behaviour is gated on ORPHAN_PRINTS_DELETE:
+      - False (default): REPORT ONLY — log a warning with the count + a bounded
+        sample of paths + total bytes.  Nothing is deleted.
+      - True: delete an orphan only if it is ALSO older than TRASH_RETENTION_DAYS,
+        with per-file logging.
+
+    Returns (orphans_found, bytes) — bytes deleted when deleting, else bytes that
+    would be reclaimed.
+    """
+    import sqlalchemy as sa  # noqa: PLC0415
+
+    from app.config import settings as _settings  # noqa: PLC0415
+    from app.db import SessionLocal  # noqa: PLC0415
+    from app.models.item import Item  # noqa: PLC0415
+    from app.models.print_record import PrintRecord  # noqa: PLC0415
+
+    delete = _settings.ORPHAN_PRINTS_DELETE
+    age_cutoff = now - timedelta(days=max(_settings.TRASH_RETENTION_DAYS, 0))
+
+    # item_id -> set of referenced relative paths
+    referenced: dict[int, set[str]] = {}
+    item_dirs: dict[int, str] = {}
+
+    async with SessionLocal() as db:
+        items_res = await db.execute(sa.select(Item.id, Item.dir_path))
+        for iid, dir_path in items_res.all():
+            item_dirs[iid] = dir_path
+
+        rec_res = await db.execute(
+            sa.select(
+                PrintRecord.item_id,
+                PrintRecord.gcode_file_path,
+                PrintRecord.print_photo_path,
+            )
+        )
+        for item_id, gcode_path, photo_path in rec_res.all():
+            refs = referenced.setdefault(item_id, set())
+            if gcode_path:
+                refs.add(gcode_path)
+            if photo_path:
+                refs.add(photo_path)
+
+    orphans: list[tuple[Path, int]] = []  # (abs_path, size)
+    for item_id, dir_path in item_dirs.items():
+        prints_dir = Path(dir_path) / "prints"
+        if not prints_dir.is_dir():
+            continue
+        refs = referenced.get(item_id, set())
+        for child in prints_dir.rglob("*"):
+            if not child.is_file():
+                continue
+            try:
+                rel = str(child.relative_to(dir_path))
+            except ValueError:
+                continue
+            if rel in refs:
+                continue
+            try:
+                size = child.stat().st_size
+            except OSError:
+                size = 0
+            orphans.append((child, size))
+
+    if not orphans:
+        log.info("orphan_cleanup: no orphaned print files found")
+        return (0, 0)
+
+    total_bytes = sum(s for _, s in orphans)
+
+    if not delete:
+        # REPORT ONLY — bounded sample so a big backlog can't flood the log.
+        sample = [str(p) for p, _ in orphans[:50]]
+        log.warning(
+            "orphan_cleanup: %d orphaned print file(s) found (%d bytes) — REPORT ONLY "
+            "(set ORPHAN_PRINTS_DELETE=true to reclaim). Sample: %s%s",
+            len(orphans),
+            total_bytes,
+            sample,
+            " …(truncated)" if len(orphans) > 50 else "",
+        )
+        return (len(orphans), total_bytes)
+
+    # DELETE mode — only files also older than the retention window.
+    deleted = 0
+    deleted_bytes = 0
+    for path, size in orphans:
+        try:
+            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
+        except OSError:
+            continue
+        if mtime >= age_cutoff:
+            log.info(
+                "orphan_cleanup: keeping orphaned print %s (younger than retention window)",
+                path,
+            )
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            log.exception("orphan_cleanup: failed to delete orphaned print %s", path)
+            continue
+        deleted += 1
+        deleted_bytes += size
+        log.info("orphan_cleanup: deleted orphaned print %s (%d bytes)", path, size)
+
+    log.info(
+        "orphan_cleanup: orphaned-prints delete complete — %d of %d deleted, %d bytes reclaimed",
+        deleted,
+        len(orphans),
+        deleted_bytes,
+    )
+    return (deleted, deleted_bytes)
+
+
+async def _orphan_cleanup_core(_ctx: dict) -> None:
+    """Daily reclamation sweep: trash purge + orphaned-prints report/delete.
+
+    Conservative by design — every deletion is logged, defaults are safe, and the
+    orphaned-prints half only deletes when ORPHAN_PRINTS_DELETE is explicitly on.
+    See config.py (TRASH_RETENTION_DAYS / ORPHAN_PRINTS_DELETE) for the knobs.
+    """
+    now = datetime.now(UTC)
+    trash_purged, trash_bytes = await _purge_trash(now)
+    print_orphans, print_bytes = await _reclaim_orphaned_prints(now)
+    log.info(
+        "orphan_cleanup: summary — trash purged=%d (%d bytes); "
+        "orphaned prints handled=%d (%d bytes)",
+        trash_purged,
+        trash_bytes,
+        print_orphans,
+        print_bytes,
+    )
+
+
 _SCHED_FUNCS = {
     "expired_zip_cleanup": _cleanup_expired_bundles_core,
     "inbox_scan": _inbox_scan_core,
@@ -390,6 +608,7 @@ _SCHED_FUNCS = {
     "share_link_expiry_cleanup": _share_link_expiry_cleanup_core,
     "db_backup": _db_backup_core,
     "job_history_retention": _job_history_retention_core,
+    "orphan_cleanup": _orphan_cleanup_core,
 }
 
 
@@ -419,6 +638,7 @@ async def exec_scheduled_job(ctx: dict, name: str) -> None:
             "library_reconcile_scan": 3,
             "db_backup": 4,
             "job_history_retention": 4,
+            "orphan_cleanup": 5,
         }
         hour = _hour_map.get(name, 1)
         await _sj_finish(name, error=error, hour=hour, minute=0)
@@ -451,3 +671,7 @@ async def cron_db_backup(ctx: dict) -> None:
 
 async def cron_job_history_retention(ctx: dict) -> None:
     await exec_scheduled_job(ctx, "job_history_retention")
+
+
+async def cron_orphan_cleanup(ctx: dict) -> None:
+    await exec_scheduled_job(ctx, "orphan_cleanup")

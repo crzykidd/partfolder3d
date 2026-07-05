@@ -33,9 +33,21 @@ from urllib.robotparser import RobotFileParser
 
 import httpx
 
-from .ssrf_guard import SSRFBlockedError, assert_safe_url
+from .ssrf_guard import (
+    GuardedFetchError,
+    SSRFBlockedError,
+    assert_safe_url,
+    guarded_fetch,
+    sanitize_for_log,
+)
 
 log = logging.getLogger(__name__)
+
+# Robots files are tiny; cap the fetch hard so a hostile host can't stream MBs.
+_ROBOTS_MAX_BYTES = 512 * 1024
+# Default HTML body cap (bytes) if a caller doesn't override it.  The worker
+# passes settings.SCRAPE_HTML_MAX_MB; this default keeps direct/test callers safe.
+_DEFAULT_HTML_MAX_BYTES = 5 * 1024 * 1024
 
 # ---------------------------------------------------------------------------
 # Result data structure
@@ -84,15 +96,20 @@ def _get_robots(domain: str, timeout: int = 10) -> RobotFileParser | None:
     rp = RobotFileParser()
     rp.set_url(robots_url)
     try:
-        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-            resp = client.get(robots_url, headers={"User-Agent": _ROBOTS_UA})
-            if resp.status_code == 200:
-                rp.parse(resp.text.splitlines())
-            else:
-                # No robots.txt or blocked → conservative: allow
-                pass
-    except Exception:
-        log.debug("robots.txt fetch failed for %s (treating as allow-all)", domain)
+        resp = guarded_fetch(
+            robots_url,
+            max_bytes=_ROBOTS_MAX_BYTES,
+            timeout=timeout,
+            headers={"User-Agent": _ROBOTS_UA},
+        )
+        if resp.status_code == 200:
+            rp.parse(resp.text.splitlines())
+        # else: no robots.txt or blocked → conservative: allow
+    except (SSRFBlockedError, GuardedFetchError, httpx.HTTPError):
+        log.debug(
+            "robots.txt fetch failed for %s (treating as allow-all)",
+            sanitize_for_log(domain),
+        )
     _robots_cache[domain] = rp
     return rp
 
@@ -132,6 +149,114 @@ def _meta_name(tree: object, name: str) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Text cleanup helpers (SEO boilerplate stripping) — issue #27
+# ---------------------------------------------------------------------------
+
+# Trailing " - Something.com" / " | Something.com" site-name suffix (title only).
+# Kept conservative: the leading separator must be surrounded by whitespace, and
+# the site segment must not contain another separator, so we only strip a genuine
+# trailing "<sep> <Site>.<tld>" tail — never legitimate mid-title content.
+_SITE_SUFFIX_RE = re.compile(
+    r"\s+[-–—|]\s+[^|\-–—]*\.(?:com|net|org|io|co)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _strip_pipe_boilerplate(text: str | None) -> str | None:
+    """Strip site SEO boilerplate that follows the first ' | ' separator.
+
+    Aggregator sites (Printables/MakerWorld/Thingiverse) bake share-card
+    boilerplate into their OG tags after a ' | ' pipe, e.g.
+    "NeilMed Sinus Rinse holder by Fuu | Download free STL model | Printables.com".
+    We keep only the leading segment.  Conservative: the separator must be a
+    space-padded pipe so we never split on a bare '|' inside real content.
+    """
+    if not text:
+        return text
+    cleaned = text.split(" | ", 1)[0].strip()
+    return cleaned or None
+
+
+def _clean_title(title: str | None) -> str | None:
+    """Strip after-pipe boilerplate and a trailing ' - <Site>.com' suffix."""
+    cleaned = _strip_pipe_boilerplate(title)
+    if not cleaned:
+        return None
+    cleaned = _SITE_SUFFIX_RE.sub("", cleaned).strip()
+    return cleaned or None
+
+
+def _clean_description(desc: str | None) -> str | None:
+    """Strip trailing SEO boilerplate that follows a ' | ' separator."""
+    return _strip_pipe_boilerplate(desc)
+
+
+def _creator_from_title(title: str | None) -> str | None:
+    """Best-effort creator from the "<name> by <Creator>" title pattern.
+
+    Printables titles read "<Model title> by <Creator> | <boilerplate>".
+    Conservative: only fires when the leading (pre-pipe) segment contains a
+    space-padded ' by '; takes the text after the last such ' by ' and rejects
+    absurdly long captures.  Returns None when the pattern doesn't clearly match.
+    """
+    if not title:
+        return None
+    first_seg = title.split(" | ", 1)[0]
+    if " by " not in first_seg:
+        return None
+    candidate = first_seg.rsplit(" by ", 1)[1].strip()
+    if candidate and len(candidate) <= 80:
+        return candidate
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Image selection helpers — issue #28
+# ---------------------------------------------------------------------------
+
+
+def _srcset_largest(srcset: str) -> str | None:
+    """Return the highest-resolution URL from a srcset attribute.
+
+    srcset format: "url1 320w, url2 640w" (width descriptors) or
+    "url1 1x, url2 2x" (density descriptors).  Prefers the largest width
+    descriptor; falls back to the largest density; then the first entry.
+    """
+    if not srcset:
+        return None
+    best_url: str | None = None
+    best_w = -1
+    best_density = -1.0
+    first_url: str | None = None
+    for part in srcset.split(","):
+        tokens = part.strip().split()
+        if not tokens:
+            continue
+        url = tokens[0]
+        if first_url is None:
+            first_url = url
+        descriptor = tokens[1] if len(tokens) > 1 else ""
+        if descriptor.endswith("w"):
+            try:
+                w = int(descriptor[:-1])
+            except ValueError:
+                continue
+            if w > best_w:
+                best_w = w
+                best_url = url
+        elif descriptor.endswith("x"):
+            try:
+                d = float(descriptor[:-1])
+            except ValueError:
+                continue
+            # Only let density win while no width descriptor has been seen.
+            if best_w < 0 and d > best_density:
+                best_density = d
+                best_url = url
+    return best_url or first_url
+
+
 def _parse_html(html: str) -> object | None:
     """Parse HTML text; returns selectolax HTMLParser or None on failure."""
     try:
@@ -145,25 +270,61 @@ def _parse_html(html: str) -> object | None:
 
 
 def _extract_images(tree: object, base_url: str, max_images: int) -> list[str]:
-    """Extract candidate image URLs from OG tags and <img> tags."""
-    seen: list[str] = []
-    # Open Graph images first (highest quality, explicitly curated)
+    """Extract candidate image URLs, preferring full-resolution over og:image.
+
+    On MakerWorld/Printables/Thingiverse the ``og:image`` is the social-share
+    card — cropped/downscaled to ~1200x630 — not the full-res gallery photo
+    (issue #28).  We therefore rank candidates by likely resolution and keep
+    ``og:image`` only as a fallback so the default (first) image is full-res:
+
+      1. ``<img srcset>`` / ``<source srcset>`` — largest width descriptor.
+      2. Lazy-loaded full-size ``data-src`` / ``data-original`` / ``data-full``.
+      3. ``og:image`` — reliable but often a downscaled social card.
+      4. Plain ``<img src>`` — lowest priority (may be thumbnails/placeholders).
+
+    Buckets are concatenated in that order, de-duplicated preserving first
+    occurrence, then capped at ``max_images``.
+    """
+    srcset_imgs: list[str] = []
+    lazy_imgs: list[str] = []
+    og_imgs: list[str] = []
+    plain_imgs: list[str] = []
+
+    # 1. srcset (img + source): the largest-width candidate per element.
+    for node in tree.css("img[srcset], source[srcset]"):  # type: ignore[union-attr]
+        best = _srcset_largest(node.attributes.get("srcset") or "")
+        if best:
+            srcset_imgs.append(best)
+
+    # 2/4. <img> lazy full-size attrs (high) and plain src (low).
+    for img in tree.css("img"):  # type: ignore[union-attr]
+        attrs = img.attributes
+        lazy = (
+            attrs.get("data-src")
+            or attrs.get("data-original")
+            or attrs.get("data-full")
+        )
+        if lazy:
+            lazy_imgs.append(lazy)
+        src = attrs.get("src")
+        if src:
+            plain_imgs.append(src)
+
+    # 3. og:image — fallback only (curated but usually a downscaled social card).
     for meta in tree.css('meta[property="og:image"]'):  # type: ignore[union-attr]
-        src = meta.attributes.get("content", "")
-        if src and src not in seen:
-            seen.append(src)
-    # Fallback: regular img tags with a reasonable minimum size heuristic
-    if len(seen) < max_images:
-        for img in tree.css("img"):  # type: ignore[union-attr]
-            src = img.attributes.get("src", "") or img.attributes.get("data-src", "")
-            if not src:
-                continue
-            absolute = urljoin(base_url, src)
+        content = meta.attributes.get("content")
+        if content:
+            og_imgs.append(content)
+
+    seen: list[str] = []
+    for bucket in (srcset_imgs, lazy_imgs, og_imgs, plain_imgs):
+        for src in bucket:
+            absolute = urljoin(base_url, src.strip())
             if absolute.startswith("http") and absolute not in seen:
                 seen.append(absolute)
                 if len(seen) >= max_images:
-                    break
-    return seen[:max_images]
+                    return seen
+    return seen
 
 
 def _extract_tags(tree: object) -> list[str]:
@@ -209,6 +370,7 @@ def scrape_url(
     url: str,
     timeout: int = 15,
     max_images: int = 20,
+    html_max_bytes: int = _DEFAULT_HTML_MAX_BYTES,
 ) -> ScrapeResult:
     """Scrape public metadata from a URL.
 
@@ -226,33 +388,39 @@ def scrape_url(
 
     result = ScrapeResult(url=url, domain=domain)
 
-    # SSRF guard — reject URLs resolving to internal/link-local/cloud-metadata IPs
+    _safe_url = sanitize_for_log(url)
+
+    # SSRF guard — reject URLs resolving to internal/link-local/cloud-metadata IPs.
+    # (The guarded fetch below re-validates every hop; this pre-flight gives a
+    # friendlier note and short-circuits before the robots.txt fetch.)
     try:
         assert_safe_url(url)
     except SSRFBlockedError as exc:
         result.blocked = True
         result.note = str(exc)
-        log.warning("scrape_url: SSRF guard blocked %s: %s", url, exc)
+        log.warning("scrape_url: SSRF guard blocked %s: %s", _safe_url, exc)
         return result
 
     # robots.txt check
     if not _robots_allows(domain, parsed.path or "/"):
         result.blocked = True
         result.note = f"robots.txt disallows fetching {url}"
-        log.info("scrape_url: robots.txt blocked %s", url)
+        log.info("scrape_url: robots.txt blocked %s", _safe_url)
         return result
 
     try:
-        with httpx.Client(
+        # Guarded fetch: no auto-redirects (each hop re-validated), body streamed
+        # and aborted once html_max_bytes is exceeded (no unbounded resp.text).
+        resp = guarded_fetch(
+            url,
+            max_bytes=html_max_bytes,
             timeout=timeout,
-            follow_redirects=True,
             headers={
                 "User-Agent": _ROBOTS_UA,
                 "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.5",
             },
-        ) as client:
-            resp = client.get(url)
+        )
 
         if resp.status_code != 200:
             result.note = f"HTTP {resp.status_code}"
@@ -264,20 +432,30 @@ def scrape_url(
                 result.blocked = True
             return result
 
-        content_type = resp.headers.get("content-type", "")
+        content_type = resp.content_type
         if "html" not in content_type:
             result.note = f"Non-HTML response: {content_type}"
             return result
 
         html = resp.text
 
+    except SSRFBlockedError as exc:
+        # A redirect hop pointed at an internal/blocked target.
+        result.blocked = True
+        result.note = str(exc)
+        log.warning("scrape_url: SSRF guard blocked redirect for %s: %s", _safe_url, exc)
+        return result
+    except GuardedFetchError as exc:
+        result.note = f"Scrape error: {exc}"
+        log.warning("scrape_url: guarded fetch failed for %s: %s", _safe_url, exc)
+        return result
     except httpx.TimeoutException:
         result.note = "Scrape timed out"
-        log.info("scrape_url: timeout for %s", url)
+        log.info("scrape_url: timeout for %s", _safe_url)
         return result
     except Exception as exc:
         result.note = f"Scrape error: {exc}"
-        log.warning("scrape_url: error for %s: %s", url, exc)
+        log.warning("scrape_url: error for %s: %s", _safe_url, exc)
         return result
 
     tree = _parse_html(html)
@@ -285,21 +463,24 @@ def scrape_url(
         result.note = "HTML parse failed"
         return result
 
-    # Title: OG → <title>
-    result.title = (
+    # Title: OG → <title>.  Keep the raw title for creator extraction (the
+    # "<name> by <Creator>" pattern lives before the boilerplate pipe), then
+    # strip SEO boilerplate for the user-facing value (issue #27).
+    raw_title = (
         _og(tree, "og:title")
         or (_meta_name(tree, "title"))
     )
-    if not result.title:
+    if not raw_title:
         try:
             title_node = tree.css_first("title")  # type: ignore[union-attr]
             if title_node:
-                result.title = (title_node.text() or "").strip() or None
+                raw_title = (title_node.text() or "").strip() or None
         except Exception:
             pass
+    result.title = _clean_title(raw_title)
 
-    # Description
-    result.description = (
+    # Description (strip trailing " | ..." boilerplate — issue #27)
+    result.description = _clean_description(
         _og(tree, "og:description")
         or _meta_name(tree, "description")
     )
@@ -313,12 +494,44 @@ def scrape_url(
     # Tags
     result.raw_tags = _extract_tags(tree)
 
-    # Creator: look for common author meta patterns
-    result.creator_name = (
+    # Creator name: common author meta patterns, then fall back to the
+    # "<name> by <Creator>" title pattern (Printables exposes no author meta
+    # but shows the creator in the title) — issue #27.
+    name = (
         _meta_name(tree, "author")
         or _meta_name(tree, "article:author")
         or _og(tree, "article:author")
     )
+    # article:author is sometimes a profile URL rather than a display name;
+    # that belongs in creator_profile_url, not the name.
+    if name and name.strip().lower().startswith("http"):
+        name = None
+    if not name:
+        name = _creator_from_title(raw_title)
+    result.creator_name = (name or "").strip() or None
+
+    # Creator profile URL: previously modeled but never assigned (issue #27).
+    # Best-effort from rel=author links/anchors or a URL-valued article:author.
+    profile_url: str | None = None
+    for sel in ('link[rel="author"]', 'a[rel="author"]'):
+        try:
+            node = tree.css_first(sel)  # type: ignore[union-attr]
+        except Exception:
+            node = None
+        if node is not None:
+            href = (node.attributes.get("href") or "").strip()
+            if href:
+                absolute = urljoin(url, href)
+                if absolute.startswith("http"):
+                    profile_url = absolute
+                    break
+    if not profile_url:
+        author_meta = (
+            _og(tree, "article:author") or _meta_name(tree, "article:author") or ""
+        ).strip()
+        if author_meta.lower().startswith("http"):
+            profile_url = author_meta
+    result.creator_profile_url = profile_url
 
     # License: try to find a cc/license link or meta
     for a in tree.css('a[rel="license"], link[rel="license"]'):  # type: ignore[union-attr]
@@ -329,7 +542,7 @@ def scrape_url(
 
     log.debug(
         "scrape_url: %s → title=%r images=%d tags=%d",
-        url, result.title, len(result.image_urls), len(result.raw_tags),
+        _safe_url, result.title, len(result.image_urls), len(result.raw_tags),
     )
     return result
 

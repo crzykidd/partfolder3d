@@ -1,4 +1,4 @@
-import { apiFetch, apiFetchForm, getCsrfToken, ApiError } from './core'
+import { apiFetch, apiFetchForm } from './core'
 
 // ---------------------------------------------------------------------------
 // Phase 3 — Catalog types
@@ -200,6 +200,8 @@ export interface ItemListParams {
   page?: number
   per_page?: number
   library_id?: number
+  /** Filter by one or more library ids (repeatable ?library_ids=1&library_ids=2). */
+  library_ids?: number[]
 }
 
 export interface TagSummary {
@@ -335,6 +337,7 @@ export const listItems = (params: ItemListParams = {}): Promise<PaginatedItems> 
   if (params.page != null) sp.set('page', String(params.page))
   if (params.per_page != null) sp.set('per_page', String(params.per_page))
   if (params.library_id != null) sp.set('library_id', String(params.library_id))
+  if (params.library_ids) params.library_ids.forEach((id) => sp.append('library_ids', String(id)))
   const qs = sp.toString()
   return apiFetch<PaginatedItems>(`/api/items${qs ? `?${qs}` : ''}`)
 }
@@ -345,6 +348,33 @@ export const getItem = (key: string): Promise<ItemDetail> =>
 /** Re-inventory the item's folder on disk + resync the sidecar (per-item rescan). */
 export const rescanItem = (key: string): Promise<ItemDetail> =>
   apiFetch<ItemDetail>(`/api/items/${key}/rescan`, { method: 'POST' })
+
+/**
+ * Move an item to another library (issue #25). Relocates the on-disk directory
+ * (copy → verify-hash → remove), updates library_id + dir_path, re-inventories.
+ */
+export const moveItem = (key: string, targetLibraryId: number): Promise<ItemDetail> =>
+  apiFetch<ItemDetail>(`/api/items/${key}/move`, {
+    method: 'POST',
+    body: JSON.stringify({ target_library_id: targetLibraryId }),
+  })
+
+export interface BulkMoveResult {
+  total: number
+  moved: number
+  skipped: { key: string; reason: string }[]
+  errors: { key: string; reason: string }[]
+}
+
+/** Bulk-move items to another library (per-item isolation; partial success). */
+export const bulkMoveItems = (
+  keys: string[],
+  targetLibraryId: number,
+): Promise<BulkMoveResult> =>
+  apiFetch<BulkMoveResult>('/api/items/move', {
+    method: 'POST',
+    body: JSON.stringify({ keys, target_library_id: targetLibraryId }),
+  })
 
 export const favoriteItem = (key: string): Promise<FavoriteOut> =>
   apiFetch<FavoriteOut>(`/api/items/${key}/favorite`, { method: 'POST' })
@@ -374,23 +404,8 @@ export const uploadItemImage = (
 export const deleteItem = (key: string): Promise<void> =>
   apiFetch<void>(`/api/items/${key}`, { method: 'DELETE' })
 
-export const deleteItemImage = (key: string, imageId: number): Promise<void> => {
-  const headers = new Headers()
-  const csrf = getCsrfToken()
-  if (csrf) headers.set('X-CSRF-Token', csrf)
-  return fetch(`/api/items/${key}/images/${imageId}`, { method: 'DELETE', headers })
-    .then(async (res) => {
-      if (!res.ok) {
-        let detail: unknown
-        try { detail = await res.json() } catch { detail = res.statusText }
-        const message =
-          typeof detail === 'object' && detail !== null && 'detail' in detail
-            ? String((detail as Record<string, unknown>)['detail'])
-            : res.statusText
-        throw new ApiError(res.status, message, detail)
-      }
-    })
-}
+export const deleteItemImage = (key: string, imageId: number): Promise<void> =>
+  apiFetch<void>(`/api/items/${key}/images/${imageId}`, { method: 'DELETE' })
 
 export const listTags = (params: {
   q?: string

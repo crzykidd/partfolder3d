@@ -16,6 +16,8 @@ from ...auth.deps import csrf_protect, get_current_user, get_db
 from ...config import settings
 from ...models.import_session import ImportSession, ImportSessionStatus, ImportSourceType
 from ...models.user import User
+from ...storage.link_url import normalize_link_url
+from .commit import router as _commit_router
 from .helpers import (  # noqa: F401 (reconcile_tags is imported by tests and worker tasks)
     _session_out,
     reconcile_tags,
@@ -56,9 +58,10 @@ async def _fetch_remote_share(url: str, timeout: int) -> dict:
             resp.raise_for_status()
             return resp.json()  # type: ignore[return-value]
     except Exception as exc:
+        log.warning("_fetch_remote_share: failed to fetch remote share link: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to fetch remote share link: {exc}",
+            detail="Failed to fetch remote share link.",
         ) from exc
 
 
@@ -79,6 +82,7 @@ class ShareLinkImportRequest(BaseModel):
 
 router = APIRouter()
 router.include_router(_sessions_router)
+router.include_router(_commit_router)
 router.include_router(_site_caps_router)
 
 
@@ -147,9 +151,12 @@ async def import_from_share_link(
     try:
         assert_safe_url(api_url)
     except SSRFBlockedError as exc:
+        # Log the specific block reason server-side; return a generic message
+        # so we don't leak internal-network topology to the importing user.
+        log.warning("import_from_share_link: SSRF-blocked share URL: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Blocked: {exc}",
+            detail="URL is not allowed.",
         ) from exc
 
     # Fetch remote metadata
@@ -176,7 +183,9 @@ async def import_from_share_link(
         if isinstance(item_data, dict)
         else remote_data.get("license")
     )
-    remote_source_url: str | None = (
+    # Drop non-http(s) schemes from the remote instance's source_url so it can't
+    # plant a javascript: href on the item / public share page (storage.link_url).
+    remote_source_url: str | None = normalize_link_url(
         item_data.get("source_url")
         if isinstance(item_data, dict)
         else remote_data.get("source_url")

@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from pathlib import Path
+from typing import Any
 
 import sqlalchemy as sa
+from arq.connections import ArqRedis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -155,7 +158,82 @@ async def _write_item_sidecar(db: AsyncSession, item: Item) -> None:
     write_sidecar(item_dir, data, item.title, item.key)
 
 
-async def _enqueue_render(item_id: int, model_extensions: list[str] | None = None) -> None:
+# Small delay applied to background jobs so the caller's transaction — which
+# holds the queued Job row and, on the create/import path, the not-yet-committed
+# item that row FKs — commits before the worker can pop the job and claim the
+# row.  See job_tracker.claim_or_create_job for the full race rationale (#20).
+_ENQUEUE_DEFER_S = 1.0
+
+
+async def _write_queued_row_and_enqueue(
+    item_id: int,
+    *,
+    pool: ArqRedis,
+    db: AsyncSession | None,
+    task: str,
+    job_type: str,
+    enqueue_kwargs: dict[str, Any] | None = None,
+) -> None:
+    """Write a ``queued`` Job row (when *db* is given) and enqueue *task*.
+
+    Issue #20/#30: a Job row is now created at **enqueue** time (status
+    ``queued``) so backlogged work is visible before any worker starts it.  We
+    self-assign the arq job id so the queued row and the arq job agree on it; the
+    worker later claims that exact row (:func:`claim_or_create_job`).
+
+    Fully fire-and-forget: the row write (isolated in a SAVEPOINT so a failure
+    cannot poison the caller's transaction) and the enqueue are independently
+    guarded — neither may block or roll back item creation/rescan.  When *db* is
+    None (a caller that cannot supply a session) we simply enqueue without a
+    queued row; the worker's claim-or-create still tracks the job.
+    """
+    arq_job_id = uuid.uuid4().hex
+    row_written = False
+
+    if db is not None:
+        try:
+            from ..models.job import Job  # noqa: PLC0415
+
+            async with db.begin_nested():
+                db.add(
+                    Job(
+                        type=job_type,
+                        status="queued",
+                        payload={"item_id": item_id},
+                        item_id=item_id,
+                        arq_job_id=arq_job_id,
+                    )
+                )
+                await db.flush()
+            row_written = True
+        except Exception:
+            log.exception(
+                "%s: failed to write queued Job row for item %s", task, item_id
+            )
+
+    kwargs: dict[str, Any] = {"_defer_by": _ENQUEUE_DEFER_S}
+    # Only pin the arq job id when the queued row was written, so the worker's
+    # ctx["job_id"] matches the row it must claim.  If the row write failed we let
+    # arq assign its own id and the worker falls back to inserting a running row.
+    if row_written:
+        kwargs["_job_id"] = arq_job_id
+    if enqueue_kwargs:
+        kwargs.update(enqueue_kwargs)
+
+    try:
+        await pool.enqueue_job(task, item_id, **kwargs)
+        log.debug("%s: enqueued for item %s (queued_row=%s)", task, item_id, row_written)
+    except Exception:
+        log.exception("%s: failed to enqueue for item %s", task, item_id)
+
+
+async def _enqueue_render(
+    item_id: int,
+    *,
+    pool: ArqRedis,
+    db: AsyncSession | None = None,
+    model_extensions: list[str] | None = None,
+) -> None:
     """Fire-and-forget: enqueue a render_item arq task for an item.
 
     Failure to enqueue (e.g. Redis not available) is logged but does NOT
@@ -188,53 +266,37 @@ async def _enqueue_render(item_id: int, model_extensions: list[str] | None = Non
             )
             return
 
-    try:
-        from arq import create_pool  # noqa: PLC0415
-        from arq.connections import RedisSettings  # noqa: PLC0415
-
-        redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-        await redis.enqueue_job("render_item", item_id)
-        await redis.aclose()
-        log.debug("_enqueue_render: render_item enqueued for item %s", item_id)
-    except Exception:
-        log.exception("_enqueue_render: failed to enqueue render for item %s", item_id)
+    await _write_queued_row_and_enqueue(
+        item_id, pool=pool, db=db, task="render_item", job_type="render"
+    )
 
 
-async def _enqueue_analyze(item_id: int) -> None:
+async def _enqueue_analyze(
+    item_id: int, *, pool: ArqRedis, db: AsyncSession | None = None
+) -> None:
     """Fire-and-forget: enqueue analyze_item alongside render on item events.
 
     Phase 16: called on item create / file change / per-item Rescan.
-    Never blocks item creation.
+    Issue #30: writes a ``queued`` Job row (type=analyze) so mesh-analysis work
+    is visible before and while it runs.  Never blocks item creation.
     """
-    try:
-        from arq import create_pool  # noqa: PLC0415
-        from arq.connections import RedisSettings  # noqa: PLC0415
-
-        redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-        await redis.enqueue_job("analyze_item", item_id)
-        await redis.aclose()
-        log.debug("_enqueue_analyze: analyze_item enqueued for item %s", item_id)
-    except Exception:
-        log.exception("_enqueue_analyze: failed to enqueue analysis for item %s", item_id)
+    await _write_queued_row_and_enqueue(
+        item_id, pool=pool, db=db, task="analyze_item", job_type="analyze"
+    )
 
 
-async def _enqueue_extract_archives(item_id: int) -> None:
+async def _enqueue_extract_archives(
+    item_id: int, *, pool: ArqRedis, db: AsyncSession | None = None
+) -> None:
     """Fire-and-forget: enqueue extract_archives for an item that contains ZIPs.
 
     Phase B (render-rework-B): called on import-session commit when the item
     contains at least one role=zip file.  Never blocks item creation.
     """
-    try:
-        from arq import create_pool  # noqa: PLC0415
-        from arq.connections import RedisSettings  # noqa: PLC0415
-
-        redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-        await redis.enqueue_job("extract_archives", item_id)
-        await redis.aclose()
-        log.debug(
-            "_enqueue_extract_archives: extract_archives enqueued for item %s", item_id
-        )
-    except Exception:
-        log.exception(
-            "_enqueue_extract_archives: failed to enqueue for item %s", item_id
-        )
+    await _write_queued_row_and_enqueue(
+        item_id,
+        pool=pool,
+        db=db,
+        task="extract_archives",
+        job_type="extract_archives",
+    )

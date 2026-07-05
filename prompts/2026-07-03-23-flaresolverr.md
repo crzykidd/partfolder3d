@@ -9,6 +9,12 @@ result:                  # one-line summary of the outcome
 
 # Task: Add FlareSolverr as a fallback-scraper backend (issue #23)
 
+> ⚠️ **SCOPE EXPANDED — re-scope before dispatch.** The owner grew this from "add FlareSolverr"
+> into a **pluggable scraper-backends framework** (each scraper enable/disable + prioritize +
+> per-scraper timeout + usage tracking with retention/manual-clear + test-connection, and AgentQL
+> retrofitted into it). **`docs/scrapers-spec.md` is now the authoritative design** — implement to
+> that, not just the FlareSolverr-only steps below (which remain valid as the FlareSolverr slice).
+
 Add [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) as a free, self-hosted
 alternative/companion to the existing AgentQL Cloudflare-fallback scraper. Both backends
 can be enabled at once, tried in a configurable order (default: FlareSolverr first, since

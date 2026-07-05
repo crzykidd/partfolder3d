@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient
@@ -516,18 +516,19 @@ async def test_commit_honors_patched_default_image(
     # Mock httpx so both URL fetches succeed.
     fake_bytes = b"\xff\xd8\xff\xe0"  # minimal JFIF header
 
-    def _make_mock_client(*args: object, **kwargs: object) -> MagicMock:  # type: ignore[return]
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "image/jpeg"}
-        mock_response.content = fake_bytes
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get = MagicMock(return_value=mock_response)
-        return mock_client
+    from app.storage.ssrf_guard import GuardedResponse  # noqa: PLC0415
 
-    with patch("httpx.Client", side_effect=_make_mock_client):
+    def _fake_guarded_fetch(url: str, **kwargs: object) -> GuardedResponse:
+        return GuardedResponse(
+            status_code=200,
+            headers={"content-type": "image/jpeg"},
+            content=fake_bytes,
+            final_url=url,
+        )
+
+    with patch(
+        "app.routers.import_sessions.sessions.guarded_fetch", _fake_guarded_fetch
+    ):
         commit_resp = await client.post(
             f"/api/import-sessions/{session_id}/commit",
             headers={"X-CSRF-Token": csrf},
@@ -623,18 +624,19 @@ async def test_commit_fallback_honors_default_image_path(
 
     fake_bytes = b"\xff\xd8\xff\xe0"
 
-    def _make_mock_client(*args: object, **kwargs: object) -> MagicMock:  # type: ignore[return]
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "image/jpeg"}
-        mock_response.content = fake_bytes
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get = MagicMock(return_value=mock_response)
-        return mock_client
+    from app.storage.ssrf_guard import GuardedResponse  # noqa: PLC0415
 
-    with patch("httpx.Client", side_effect=_make_mock_client):
+    def _fake_guarded_fetch(url: str, **kwargs: object) -> GuardedResponse:
+        return GuardedResponse(
+            status_code=200,
+            headers={"content-type": "image/jpeg"},
+            content=fake_bytes,
+            final_url=url,
+        )
+
+    with patch(
+        "app.routers.import_sessions.sessions.guarded_fetch", _fake_guarded_fetch
+    ):
         commit_resp = await client.post(
             f"/api/import-sessions/{session_id}/commit",
             headers={"X-CSRF-Token": csrf},

@@ -30,6 +30,7 @@ import { DownloadsSection } from './item/DownloadsPanel'
 import { ObjectBreakdownSection } from './item/ObjectBreakdown'
 import { PrintHistorySection } from './item/PrintHistory'
 import { ShareSection } from './item/ShareControls'
+import { MoveToLibrary } from './item/MoveToLibrary'
 
 export function ItemPage() {
   const { key } = useParams<{ key: string }>()
@@ -225,6 +226,7 @@ export function ItemPage() {
         {/* Delete item (moves to trash) */}
         {isOwnerOrAdmin && (
           <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <MoveToLibrary itemKey={item.key} currentLibraryId={item.library_id} />
             {deleteItemMutation.isError && (
               <span style={{ fontSize: 11, color: 'var(--aurora-danger)' }}>Delete failed</span>
             )}

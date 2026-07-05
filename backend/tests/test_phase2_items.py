@@ -437,6 +437,104 @@ async def test_create_item_with_creator(client: AsyncClient, tmp_path: Path) -> 
     assert data["creator"]["name"] == "Jane Maker"
 
 
+# ---------------------------------------------------------------------------
+# javascript:-scheme XSS guard on source_url / creator.profile_url
+# (audit-2026-07-03 §A [med]).  These fields render into anchor hrefs, incl. the
+# unauthenticated public share page — only http(s) may be stored.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad_url",
+    [
+        "javascript:alert(1)",
+        "data:text/html,<script>alert(1)</script>",
+        "vbscript:msgbox",
+        "//evil.example.com",
+    ],
+)
+async def test_patch_item_rejects_dangerous_source_url(
+    client: AsyncClient, tmp_path: Path, bad_url: str
+) -> None:
+    """PATCH with a non-http(s) source_url is rejected at the schema boundary (422)."""
+    csrf = await _login_admin(client, tmp_path)
+    _, created = await _create_library_and_item(client, tmp_path, csrf)
+    key = created["key"]
+
+    resp = await client.patch(
+        f"/api/items/{key}",
+        json={"source_url": bad_url},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 422, resp.text
+    # And the value was not stored.
+    get_resp = await client.get(f"/api/items/{key}")
+    assert get_resp.json()["source_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_patch_item_accepts_https_source_url(
+    client: AsyncClient, tmp_path: Path
+) -> None:
+    """A legitimate https source_url is accepted and stored."""
+    csrf = await _login_admin(client, tmp_path)
+    _, created = await _create_library_and_item(client, tmp_path, csrf)
+    key = created["key"]
+
+    resp = await client.patch(
+        f"/api/items/{key}",
+        json={"source_url": "https://printables.com/model/123"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["source_url"] == "https://printables.com/model/123"
+
+
+@pytest.mark.asyncio
+async def test_patch_item_rejects_dangerous_creator_profile_url(
+    client: AsyncClient, tmp_path: Path
+) -> None:
+    """PATCH with a javascript: creator profile_url is rejected (422)."""
+    csrf = await _login_admin(client, tmp_path)
+    _, created = await _create_library_and_item(client, tmp_path, csrf)
+    key = created["key"]
+
+    resp = await client.patch(
+        f"/api/items/{key}",
+        json={"creator": {"name": "Evil", "profile_url": "javascript:alert(document.cookie)"}},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_create_item_rejects_dangerous_creator_profile_url(
+    client: AsyncClient, tmp_path: Path
+) -> None:
+    """POST with a javascript: creator profile_url is rejected (422)."""
+    csrf = await _login_admin(client, tmp_path)
+    mount = str(tmp_path / "lib_xss")
+    Path(mount).mkdir(parents=True, exist_ok=True)
+    lib_resp = await client.post(
+        "/api/libraries",
+        json={"name": "XSS Lib", "mount_path": mount},
+        headers={"X-CSRF-Token": csrf},
+    )
+    lib = lib_resp.json()
+
+    resp = await client.post(
+        "/api/items",
+        json={
+            "title": "Evil Item",
+            "library_id": lib["id"],
+            "creator": {"name": "Evil", "profile_url": "javascript:alert(1)"},
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 422, resp.text
+
+
 @pytest.mark.asyncio
 async def test_update_item_tags(client: AsyncClient, tmp_path: Path) -> None:
     """PATCH /api/items/{key} replaces tags."""

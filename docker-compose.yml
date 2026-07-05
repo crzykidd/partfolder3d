@@ -47,10 +47,14 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    # Password-protect Redis: arq deserializes job bodies, so write access to
+    # the queue is code-execution in the worker. Not network-published today,
+    # but requirepass is cheap defense-in-depth. Set REDIS_PASSWORD in .env.
+    command: redis-server --requirepass "${REDIS_PASSWORD:-changeme}"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -68,8 +72,13 @@ services:
         required: false   # .env is optional; env vars can be set directly
     environment:
       DATABASE_URL: "postgresql+asyncpg://partfolder3d:${POSTGRES_PASSWORD:-changeme}@db:5432/partfolder3d"
-      REDIS_URL: "redis://redis:6379"
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
       DATA_DIR: /data
+      # The admin "Add library" folder browser can only pick paths under these roots
+      # (default /library). Libraries mounted as SUBFOLDERS of /library (e.g.
+      # /library/main, /library/minis below) work with the default — no change needed.
+      # Only if you mount a library at a SEPARATE top-level path, list it here too, e.g.:
+      #   FS_BROWSE_ROOTS: '["/library","/library2"]'
       RUN_MIGRATIONS: "true"
     volumes:
       - ./data:/data
@@ -79,9 +88,14 @@ services:
       # After first login, register each container path on the Libraries admin
       # page (Admin → Content → Libraries) to make it visible in the catalog.
       #
-      # Uncomment and edit the host path on the left:
+      # Uncomment and edit the host path on the left. Mounting each library as a
+      # SUBFOLDER of /library keeps it browsable with the default
+      # FS_BROWSE_ROOTS=["/library"] — no extra config needed:
       #   - /mnt/nas/3dprints:/library/main   # <-- EDIT: host path → container path
       #   - /mnt/nas/minis:/library/minis     # add as many libraries as you need
+      # To mount a library at a SEPARATE top-level path instead, also list that path
+      # in FS_BROWSE_ROOTS (backend environment above), e.g.:
+      #   - /mnt/nas/other:/library2          # then FS_BROWSE_ROOTS: '["/library","/library2"]'
     depends_on:
       db:
         condition: service_healthy
@@ -111,7 +125,7 @@ services:
         required: false
     environment:
       DATABASE_URL: "postgresql+asyncpg://partfolder3d:${POSTGRES_PASSWORD:-changeme}@db:5432/partfolder3d"
-      REDIS_URL: "redis://redis:6379"
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
       DATA_DIR: /data
       # Render thread caps — override the Dockerfile defaults from RENDER_CPU_THREADS.
       # All six vars must be set so every numeric-thread library sees the cap.
@@ -130,6 +144,7 @@ services:
       #
       #   - /mnt/nas/3dprints:/library/main   # <-- EDIT: same mounts as backend
       #   - /mnt/nas/minis:/library/minis
+      #   - /mnt/nas/other:/library2          # separate top-level root (mirror backend)
     depends_on:
       db:
         condition: service_healthy

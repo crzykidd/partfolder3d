@@ -6,7 +6,7 @@ See .env.example for documentation of every variable.
 
 from typing import Annotated
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -24,7 +24,11 @@ class Settings(BaseSettings):
     )
 
     # ---- Redis / job queue ----
-    REDIS_URL: str = "redis://localhost:6379"
+    # Password-authenticated by default (Redis runs with --requirepass). The
+    # password is normally injected by compose via REDIS_PASSWORD; this default
+    # is the bare-metal fallback. Every arq connection derives from this URL, so
+    # the password propagates automatically through RedisSettings.from_dsn().
+    REDIS_URL: str = "redis://:changeme@localhost:6379/0"
 
     # ---- App paths ----
     DATA_DIR: str = "/data"
@@ -51,9 +55,22 @@ class Settings(BaseSettings):
             if s.startswith("["):  # explicit JSON array
                 import json
 
-                return json.loads(s)
-            return [part.strip() for part in s.split(",") if part.strip()]
-        return v
+                result: object = json.loads(s)
+            else:
+                result = [part.strip() for part in s.split(",") if part.strip()]
+        else:
+            result = v
+        # Reject the CORS wildcard: main.py mounts CORSMiddleware with
+        # allow_credentials=True, and the CORS spec forbids "*" together with
+        # credentials — browsers silently reject the response, so the operator
+        # sees a broken config with no error. Fail loud at startup instead.
+        if isinstance(result, list) and any(str(o).strip() == "*" for o in result):
+            raise ValueError(
+                'ALLOWED_ORIGINS may not be "*": the API sends credentials '
+                "(cookies), and browsers reject a wildcard CORS origin when "
+                "credentials are enabled. List explicit origins instead."
+            )
+        return result
 
     # ---- Session cookies ----
     # Set to False for local http:// dev (Docker or plain uvicorn).
@@ -121,12 +138,17 @@ class Settings(BaseSettings):
     SCRAPE_TIMEOUT: int = 15
     # Maximum number of images to collect per scrape.
     SCRAPE_MAX_IMAGES: int = 20
+    # Max size (MB) of a single scraped/AgentQL image fetched at commit time.
+    # The guarded fetch streams the body and aborts once this cap is exceeded,
+    # so a hostile page can't OOM/fill-disk the worker with a huge "image".
+    SCRAPE_IMAGE_MAX_MB: int = 25
+    # Max size (MB) of an HTML page body read by the URL scraper.  Streamed with
+    # the same abort-on-cap guard; non-HTML/oversized responses are rejected.
+    SCRAPE_HTML_MAX_MB: int = 5
 
     # ---- Sharing (Phase 7) ----
-    # Default expiry for new share links, in days.
-    # Can be overridden per-link.  Set to 0 for "never expires".
-    # Also stored as DB setting "share_default_expiry_days" for per-instance override.
-    SHARE_DEFAULT_EXPIRY_DAYS: int = 30
+    # NOTE: the default share-link expiry is NOT an env var — it lives in the DB
+    # Setting "share_default_expiry_days" (admin UI), read in routers/shares.py.
     # HTTP timeout (seconds) for instance-to-instance import fetch.
     INSTANCE_IMPORT_TIMEOUT: int = 30
 
@@ -135,6 +157,25 @@ class Settings(BaseSettings):
     JOB_RETENTION_SUCCEEDED_DAYS: int = 7
     # Days after which a failed/cancelled/superseded job row is hard-deleted.
     JOB_RETENTION_FAILED_DAYS: int = 30
+
+    # ---- Trash / orphaned-file reclamation (Fix Set 8) ----
+    # Days a soft-deleted item folder survives under DATA_DIR/trash before the
+    # daily orphan_cleanup cron HARD-DELETES it.  Item delete moves the folder to
+    # /data/trash/<ts>-<key>/ instead of rm -rf, so this is the grace window
+    # before that copy is permanently removed.
+    # RISK: this permanently deletes files.  Keep the default generous.
+    # Set to 0 (or negative) to DISABLE trash purging entirely (trash then grows
+    # forever — you must prune it by hand).
+    TRASH_RETENTION_DAYS: int = 30
+    # Whether the daily orphan_cleanup cron DELETES orphaned files under items'
+    # prints/ directories — gcode/photo files left on disk when a PrintRecord was
+    # deleted (the DELETE endpoint intentionally leaves files behind).
+    # DEFAULT False = REPORT ONLY: orphans are logged (count + paths + bytes) but
+    # never deleted, so the owner can review before enabling deletion.
+    # When True, an orphaned print file is deleted ONLY if it is BOTH unreferenced
+    # AND older than TRASH_RETENTION_DAYS, with per-file logging.
+    # RISK: True permanently deletes files.
+    ORPHAN_PRINTS_DELETE: bool = False
 
     # ---- ZIP auto-extraction (Phase B / render-rework-B) ----
     # Maximum total uncompressed size (MB) of a single ZIP archive.
@@ -164,6 +205,22 @@ class Settings(BaseSettings):
                 return json.loads(s)
             return [part.strip() for part in s.split(",") if part.strip()]
         return v
+
+    @model_validator(mode="after")
+    def _reject_weak_db_password(self) -> "Settings":
+        # Fail fast if the weak default password ("changeme") reaches a
+        # non-dev deployment — don't let production silently run with it.
+        # DEBUG=true (the dev compose stack) is allowed to keep using it.
+        if not self.DEBUG:
+            from urllib.parse import urlsplit  # noqa: PLC0415
+
+            if urlsplit(self.DATABASE_URL).password == "changeme":
+                raise ValueError(
+                    "DATABASE_URL is using the insecure default password "
+                    "'changeme'. Set a strong POSTGRES_PASSWORD in .env before "
+                    "running in production (or set DEBUG=true for local dev)."
+                )
+        return self
 
 
 settings = Settings()

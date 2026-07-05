@@ -7,8 +7,9 @@ anything the adopted standards govern (branching, commits, releases, handoff pro
 It is the in-repo source of truth for which engineering standards this project conforms
 to, and at which versions.
 
-> **Status:** alpha (v0.3.0) — see [`README.md`](README.md) and [`PRD.md`](PRD.md).
-> Full stack is built; first tagged release pending.
+> **Status:** alpha (v0.4.0) — see [`README.md`](README.md) and [`PRD.md`](PRD.md).
+> Full stack is built and shipping; v0.4.0 is released on `main` (v0.1.1–v0.4.0 tagged),
+> with `dev` == `main` between releases.
 
 ## Operating model (project-specific)
 
@@ -31,6 +32,37 @@ PartFolder 3D is driven from a **central planning session** (a Claude session on
   intentionally **not** adopted.
 
 The operational rules below are pasted verbatim from each adopted standard.
+
+---
+
+## Verify before commit (durable rules)
+
+Every code change is gated. The full recipe is encoded in `scripts/` — do **not**
+re-paste it into prompts; call the scripts (or `make`) and interpret the result.
+
+- **`make verify`** runs both gates. Or individually: **`make verify-backend`**
+  (`scripts/verify-backend.sh` — ephemeral Postgres `pf3d-pg-v` on `:5433` →
+  pinned ruff 0.8.4 → `alembic upgrade head` → `pytest -n auto`, ≈658 tests) and
+  **`make verify-frontend`** (`scripts/verify-frontend.sh` — clean `tsc -b --force`
+  → `npm run build` → `vitest run`, ≈333 tests). Slash: `/verify-backend`,
+  `/verify-frontend`.
+- **Two gotchas the scripts encode — never work around them:** backend tests
+  **require `pytest -n auto`** (xdist gives each worker a fresh DB; a serial run
+  reuses one DB → accumulated rows → spurious count failures); the frontend gate
+  **requires a fresh build** (`tsc -b`'s incremental cache HIDES real type errors;
+  the script forces `--force`).
+- **The dev worker has NO hot-reload.** `uvicorn --reload` hot-reloads the
+  backend, but the worker runs plain `python worker.py` — after any
+  worker/task/scraper edit run **`make worker-restart`** (restarts the
+  `worker` service in `docker-compose.dev.yml`).
+- **Migration numbering is serialized.** A task that creates an Alembic migration
+  must be run **one at a time** — the orchestrator assigns the next `00NN` number
+  in the handoff prompt. Two parallel agents both creating `0023_*` is a
+  guaranteed conflict.
+- **Where things live:** [`docs/architecture.md`](docs/architecture.md) is the
+  module map (feature → router / model / worker task / storage / api client /
+  page / test file) plus the load-bearing technical gotchas. Consult it before
+  grepping for where a feature's code lives.
 
 ---
 

@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as api from '@/lib/api'
 import { extractDomain } from '@/lib/import-utils'
+import { safeHref } from '@/lib/utils'
 import {
   SECTION_LABEL,
   AURORA_INPUT,
@@ -261,7 +262,7 @@ export function TitleStep({ session, onNext }: TitleStepProps) {
             Source
           </span>
           <a
-            href={session.source_url}
+            href={safeHref(session.source_url)}
             target="_blank"
             rel="noopener noreferrer"
             style={{

@@ -12,15 +12,16 @@ import logging
 from datetime import datetime
 from typing import Annotated
 
+from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import csrf_protect, get_db, require_admin
-from ..config import settings
 from ..models.scheduled_job import ScheduledJob
 from ..models.user import User
+from ..worker.arq_pool import get_arq_pool
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +72,7 @@ async def run_now(
     _admin: Annotated[User, Depends(require_admin)],
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    arq: Annotated[ArqRedis, Depends(get_arq_pool)],
 ) -> RunNowResponse:
     """Enqueue a named scheduled job immediately, independent of its schedule.
 
@@ -88,18 +90,13 @@ async def run_now(
             detail=f"Scheduled job {name!r} not found.",
         )
 
-    # Enqueue via arq
+    # Enqueue via the shared arq pool
     try:
-        from arq import create_pool  # noqa: PLC0415
-        from arq.connections import RedisSettings  # noqa: PLC0415
-
-        redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-        await redis.enqueue_job("exec_scheduled_job", name)
-        await redis.aclose()
+        await arq.enqueue_job("exec_scheduled_job", name)
         return RunNowResponse(enqueued=True, message=f"Job {name!r} enqueued.")
     except Exception as exc:
         log.exception("run_now: failed to enqueue %r", name)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Failed to enqueue job: {exc}",
+            detail="Failed to enqueue job.",
         ) from exc

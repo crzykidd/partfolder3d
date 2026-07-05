@@ -2,6 +2,294 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-04 — #26 wizard viewport capture: a real session-image save path (not `uploadSessionFiles`)
+
+The #26 handoff assumed a capture could be saved by reusing `uploadSessionFiles`
+(`POST /api/import-sessions/{id}/files`) and would then appear as a strip image. On inspection that
+path does **not** work for a capture: it only accepts `draft` status (409 in `pending_wizard`, where
+the wizard actually runs) and it creates `ImportSessionFile` rows, whereas the strip renders
+`ImportSessionImage` rows. Nothing in the codebase created local (`is_url=False`) session images —
+only the scraper created `is_url=True` ones. So, per issue #26's own note that this needs a
+"session-image upload path distinct from the item-page endpoint," we added a dedicated
+`POST /api/import-sessions/{id}/images` (allowed while editable, writes a token-named PNG into the
+staging dir, creates an `ImportSessionImage(is_url=False, source="capture")`, first image becomes the
+default). Non-obvious choices:
+- **No migration.** `ImageSource.captured` already exists (migration 0022, from #21) and
+  `ImportSessionImage` already models local images (`is_url`, `source`, `path`); the feature is purely
+  additive routing/UI. No schema change.
+- **Repaired the dormant `is_url=False` commit branch.** The commit handler's local-image branch was
+  never exercised (nothing created such rows) and was internally inconsistent — it checked for the
+  file at `item_dir/<name>` but recorded it under `images/<name>`. It now resolves the source bytes
+  from the staged absolute path (falling back to an already-moved root file), copies into
+  `item_dir/images/`, records the matching `images/<name>` path, and maps `source=="capture"` →
+  `ImageSource.captured`. Re-inventory then adds the File row. Verified end-to-end by a commit test.
+- **Strip preview + serve endpoint.** Local session images previously showed only a filename
+  placeholder ("preview after commit"); they now render via the new path-guarded serve endpoint
+  (`GET /api/import-sessions/{id}/files/{filename}`), so a capture is visible immediately.
+- **Renderable set = `.stl/.obj/.3mf` only** (not `.ply` as the prompt listed): the shipped
+  `ModelViewer` has no PLY loader, so offering PLY would open an empty/errored viewer. Gated to what
+  the viewer can actually render.
+
+## 2026-07-04 — #25 move assets between libraries: copy→verify→remove, and where safety stops
+
+The cross-mount library move (`storage/library_move.py`) is a **copy → verify-by-hash → remove**,
+not an `os.rename` — source and target libraries can be on different filesystems (NFS ↔ local),
+where a rename would `EXDEV`. Non-obvious choices:
+- **Pure/no-DB storage function.** `move_item_to_library(src, dst, key)` does only the filesystem
+  work (copy to a sibling `<dst>.partial-<key>`, hash-verify every file against the source, atomic
+  `replace` into place, then `rmtree` the source). It stays unit-testable on tmp dirs; the router
+  owns the DB (`library_id`/`dir_path` + re-inventory + sidecar) in its own transaction.
+- **Separate journal sub-dir** (`/data/journal/library_moves/`) so it never collides with the
+  rename journal's top-level `*.json` glob or its `JournalEntry` shape. A dedicated
+  `recover_stale_library_moves()` runs at startup alongside `recover_stale_journals`.
+- **Where the guarantee holds vs. stops.** The ABSOLUTE invariant — *an interrupted move never
+  loses files* — is upheld by construction: the source is removed only after the target is a
+  fully hash-verified copy. The one residual window is a crash **between** a successful filesystem
+  move and the DB commit: files exist only at the new path while the row still points at the old
+  one. That is a **DB/FS inconsistency, never data loss**, and the reconcile engine already
+  surfaces a missing item dir as an Issue for the admin — consistent with how `atomic_rename`
+  treats an irrecoverable post-commit DB update. Recovery reconciles the filesystem to a single
+  canonical copy; it deliberately does **not** touch the DB.
+- **Bulk UI deferred.** The bulk endpoint (`POST /api/items/move`, N isolated per-item
+  transactions) ships, but the catalog has **no multi-select affordance**, so per the prompt we
+  shipped the single-item "Move to library" control well and left bulk-UI (a whole selection
+  system) as a follow-up rather than inventing one.
+
+## 2026-07-04 — #27 URL-import: core "no model file attached" issue deferred (owner decision)
+
+Addressed the tractable parts of #27 — title/description SEO-boilerplate stripping, creator
+name/profile-url extraction, full-res image selection over the social `og:image` (#28), tags
+rendering immediately on the Tags step (independent of the AI call), and a **Files row** on
+Review & Commit that flags zero-file (metadata-only) commits. **#27 stays open** for its core
+issue: a URL import attaches **no model file at all** (by design — `create_import_session` for
+`source_type=url` only pre-fills metadata/images), so "paste a URL → add to library" produces a
+committed entry with 0 files. This is a **design fork left to the owner**, not something to pick
+autonomously:
+- **(a) auto-fetch the model file** from the source — but on Printables/MakerWorld/Thingiverse the
+  download is usually login-gated / not directly linkable, so this is site-specific and fragile;
+- **(b) add a manual file-upload step** to the URL wizard (relates to #26 "Try to render file");
+- **(c) accept metadata-only entries** and just keep surfacing the 0-file state (now done via the
+  Files-row warning).
+The Files-row warning ships now so the state is at least never silent; pick (a)/(b)/(c) later.
+
+## 2026-07-03 — Audit remediation round 2 (security + sweep + refactors): what shipped, what's deferred
+
+Worked `docs/audit-2026-07-03.md` §A/§E/§D end to end (round 1 covered §B/§C/§D-ergonomics). 13
+commits on `dev`; backend suite 720 green, frontend 342 green. **Shipped:** SSRF guard,
+`javascript:` XSS, authz hardening, Redis auth + nginx headers + DB-fail-fast + CORS + CI
+pinning, arq shared-pool + JSON serializer, global exception handler + `{exc}` scrub, zip byte
+budget + 3MF XXE parser + backup perms, generalized crash recovery + reclamation cron, and the
+four file-split refactors (items→package, catalog/imports pages, commit.py, issue_action).
+
+**Deliberately deferred (owner decision — not blockers):**
+- **Login rate-limiting + per-user AI spend cap** (§A low) — the real issue (login-timing
+  enumeration oracle) is fixed; throttling is low-value for a single trusted household behind
+  the owner's proxy and needs a Redis limiter. Revisit if exposed to untrusted users.
+- **List pagination + paginated-envelope field-name unification** (§E, print-records/shares/
+  users/etc.) — these return bare lists the frontend consumes; paginating is a **breaking API
+  shape change** not worth doing autonomously at household scale. Batch with a frontend update
+  when convenient.
+- **Test login/setup-helper consolidation into conftest** (§E med) — 29 files; high churn, no
+  behavior/security impact. Do opportunistically, not as a big-bang.
+- **`docs/decisions.md` split, 4× `/api/version` fetch dedup** (§E low/nit) — cosmetic.
+- **Image-digest pinning** (§A low) — churny; action SHA-pinning (the real supply-chain win)
+  shipped. **X-Forwarded-Proto** verified safe (backend keys secure-cookie off `COOKIE_SECURE`,
+  not the header).
+- **DNS-rebinding TOCTOU** in the SSRF guard — accepted residual (see the set-1 entry below).
+- **PRD §C "assorted"** — feature-catalog-altitude items belong in `features-overview.md`, not
+  the intent-level PRD.
+
+## 2026-07-03 — Operational: generalized crash recovery + conservative reclamation cron
+
+Audit §E remediation (set 8). **Crash recovery** at worker startup now reaps ALL jobs stuck in
+`running` (was render-only): idempotent types (`render`, `analyze`, `extract_archives` — single
+`item_id`, safe to re-run) are marked failed + re-enqueued; everything else (`backup`,
+`import_session` commit, `zip_bundle`) is marked failed only (visible, never silently re-run).
+`queued` rows are left untouched until #20 writes them.
+
+**Reclamation cron** (`orphan_cleanup`, daily 05:00 UTC) — net-new scheduled deletion, kept
+deliberately conservative and owner-tunable (**owner: review these defaults**):
+- **Trash purge** — deletes trash entries older than `TRASH_RETENTION_DAYS` (default **30**;
+  set `0` to disable). Every deletion + a summary is logged (no silent truncation).
+- **Orphaned prints** (print files left on disk by `DELETE .../print-records/{id}`) —
+  **report-only by default** (`ORPHAN_PRINTS_DELETE=false`): logs a warning with count + sample
+  paths + bytes, deletes nothing, so the owner can confirm detection before enabling. When set
+  `true`, deletes an orphan only if unreferenced AND older than the retention window, per-file
+  logged. Chosen report-first because this is destructive against user print history.
+
+## 2026-07-03 — Shared arq pool + JSON job serializer (audit §A/§E remediation, set 5)
+
+**One process-wide arq pool, injected — not a module singleton.** The ~32 per-request
+`create_pool()`/`aclose()` sites (fresh pool per request; `aclose()` skipped and leaked when
+`enqueue_job()` raised) were consolidated into a single pool created at app lifespan startup
+(`app.state.arq_pool`) and injected via a `get_arq_pool` FastAPI dependency
+(`app/worker/arq_pool.py`), closed once at shutdown. Fire-and-forget service helpers
+(`_enqueue_render/_analyze/_extract_archives`, `_enqueue_import_job`) take the pool as a
+parameter so both their router callers (inject the shared pool) and their one worker-task caller
+(`extract_archives` passes `ctx.get("redis")`) reuse an existing pool. **Consequence:** the app
+now opens Redis at startup rather than lazily — a hard Redis dependency at boot (compose already
+`depends_on` Redis; arq's `create_pool` retries).
+
+**Two worker-internal enqueue sites kept their own short-lived pool (with `try/finally`).**
+`reconcile.py` (`_behavior_re_render`, `apply_review_item_action`) don't take `ctx`, and threading
+it down their call chains was more invasive than the leak was worth; they call the shared
+`create_arq_pool()` factory (same JSON serializer) wrapped in `try/finally`. The inbox-scan site
+in `scheduled.py` *does* have `ctx`, so it uses `ctx["redis"]` directly.
+
+**arq switched from pickle to JSON on BOTH ends.** Serializer + deserializer live in
+`arq_pool.py` and are set on the shared pool (enqueue side) AND `WorkerSettings` (dequeue side) —
+they must match. All job args are ints/strings; arq stores args as a tuple and JSON restores a
+list, which unpacks identically via `*args`. **Deploy note (also in CHANGELOG):** pickled jobs
+already queued at upgrade time won't deserialize under JSON — drain the worker queue across the
+upgrade (jobs are short-lived, queue normally empty). Also fixed `worker.py`'s `REDIS_URL`
+fallback to use the password-bearing `settings.REDIS_URL` default instead of a bare
+`redis://localhost:6379`.
+
+**Test seam:** the ASGI transport never runs lifespan, so `app.state.arq_pool` is never set and
+there's no Redis in tests. The `client` conftest fixture overrides `get_arq_pool` to return a
+shared-pool `AsyncMock` (`arq_pool` fixture); enqueue-asserting tests inspect its `.enqueue_job`
+instead of patching `arq.create_pool`.
+
+## 2026-07-03 — Authz model: trusted household; per-record write-ownership only
+
+Audit §A remediation (set 3). Two related decisions:
+
+**"All authenticated users are trusted" is the deliberate model — recorded, not fixed.** The
+core catalog has no per-item ownership or role gate on mutations, and a Bearer API key resolves
+to the full user with no per-key scope. For the single-household deployment this is intended:
+every authenticated member may edit/delete/share any item, and an API key is a full-power
+credential. This is NOT a bug to fix now — it's the accepted design. If the instance ever hosts
+less-trusted users, revisit: add an ownership/role gate on item mutations + public-share minting,
+and a `scope` column on `ApiKey`.
+
+**Print-record `visibility="private"` means "hidden from anonymous share viewers," not
+"per-user private."** The model/router docstrings and the item Print-History UI all treat
+private records as visible to every authenticated household member (only the public share path
+filters to `public`). So we enforced **write-ownership** (edit/delete/gcode/photo require the
+record's owner or an admin — closing real cross-user tampering) but left **read shared** within
+the household. Setup TOCTOU closed with a `pg_advisory_xact_lock`; password-reset now
+deactivates the user's sessions; login runs a dummy argon2 verify on unknown emails to kill the
+enumeration timing oracle. (No self-service logged-in password-change endpoint exists, so
+reset-kills-all-sessions has no "current session to preserve" case.)
+
+## 2026-07-03 — SSRF: one guarded-fetch chokepoint; DNS-rebinding accepted as residual
+
+Audit §A remediation (set 1). All user-influenced outbound HTTP now goes through
+`guarded_fetch()` in `backend/app/storage/ssrf_guard.py` — a single chokepoint that validates
+the scheme (http/https only), re-validates **every redirect hop** against the existing IP
+block-list (redirects are NOT auto-followed by httpx anymore), streams with a byte cap, and can
+enforce a content-type allow-list. Wired into `scraper.scrape_url`, `scraper._get_robots`, and
+the commit-time image download in `import_sessions/sessions.py` (the previously-unguarded
+`follow_redirects=True` fetch that wrote `r.content` to disk). New caps `SCRAPE_IMAGE_MAX_MB=25`
+/ `SCRAPE_HTML_MAX_MB=5`; robots cap is a fixed 512 KB constant.
+
+**Accepted residual:** DNS-rebinding (TOCTOU) between the `assert_safe_url`/`guarded_fetch`
+pre-resolution check and httpx's own connect-time resolution is NOT closed — full closure needs
+pinning the connection to the vetted IP via a custom transport, which is invasive for HTTPS
+SNI/cert validation and would break the mock-based test seam. Accepted for the
+single-household / trusted-importer deployment; revisit if the instance ever accepts imports
+from untrusted users.
+
+## 2026-07-03 — Documentation ecosystem: each doc gets one job
+
+Prompted by the full-repo audit (`docs/audit-2026-07-03.md`), we fixed the root cause behind
+most doc drift: the PRD was trying to be **both** the intent spec **and** a feature inventory,
+so every release silently invalidated it. Locked the roles so each doc has a single job:
+
+- **PRD.md** — durable **product intent & requirements** (the *why*). Kept authoritative, but
+  re-scoped to *intent altitude*: it states intent, not a per-endpoint inventory, and is
+  updated only when intent changes.
+- **GitHub issues** — **near-term feature scope** (what we're building *now*). The roadmap
+  lives here, **not** in the PRD. PRD §17 keeps only long-term *vision*.
+- **docs/features-overview.md** — the **as-built feature catalog** (what exists now), promoted
+  to the living "what shipped" reference; updated in the same commit as the feature.
+- **CHANGELOG.md** — release **history**.
+- **docs/decisions.md** — this ADR log.
+- **docs/architecture.md** *(new)* — the **module/where-things-live map** + load-bearing
+  gotchas (relocated out of startnewsession).
+- **prompts/startnewsession.md** — the **lean live-state handoff** only (slimmed ~50%): current
+  release, what's in progress, and pointers into the docs above. Full verify recipe + gotchas
+  moved to their durable homes.
+
+The same map is at the top of `docs/architecture.md` so a new session knows where to look.
+
+## 2026-07-03 — No-archive changelog policy (formalized)
+
+A single living `CHANGELOG.md`. The earlier plan to archive each old series to
+`docs/CHANGELOG-<minor>.x.md` on a minor bump is **dropped** (it never ran, and the owner
+prefers one file). The `/release-prep` Step 3 and the CHANGELOG footer were rewritten to match;
+Keep-a-Changelog compare-links were added. Also formalized: `/release-prep` Step 5 now refreshes
+the **whole** CLAUDE.md Status line, not just the version number — that narrow sync is why
+"first tagged release pending" survived 7 releases.
+
+## 2026-07-03 — Verify recipe canonicalized into scripts (not prose)
+
+The backend/frontend verify recipe used to live only as prose in startnewsession.md, re-pasted
+into every handoff prompt (four memory files existed just to patch failures it caused). It's now
+`scripts/verify-backend.sh` + `scripts/verify-frontend.sh` (+ `Makefile`, `/verify-backend`,
+`/verify-frontend`), referenced from CLAUDE.md and allowlisted in settings.json. Two gotchas are
+encoded once: **(1)** backend tests **require `pytest -n auto`** — under xdist each worker
+*rewrites* `DATABASE_URL` to its own per-worker DB (`partfolder3d_gw0`, …) and drops/creates/
+migrates it; serial runs get only rollback isolation, so committed rows accumulate and produce
+spurious count failures. **(2)** the frontend gate must be a **fresh** `tsc -b --force` build —
+a stale incremental cache hides real type errors. Also added a rule: **Alembic migration
+numbering is serialized** — parallel agents both creating `0023_*` collide, so the orchestrator
+assigns the next `00NN` in the handoff prompt (head is at 0022).
+
+## 2026-07-03 — PRD re-scoped to intent; build-plan marked historical
+
+The PRD was updated to intent altitude (wrong claims fixed: §7 3MF-not-server-rendered +
+vtk-osmesa, tag-tree-depth removed, API keys hashed-not-encrypted, SiteCapability/Image/
+ShareAuditEvent field names, per-library×per-OS prefixes; brief intent sections added for
+modification tracking, file-analysis/3D-preview, import-session lifecycle, job lifecycle). The
+§18 "Resolved decisions" ledger was lifted out of the spec into this file (below).
+`docs/build-plan.md` was marked **historical** (pre-Phase-0 locked decisions kept for
+provenance; supersessions like render-stack → vtk-osmesa are tracked here). One correction made
+in passing: the old "all secrets encrypted at rest" line was wrong post-hashing — see item 7 in
+the relocated ledger for the accurate hashed-vs-encrypted split.
+
+## Resolved decisions & remaining notes (relocated from PRD §18, 2026-07-03)
+
+Historical decision ledger lifted out of the PRD when the PRD was re-scoped to intent
+altitude. Preserved here for provenance; where a decision was later reversed in code the
+current shipped behavior is noted inline.
+
+**Resolved:**
+1. **Key format** — short hash (6–8 char base32). Item dir and URL slug are both
+   `title`-`key`, so identical titles never collide (PRD §3.2).
+2. **Rendering** — CPU-only; GPU is a possible later option (PRD §7, §17).
+3. **ZIP retention** — expire after ~1 day; invalidate on any change in the item dir (PRD §11).
+4. **Sidecar ⇄ DB conflict resolution** — *(revised from the original "last-write-wins with a
+   configurable conflict-mode setting", which never shipped).* Shipped behavior: when both the
+   sidecar and the DB have changed, reconciliation **raises a conflict Issue** rather than
+   silently overwriting; the user resolves it per-item via **Keep-DB** or **Keep-sidecar**.
+   There is no global conflict-mode switch (PRD §4, §8.1).
+5. **Scan schedule** — daily; inotify/file-watching is a later enhancement. *(As shipped the
+   daily schedule is fixed, not a configurable cron; retention count is the tunable knob —
+   configurable cron remains future intent.)* (PRD §8.4).
+6. **Per-item rescan** — on-demand "Rescan disk" button on each item (PRD §8.6).
+7. **Secrets** — no readable secrets in the DB. One-way credentials (user API keys, invite/
+   reset tokens) are stored **hashed**; reusable credentials that must be replayed (site
+   download tokens, AI provider keys) are stored **encrypted** with an instance key.
+   *(Corrected from the original "all tokens/keys encrypted at rest," which predated API keys
+   moving to SHA-256 hashing.)* (PRD §4, §14).
+
+**Remaining implementation notes:**
+- **Instance encryption key** — provisioning done (Fernet key auto-generated at first run
+  into `DATA_DIR/config/secret.key`, 0600, never in DB; losing it means re-entering all
+  secrets). Rotation remains a later utility.
+- **Move journaling / crash recovery** for an interrupted directory rename (PRD §8.5) —
+  resolved: filesystem journal, atomic-rename-as-commit with roll-forward, locked-file safe,
+  bulk-isolated; see `docs/atomic-moves.md`.
+- **Title sanitization** rules for deriving `itemname` from a user-entered title — resolved
+  (NFKD→ASCII→lowercase→`[a-z0-9-]`, 80-char cap, collision-proofed by `<key>`); see
+  `docs/sidecar-schema.md` §2.
+
+**Tag hierarchy history (relocated from PRD §5.2):** an earlier design nested tags into an
+N-deep browse tree because objects were once stored under a tag-name directory structure on
+disk. That disk layout was dropped, so the hierarchy is gone — a popularity-weighted tag
+cloud + popularity sorting replace it.
+
 ## 2026-07-03 — Merge fallout: duplicate `/{key}/jobs` endpoint (#18 vs object-breakdown)
 
 Two parallel worktree branches both built the item-jobs feature: **#18** added

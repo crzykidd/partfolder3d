@@ -34,6 +34,9 @@ async def _try_agentql_fallback(
     from app.models.setting import Setting  # noqa: PLC0415
     from app.storage.agentql_client import agentql_scrape  # noqa: PLC0415
     from app.storage.scraper import ScrapeResult  # noqa: PLC0415
+    from app.storage.ssrf_guard import sanitize_for_log  # noqa: PLC0415
+
+    _su = sanitize_for_log(url)
 
     RESET_DAY = 1  # matches AGENTQL_RESET_DAY in agentql router
 
@@ -68,7 +71,7 @@ async def _try_agentql_fallback(
         try:
             api_key = decrypt(str(api_key_enc))
         except InvalidToken:
-            log.warning("_try_agentql_fallback: key decryption failed for %s", url)
+            log.warning("_try_agentql_fallback: key decryption failed for %s", _su)
             return ScrapeResult(
                 url=url, domain="",
                 blocked=True,
@@ -152,14 +155,14 @@ async def _try_agentql_fallback(
             await db.flush()  # type: ignore[union-attr]
         except Exception:
             log.warning(
-                "_try_agentql_fallback: could not record usage row for %s", url
+                "_try_agentql_fallback: could not record usage row for %s", _su
             )
 
         return sr
 
     except Exception as exc:
         log.warning(
-            "_try_agentql_fallback: unexpected error for %s: %s", url, exc
+            "_try_agentql_fallback: unexpected error for %s: %s", _su, exc
         )
         return None
 
@@ -191,7 +194,9 @@ async def process_import_session(ctx: dict, session_id: str) -> None:
         ImportSourceType,
     )
     from app.models.site_capability import SiteCapability  # noqa: PLC0415
+    from app.storage.link_url import normalize_link_url  # noqa: PLC0415
     from app.storage.scraper import extract_domain, scrape_url  # noqa: PLC0415
+    from app.storage.ssrf_guard import sanitize_for_log  # noqa: PLC0415
 
     try:
         sid = _uuid.UUID(session_id)
@@ -262,6 +267,7 @@ async def process_import_session(ctx: dict, session_id: str) -> None:
                             session.source_url,
                             timeout=_settings.SCRAPE_TIMEOUT,
                             max_images=_settings.SCRAPE_MAX_IMAGES,
+                            html_max_bytes=_settings.SCRAPE_HTML_MAX_MB * 1024 * 1024,
                         ),
                     )
 
@@ -312,7 +318,7 @@ async def process_import_session(ctx: dict, session_id: str) -> None:
                             log.info(
                                 "process_import_session: AgentQL fallback succeeded for %s "
                                 "(title=%r images=%d)",
-                                session.source_url,
+                                sanitize_for_log(session.source_url),
                                 scraped_title,
                                 len(image_urls),
                             )
@@ -330,7 +336,7 @@ async def process_import_session(ctx: dict, session_id: str) -> None:
                             session.scrape_note = note_msg
                             log.info(
                                 "process_import_session: static + AgentQL both blocked for %s: %s",
-                                session.source_url, note_msg,
+                                sanitize_for_log(session.source_url), note_msg,
                             )
 
             # ---- Inbox folder sidecar read ----
@@ -359,8 +365,10 @@ async def process_import_session(ctx: dict, session_id: str) -> None:
                                 src = raw.get("source") or {}
                                 if isinstance(src, dict):
                                     if not session.source_url and src.get("url"):
-                                        # Update session source URL
-                                        session.source_url = str(src["url"])
+                                        # Update session source URL (drop non-http(s)
+                                        # schemes so a hostile sidecar can't plant a
+                                        # javascript: href — see storage.link_url).
+                                        session.source_url = normalize_link_url(str(src["url"]))
                                     if not scraped_license and src.get("license"):
                                         scraped_license = str(src["license"])
                                     if not scraped_source_site and src.get("site"):
@@ -415,7 +423,8 @@ async def process_import_session(ctx: dict, session_id: str) -> None:
             if not session.creator_name:
                 session.creator_name = scraped_creator
             if not session.creator_profile_url:
-                session.creator_profile_url = scraped_creator_url
+                # Drop non-http(s) schemes from scraped creator URLs (XSS-safe href).
+                session.creator_profile_url = normalize_link_url(scraped_creator_url)
             if not session.creator_source_site and scraped_source_site:
                 session.creator_source_site = scraped_source_site
 

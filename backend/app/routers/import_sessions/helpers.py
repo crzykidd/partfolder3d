@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 
 import sqlalchemy as sa
+from arq.connections import ArqRedis
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -225,15 +226,10 @@ def _get_staging_dir() -> Path:
     return staging
 
 
-async def _enqueue_import_job(session_id: str) -> None:
+async def _enqueue_import_job(session_id: str, pool: ArqRedis) -> None:
     """Fire-and-forget: enqueue a process_import_session arq task."""
     try:
-        from arq import create_pool  # noqa: PLC0415
-        from arq.connections import RedisSettings  # noqa: PLC0415
-
-        redis = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
-        await redis.enqueue_job("process_import_session", session_id)
-        await redis.aclose()
+        await pool.enqueue_job("process_import_session", session_id)
         log.debug("_enqueue_import_job: enqueued for session %s", session_id)
     except Exception:
         log.exception(

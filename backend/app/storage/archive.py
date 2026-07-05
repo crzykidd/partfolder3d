@@ -7,8 +7,12 @@ Extracts a ZIP archive into a destination directory with:
 - Configurable caps (uncompressed MB, file count, per-entry size, zip-bomb ratio)
 - Lone top-level wrapper folder stripping
 - Collision-safe renaming on conflicts
-- Clean failure: caps are checked in a pre-scan phase so dest_dir is never
-  partially written on cap-exceeded errors (a temp dir handles in-flight files)
+- Clean failure: caps are checked in a pre-scan phase (from the central-directory
+  declared sizes) AND re-enforced with a running byte budget during the actual
+  decompression, so a crafted ZIP that under-declares its sizes cannot slip past
+  the caps. dest_dir is never partially written on cap-exceeded errors: in-flight
+  files land in a temp dir and are only moved into dest_dir once every entry has
+  been written within budget.
 """
 from __future__ import annotations
 
@@ -28,6 +32,8 @@ _DEFAULT_MAX_FILES = 10_000
 _PER_ENTRY_MAX_MB = 512
 # Zip-bomb guard: bail if (total uncompressed) / (total compressed) exceeds this.
 _BOMB_RATIO = 200
+# Chunk size for the runtime byte-budget copy loop.
+_COPY_CHUNK_BYTES = 1024 * 1024
 
 # Junk: top-level directory names to skip entirely
 _JUNK_TOP_DIRS: frozenset[str] = frozenset({"__MACOSX"})
@@ -62,6 +68,50 @@ class ArchiveError(Exception):
 
     When this is raised no files have been written to dest_dir.
     """
+
+
+class _CapExceeded(Exception):
+    """Internal: raised by the copy loop when real decompressed bytes blow a cap.
+
+    Caught inside extract_zip and re-raised as ArchiveError so extraction aborts
+    (rather than being swallowed by the per-entry recoverable-error handler).
+    """
+
+
+def _copy_within_budget(
+    src: object,
+    dst: object,
+    per_entry_bytes: int,
+    total_remaining: int,
+) -> int:
+    """Copy *src* → *dst* counting real bytes, aborting when a cap is exceeded.
+
+    Streams the decompressed entry in chunks and tracks the actual number of
+    bytes produced (which — for a crafted archive — may exceed the size declared
+    in the central directory). Raises _CapExceeded the moment this entry passes
+    *per_entry_bytes* or its bytes would push the archive past *total_remaining*
+    (the uncompressed budget still available across the whole archive).
+
+    Returns the number of bytes written on success.
+    """
+    written = 0
+    while True:
+        chunk = src.read(_COPY_CHUNK_BYTES)  # type: ignore[attr-defined]
+        if not chunk:
+            break
+        written += len(chunk)
+        if written > per_entry_bytes:
+            raise _CapExceeded(
+                f"entry exceeded per-entry cap of {per_entry_bytes // (1024 * 1024)} MB "
+                f"during decompression (declared size was smaller)"
+            )
+        if written > total_remaining:
+            raise _CapExceeded(
+                "archive exceeded total uncompressed cap during decompression "
+                "(declared sizes were smaller)"
+            )
+        dst.write(chunk)  # type: ignore[attr-defined]
+    return written
 
 
 # ---------------------------------------------------------------------------
@@ -288,12 +338,20 @@ def extract_zip(
             plan.append((info, rel))
 
         # ------------------------------------------------------------------
-        # Extraction: write to a temp dir, then move to dest_dir atomically
+        # Extraction: write every entry into a temp dir under a running byte
+        # budget, then — only once all entries are within budget — move them
+        # into dest_dir. Writing to the temp dir first (rather than moving each
+        # entry as it is written) guarantees dest_dir stays untouched if the
+        # runtime budget aborts mid-archive.
         # ------------------------------------------------------------------
         tmp_dir = Path(
             tempfile.mkdtemp(dir=dest_dir.parent, prefix=".pf3d_extract_")
         )
         try:
+            # (tmp_dest, dest_rel) for each entry written within budget
+            written: list[tuple[Path, str]] = []
+            total_written = 0
+
             for info, dest_rel in plan:
                 # Per-entry size sanity cap (declared size from central directory)
                 if info.file_size > _per_entry_bytes:
@@ -308,7 +366,25 @@ def extract_zip(
 
                 try:
                     with zf.open(info) as src, tmp_dest.open("wb") as dst:
-                        shutil.copyfileobj(src, dst)
+                        entry_bytes = _copy_within_budget(
+                            src,
+                            dst,
+                            _per_entry_bytes,
+                            _max_unc_bytes - total_written,
+                        )
+                except _CapExceeded as ce:
+                    # Real decompressed bytes blew a cap — abort the whole
+                    # extraction. The finally below wipes the temp dir; nothing
+                    # has been moved into dest_dir yet, so it stays untouched.
+                    log.warning(
+                        "extract_zip: %s aborted on %s: %s",
+                        zip_path.name,
+                        info.filename,
+                        ce,
+                    )
+                    raise ArchiveError(
+                        f"ZIP '{zip_path.name}' {ce}."
+                    ) from ce
                 except Exception as exc:
                     result.errors.append(f"{info.filename}: {exc}")
                     log.warning(
@@ -321,7 +397,11 @@ def extract_zip(
                         pass
                     continue
 
-                # Move from temp dir → dest_dir
+                total_written += entry_bytes
+                written.append((tmp_dest, dest_rel))
+
+            # All entries decompressed within budget — commit to dest_dir.
+            for tmp_dest, dest_rel in written:
                 final = dest_dir / dest_rel
                 final.parent.mkdir(parents=True, exist_ok=True)
                 try:

@@ -17,8 +17,8 @@ release.
 | Version source-of-truth | `backend/app/version.py` — literal `__version__ = "<current>"`. Also sync `frontend/package.json` `"version": "<current>"` (same bare semver). |
 | README badge pattern | `version-<current>-0FA4AB` (teal badge) |
 | README What's New heading | `## What's New` |
-| Docs to sync | `CLAUDE.md` — update the top `> **Status:**` line to reference the new version if it names a specific version. |
-| Changelog archive dir | `docs/` (archive files: `docs/CHANGELOG-<minor>.x.md`) |
+| Docs to sync | `CLAUDE.md` — refresh the **whole** top `> **Status:**` line (version number **and** any surrounding prose, e.g. "first tagged release pending") so no stale phrase survives. |
+| Changelog archiving | **None** — single living `CHANGELOG.md`; never split to `docs/CHANGELOG-<minor>.x.md` (see Step 3). |
 
 ## Local validation checks (same commands CI runs)
 
@@ -104,8 +104,7 @@ proceeds silently; everything else pauses for explicit confirmation.
 - **Minor bump** = MINOR increased (MAJOR unchanged), e.g. `0.3.3` → `0.4.0`.
   ALWAYS warn and require confirmation, even for the clean `.0` case. Message:
   this is a **new minor release**, which is infrequent — confirm it's
-  intended. Note that a new minor also fires the changelog archive trigger
-  (Step 3). If the target is a minor bump but PATCH is not `0` (e.g.
+  intended. If the target is a minor bump but PATCH is not `0` (e.g.
   `0.3.3` → `0.4.2`), additionally flag that new minors normally start at
   `.0`.
 
@@ -125,11 +124,8 @@ Do not proceed on any warned tier without a clear affirmative ("yes",
 
 ### 0c — Remaining setup
 
-4. Determine whether this is a **new minor/major** (MINOR or MAJOR differs from
-   current) or a **patch within the current minor**. This decides whether the
-   archive trigger fires (Step 3): minor and major bumps archive **every closed
-   minor series** still in the active file; patch bumps archive nothing.
-5. Capture today's date as `YYYY-MM-DD` for the changelog header.
+4. Capture today's date as `YYYY-MM-DD` for the changelog header. (There is no
+   archive trigger — Step 3 never archives, regardless of bump tier.)
 
 ## Step 1 — Bump the version
 
@@ -153,36 +149,22 @@ In `CHANGELOG.md`:
 4. If the `[Unreleased]` section is empty (no entries to ship), STOP and
    report — there is nothing to release.
 
-## Step 3 — Per-minor archive trigger (MINOR/MAJOR ONLY — summarize-on-archive)
+## Step 3 — Changelog archiving: NONE (single living changelog)
 
-Run this step only when Step 0 determined this is a **new minor (`0.x.0`) or
-major (`x.0.0`) bump**. For a **patch release** (e.g. `0.3.6`), do NOT archive
-anything — skip this step entirely.
+**Do not archive anything, on any bump tier.** This project keeps a **single living
+`CHANGELOG.md`** — every release, oldest to newest, stays in full Keep-a-Changelog
+detail in that one file. There is **no** per-minor archive, no summarize-on-archive
+step, and no `docs/CHANGELOG-<minor>.x.md` files. (An earlier archive-on-minor policy
+was dropped — see `docs/decisions.md`.)
 
-Archive **every closed minor series** still living in the active `CHANGELOG.md`
-(every series whose MINOR is below the new current minor), not just the
-immediately-prior one — this clears any deferred backlog in one pass. For each
-such closed series `<minor>.x`:
+The only maintenance here is the reference-link block at the bottom of `CHANGELOG.md`:
 
-1. **Move the full detail to the archive.** Move the entire series (all its
-   `## [<minor>.PATCH] — <date>` blocks, full content) out of `CHANGELOG.md` into
-   `docs/CHANGELOG-<minor>.x.md`, newest-first, matching the format of any
-   existing archive file. Full Keep-a-Changelog detail is preserved here.
-2. **Leave a summary in the active file.** In place of each moved version, write a
-   condensed summary block:
-   - Heading: `## [<version>] — <date> (summary)`.
-   - Body: **one bullet per major feature or fix.** Use judgment to **drop
-     small/trivial entries** (typo fixes, copy tweaks, minor internal cleanups);
-     keep user-visible features and significant fixes. Phrase each as a tight
-     one-liner.
-   - End the block with a deep link to the full archived section, e.g.
-     `[Full notes →](docs/CHANGELOG-<minor>.x.md#<anchor>)`
-     (anchor = the GitHub-style slug of the full header, e.g. `031--2026-06-21`).
-3. Prepend a link to each new archive file in the "Archived releases" index at the
-   bottom of `CHANGELOG.md` (create the index if absent).
-4. Confirm the active `CHANGELOG.md` now holds `[Unreleased]` + the **current**
-   minor series in **full detail** + each older minor as a **summary block** (with
-   archive deep links).
+1. Under the "Release history policy" footer, update the comparison reference links so
+   they cover the new release. Add a `[$ARGUMENTS]:
+   https://github.com/crzykidd/partfolder3d/compare/v<previous-tag>...v$ARGUMENTS` line,
+   and repoint the `[Unreleased]:` link to `...compare/v$ARGUMENTS...HEAD`.
+2. Confirm the active `CHANGELOG.md` still holds `[Unreleased]` + **every** prior
+   release in **full detail** (nothing moved out, nothing summarized).
 
 ## Step 4 — Sync the README
 
@@ -200,10 +182,13 @@ In `README.md`:
 ## Step 5 — Sync long-form docs
 
 For `CLAUDE.md`:
-- Find the top `> **Status:**` block and update it to reflect the new release
-  if it currently names a specific version (e.g. change "alpha" + a specific
-  version reference). Do not invent new sections — only adjust content that
-  already references a version.
+- Find the top `> **Status:**` block and refresh the **entire Status line**, not just
+  the version number. Update the version reference **and** re-read the surrounding
+  prose for anything now false: stale lifecycle phrases like "first tagged release
+  pending", "pre-release", "unreleased", "N migrations", etc. must be corrected or
+  removed so no obsolete claim survives the bump. (This phrase-sync gap is exactly why
+  "first tagged release pending" outlived seven releases — don't reintroduce it.)
+- Do not invent new sections — only adjust content in that Status block.
 
 ## Step 6 — Validate locally BEFORE committing
 
@@ -250,10 +235,9 @@ chore(release): prepare v$ARGUMENTS
 
 - backend/app/version.py bumped to $ARGUMENTS
 - frontend/package.json bumped to $ARGUMENTS
-- CHANGELOG: rolled [Unreleased] → [$ARGUMENTS] — <today>
+- CHANGELOG: rolled [Unreleased] → [$ARGUMENTS] — <today>; compare-link refs updated
 - README: version badge + What's New entry
-- CLAUDE.md: Status line updated
-<- archive line ONLY if a new-minor archive was performed>
+- CLAUDE.md: Status line refreshed (version + surrounding prose)
 ```
 
 No `Co-authored-by` lines.

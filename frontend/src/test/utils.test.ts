@@ -3,10 +3,11 @@
  *
  * Covers:
  *  - isSafeHttpUrl: XSS guard for user-supplied profile URLs
+ *  - safeHref: render-time href sanitizer (returns undefined for unsafe URLs)
  */
 
 import { describe, it, expect } from 'vitest'
-import { isSafeHttpUrl } from '@/lib/utils'
+import { isSafeHttpUrl, safeHref } from '@/lib/utils'
 
 describe('isSafeHttpUrl', () => {
   it('accepts http URLs', () => {
@@ -47,5 +48,30 @@ describe('isSafeHttpUrl', () => {
   it('rejects protocol-relative URLs', () => {
     // //example.com is not a valid URL without a scheme
     expect(isSafeHttpUrl('//example.com')).toBe(false)
+  })
+})
+
+describe('safeHref', () => {
+  it('returns http/https URLs unchanged', () => {
+    expect(safeHref('http://example.com')).toBe('http://example.com')
+    expect(safeHref('https://printables.com/model/123')).toBe('https://printables.com/model/123')
+  })
+
+  it('returns undefined for dangerous schemes', () => {
+    expect(safeHref('javascript:alert(1)')).toBeUndefined()
+    expect(safeHref('data:text/html,<script>alert(1)</script>')).toBeUndefined()
+    expect(safeHref('vbscript:MsgBox(1)')).toBeUndefined()
+    expect(safeHref('file:///etc/passwd')).toBeUndefined()
+  })
+
+  it('returns undefined for protocol-relative and non-URL strings', () => {
+    expect(safeHref('//evil.example.com')).toBeUndefined()
+    expect(safeHref('not-a-url')).toBeUndefined()
+  })
+
+  it('handles null/undefined/empty gracefully', () => {
+    expect(safeHref(null)).toBeUndefined()
+    expect(safeHref(undefined)).toBeUndefined()
+    expect(safeHref('')).toBeUndefined()
   })
 })

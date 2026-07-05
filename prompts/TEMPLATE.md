@@ -1,6 +1,6 @@
 ---
 name: YYYY-MM-DD-short-description
-status: pending          # pending | completed | failed
+status: pending          # pending | in-progress | done | failed
 created: YYYY-MM-DD
 model:                   # opus = research/planning, sonnet = coding
 completed:               # filled when the work is done
@@ -14,7 +14,7 @@ result:                  # one-line summary of the outcome
 ## Before you start
 
 - <Docs to read first / conventions to match.>
-- <Constraints — paths come from host-paths.md, map-not-copy, etc.>
+- <Constraints — map-not-copy, migration numbering, verify-before-commit, etc.>
 
 ## Working tree check
 
@@ -35,7 +35,7 @@ expected to be modified by "When done" below.
 
 ## When done
 
-1. Update this file's frontmatter: set `status` (completed/failed), `completed` (the
+1. Update this file's frontmatter: set `status` (`done`/`failed`), `completed` (the
    date), and `result` (one line).
 2. `git mv` this file into `prompts/done/` (on success) or `prompts/failed/` (on
    failure). Create the subdir if it doesn't exist yet.
