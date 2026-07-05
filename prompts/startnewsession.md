@@ -6,44 +6,30 @@ It is NOT a full reference: durable rules live in `CLAUDE.md`, the module map + 
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
 "Current state" + "Next phases" before every `/clear`.
 
-**Last updated:** 2026-07-05 — v0.3.0 on `main`; a **large unreleased batch on `dev` is ready**;
-the **immediate next action is to cut the release**.
+**Last updated:** 2026-07-05 — **v0.4.0 released to production**; `dev` == `main`; next up = the
+Phase 2 owner-decision items below.
 
 ## Current state
 
-- **Latest release: `v0.3.0`** on `main` (tagged, GitHub release live). Full app shipping
-  (identity, libraries + atomic-move storage, import wizard + bulk import, catalog, item pages with
-  3D viewer + object breakdown, reconcile, print history + sharing, AI tagging, admin, worker limits).
-- **`dev` is well AHEAD of `main` — a big unreleased batch, every push CI-green, suites ≈769 backend / ≈357 frontend:**
-  - **Audit remediation** (two rounds; `docs/audit-2026-07-03.md`, ~83/93 done): docs/PRD/
-    Claude-ergonomics; the **security cluster** (SSRF, `javascript:` XSS, authz, Redis auth + nginx
-    headers + DB-fail-fast + CORS + CI SHA-pinning, exception hygiene, data-safety); operational
-    hygiene (generalized crash recovery + daily reclamation cron); file-split refactors
-    (items→package, catalog/imports pages, commit.py, issue_action).
-  - **Features / bug-fixes:** #20+#30 queued/analyze job visibility · #28 full-res scraper images +
-    title/desc/creator cleanup · #27 **partial** (tags-immediate + Files row) · #31 auto-approve-tags
-    + bulk approve-all · #25 move-assets-between-libraries · #26 wizard "Try to render file" capture ·
-    analyze-on-import fix · catalog-pagination + scraped-images-in-file-list + dev-worker-DEBUG fixes ·
-    second-library compose support (`FS_BROWSE_ROOTS`).
-  - `closes #N` is in the commits → those issues auto-close on the **dev→main merge** (still open now).
-- **Owner is testing** the app (notably the new **second-library** setup) before cutting the release.
-  The `:dev` docker stack runs **on this host** — diagnose live via `docker logs`/`exec` + the app DB
-  (`docker exec partfolder3d-db-1 psql -U partfolder3d -d partfolder3d`).
+- **Latest release: `v0.4.0`** (2026-07-05 — tagged, GitHub release live, **deployed to prod**;
+  `:latest`/`:0.4.0`/`:0` images published). **`dev` == `main`, nothing queued.** v0.4.0 shipped the
+  two-round audit remediation + a big feature/security batch — full list in `CHANGELOG.md [0.4.0]`.
+  Headline items: the security cluster (SSRF, `javascript:` XSS, authz, Redis-auth, nginx headers,
+  DB-fail-fast, CI SHA-pinning), job visibility (#20/#30), move-between-libraries (#25) + multi-library
+  + catalog library filter, auto-approve tags (#31), and the wizard render-capture (#26).
+- **The docker stack runs on THIS host** — diagnose live via `docker logs`/`exec` + the app DB
+  (`docker exec partfolder3d-db-1 psql -U partfolder3d -d partfolder3d`). Backend routes + frontend
+  **hot-reload** from the repo; the **worker does NOT** (restart it after worker/task/scraper edits).
 
 ## Next phases (roadmap)
 
-**Phase 1 — CUT THE RELEASE (immediate next action).** The dev batch is a broad security + features
-release. Flow: `/release-prep <version>` → merge the dev→main PR (only when all required checks are
-green) → `:latest` publishes → `/release-cut <version>`. Likely a **minor** (e.g. `0.4.0`) — owner
-picks the number. We do **NOT** archive old changelog series.
-⚠️ **Upgrade caveats to put in the release notes:**
-  - **Drain the worker queue** across the upgrade — the arq serializer changed pickle→JSON (in-flight
-    pickled jobs won't deserialize; queue is normally empty, so usually a non-event).
-  - Prod now **fails fast on the default `changeme` DB password** — operators must set a real
-    `POSTGRES_PASSWORD` **and** `REDIS_PASSWORD` (Redis now runs with `--requirepass`).
-  - New knobs to mention: `TRASH_RETENTION_DAYS`, `ORPHAN_PRINTS_DELETE`, `SCRAPE_IMAGE_MAX_MB` /
-    `SCRAPE_HTML_MAX_MB`, `FS_BROWSE_ROOTS` (multi-library).
-  - CodeQL may flag items on the release PR — fix real ones, dismiss FPs (CI notes in `docs/architecture.md`).
+**Phase 1 — cut the release. ✅ DONE (v0.4.0, 2026-07-05)** — the whole dev batch shipped and is in
+prod; upgrade caveats (queue drain, DB/Redis passwords, new knobs) are in the `[0.4.0]` CHANGELOG /
+GitHub release notes. Next release is `/release-prep <next>` when the next batch is ready. **Release
+gotcha to remember:** the CodeQL PR check reports findings against the *changed* code — on a large
+diff it surfaces pre-existing/moved alerts too. Fix real log-injections (`sanitize_for_log`), and
+dismiss genuine path-injection FPs that already have a `resolve()`+`is_relative_to()` barrier (done
+for v0.4.0). CodeQL is non-required but shows the PR red until resolved.
 
 **Phase 2 — owner-decision items (BLOCKED on owner input — don't guess).** All in `docs/decisions.md`:
   - **#27 core fork** — URL import attaches no model file. Pick: (a) auto-fetch the file
