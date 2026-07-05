@@ -94,6 +94,11 @@ const ONE_LIBRARY: LibraryOut[] = [
   { id: 1, name: 'Main', mount_path: '/data/library', enabled: true, item_count: 0 },
 ]
 
+const TWO_LIBRARIES: LibraryOut[] = [
+  { id: 1, name: 'Main', mount_path: '/data/main', enabled: true, item_count: 0 },
+  { id: 2, name: 'Minis', mount_path: '/data/minis', enabled: true, item_count: 0 },
+]
+
 // ---------------------------------------------------------------------------
 // Helper — render CatalogPage with all required providers.
 // ---------------------------------------------------------------------------
@@ -215,6 +220,44 @@ describe('CatalogPage', () => {
       expect(vi.mocked(api.listItems)).toHaveBeenCalledWith(
         expect.objectContaining({ tags: ['miniature'] }),
       )
+    })
+  })
+
+  it('hides the library filter when only one enabled library exists', async () => {
+    vi.mocked(api.listItems).mockResolvedValue(
+      itemsResponse([makeItem({ key: 'aaa1111', title: 'Benchy Boat' })]),
+    )
+    // Default beforeEach mock returns ONE_LIBRARY.
+
+    renderCatalog('/catalog?view=table')
+
+    await waitFor(() => {
+      expect(screen.getByText('Benchy Boat')).toBeInTheDocument()
+    })
+    expect(screen.queryByTitle('Filter by library')).not.toBeInTheDocument()
+  })
+
+  it('lists enabled libraries and re-queries listItems when one is selected', async () => {
+    vi.mocked(api.listItems).mockResolvedValue(
+      itemsResponse([makeItem({ key: 'aaa1111', title: 'Benchy Boat' })]),
+    )
+    vi.mocked(api.listLibraries).mockResolvedValue(TWO_LIBRARIES)
+
+    renderCatalog('/catalog?view=table')
+
+    // With >1 enabled library the control is visible; opening it lists the libraries.
+    const trigger = await screen.findByTitle('Filter by library')
+    fireEvent.click(trigger)
+
+    const miniOption = await screen.findByRole('menuitemcheckbox', { name: 'Minis' })
+    fireEvent.click(miniOption)
+
+    // listItems is re-queried with the selected library id, and the chip shows up.
+    await waitFor(() => {
+      expect(vi.mocked(api.listItems)).toHaveBeenCalledWith(
+        expect.objectContaining({ library_ids: [2] }),
+      )
+      expect(screen.getByText('Library:')).toBeInTheDocument()
     })
   })
 })

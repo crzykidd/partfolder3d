@@ -200,6 +200,8 @@ export interface ItemListParams {
   page?: number
   per_page?: number
   library_id?: number
+  /** Filter by one or more library ids (repeatable ?library_ids=1&library_ids=2). */
+  library_ids?: number[]
 }
 
 export interface TagSummary {
@@ -335,6 +337,7 @@ export const listItems = (params: ItemListParams = {}): Promise<PaginatedItems> 
   if (params.page != null) sp.set('page', String(params.page))
   if (params.per_page != null) sp.set('per_page', String(params.per_page))
   if (params.library_id != null) sp.set('library_id', String(params.library_id))
+  if (params.library_ids) params.library_ids.forEach((id) => sp.append('library_ids', String(id)))
   const qs = sp.toString()
   return apiFetch<PaginatedItems>(`/api/items${qs ? `?${qs}` : ''}`)
 }

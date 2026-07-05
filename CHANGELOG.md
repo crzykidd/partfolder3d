@@ -102,6 +102,12 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **Catalog "filter by library" control (default All, multi-select).** The catalog toolbar now has a
+  library filter that defaults to All (every library) and lets you pick one or more enabled libraries
+  from a checkbox popover; the selection persists in the URL (`libs=1,2`, deep-linkable), shows active
+  chips, and resets to page 1 on change. The control is hidden when only one enabled library exists.
+  Backend `GET /api/items` gains a repeatable `library_ids` query param (combined with the legacy
+  single `library_id` into one `IN(...)` set; empty = all libraries).
 - **"Try to render file" viewport capture in the Add Asset wizard's Images step.** During an upload
   import — before the item exists — you can now open a staged model file (`.stl`/`.obj`/`.3mf`) in the
   in-browser 3D viewer and capture the current view as a session image, which flows through to the

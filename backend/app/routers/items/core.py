@@ -13,6 +13,8 @@ GET    /api/items/{key}/jobs            → active + recent failed jobs for an i
 Phase 3 additions to GET /api/items:
   q          — full-text search (title + description + tags via tsvector + GIN index)
   tags       — AND-filter by tag names (repeat param)
+  library_ids— filter by one or more library ids (repeat param); combined with the
+               legacy single `library_id` into one IN(...) set. Empty = all libraries.
   creator_id — filter by creator
   favorited  — if true, only items starred by current user (requires auth)
   sort       — created_at_desc (default), created_at_asc, updated_at_desc,
@@ -207,6 +209,10 @@ async def list_items(
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=20, ge=1, le=100),
     library_id: int | None = Query(default=None),
+    library_ids: list[int] | None = Query(
+        default=None,
+        description="Filter by one or more library ids (repeat for multiple)",
+    ),
     # Phase 3 search / filter params
     q: str | None = Query(default=None, description="Full-text search (title/description/tags)"),
     tags: list[str] | None = Query(
@@ -232,8 +238,13 @@ async def list_items(
         sort = "created_at_desc"
 
     query = select(Item).options(selectinload(Item.creator))
+    # Library filter: normalize the single `library_id` (backward-compat) and the
+    # repeatable `library_ids` list into one set and match with IN(...). Empty = all.
+    lib_id_set: set[int] = set(library_ids or [])
     if library_id is not None:
-        query = query.where(Item.library_id == library_id)
+        lib_id_set.add(library_id)
+    if lib_id_set:
+        query = query.where(Item.library_id.in_(lib_id_set))
 
     # Full-text search
     params: dict[str, Any] = {}

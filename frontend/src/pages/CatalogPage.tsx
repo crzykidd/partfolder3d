@@ -9,6 +9,7 @@
  *   sort        created_at_desc | created_at_asc | title_asc | title_desc | relevance
  *   view        grid | table
  *   page        current page (1-based)
+ *   libs        comma-separated library ids to filter by (empty = all libraries)
  *
  * Tag browse: popularity-weighted tag cloud (NO hierarchy, NO depth control).
  * Grid view: virtualized with @tanstack/react-virtual (rows of 3 cards).
@@ -35,6 +36,7 @@ import { TagCloud } from './catalog/TagCloud'
 import { VirtualGrid } from './catalog/VirtualGrid'
 import { TableView } from './catalog/TableView'
 import { Pagination } from './catalog/Pagination'
+import { LibraryFilter } from './catalog/LibraryFilter'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -123,6 +125,11 @@ export function CatalogPage() {
   const urlSort = searchParams.get('sort') ?? 'created_at_desc'
   const urlView = (searchParams.get('view') ?? localStorage.getItem('pf3d-catalog-view') ?? 'grid') as 'grid' | 'table'
   const urlPage = searchParams.get('page') ? Number(searchParams.get('page')) : 1
+  // Library filter — a single `libs=1,2` param holding comma-separated ids. Empty = All.
+  const urlLibs = (searchParams.get('libs') ?? '')
+    .split(',')
+    .map((s) => Number(s))
+    .filter((n) => Number.isInteger(n) && n > 0)
 
   // Local search input (debounced sync to URL)
   const [inputValue, setInputValue] = useState(urlQ)
@@ -233,9 +240,42 @@ export function CatalogPage() {
     [setSearchParams],
   )
 
+  // Write a new library-filter selection to the URL. Resets to page 1 (same pattern
+  // as tag/sort/per-page). Only mutates the `libs` param, so the search-debounce
+  // effect (which guards on the search text) is untouched — no page-1 bounce.
+  const setLibs = useCallback(
+    (ids: number[]) =>
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        if (ids.length) {
+          next.set('libs', ids.join(','))
+        } else {
+          next.delete('libs')
+        }
+        next.delete('page')
+        return next
+      }),
+    [setSearchParams],
+  )
+
+  const toggleLibrary = useCallback(
+    (id: number) => {
+      const set = new Set(urlLibs)
+      if (set.has(id)) {
+        set.delete(id)
+      } else {
+        set.add(id)
+      }
+      setLibs([...set])
+    },
+    [urlLibs, setLibs],
+  )
+
+  const clearLibs = useCallback(() => setLibs([]), [setLibs])
+
   // --- Data fetching ---
   const { data: itemsData, isLoading: itemsLoading } = useQuery({
-    queryKey: ['items', urlQ, urlTags, urlCreatorId, urlFavorited, urlSort, urlPage, perPage],
+    queryKey: ['items', urlQ, urlTags, urlCreatorId, urlFavorited, urlSort, urlPage, perPage, urlLibs],
     queryFn: () =>
       api.listItems({
         q: urlQ || undefined,
@@ -245,6 +285,7 @@ export function CatalogPage() {
         sort: urlSort,
         page: urlPage,
         per_page: perPage,
+        library_ids: urlLibs.length ? urlLibs : undefined,
       }),
   })
 
@@ -284,6 +325,9 @@ export function CatalogPage() {
   const total = itemsData?.total ?? 0
   const totalPages = Math.ceil(total / perPage)
   const tags = tagsData?.tags ?? []
+  // Only enabled libraries are selectable; hide the filter entirely with ≤1 of them.
+  const enabledLibraries = (libraries ?? []).filter((l) => l.enabled)
+  const showLibraryFilter = enabledLibraries.length > 1
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18, color: 'var(--aurora-text)' }}>
@@ -370,6 +414,40 @@ export function CatalogPage() {
               <X size={11} />
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Active library-filter chips */}
+      {showLibraryFilter && urlLibs.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>Library:</span>
+          {urlLibs.map((id) => {
+            const lib = enabledLibraries.find((l) => l.id === id)
+            return (
+              <button
+                key={id}
+                onClick={() => toggleLibrary(id)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  background: 'var(--aurora-pill)',
+                  border: '1px solid var(--aurora-pill-border)',
+                  borderRadius: 20,
+                  color: 'var(--aurora-accent)',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: '3px 8px 3px 10px',
+                  cursor: 'pointer',
+                  boxShadow: 'var(--aurora-glow)',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {lib?.name ?? `#${id}`}
+                <X size={11} />
+              </button>
+            )
+          })}
         </div>
       )}
 
@@ -470,6 +548,17 @@ export function CatalogPage() {
                   ))}
                 </select>
               </div>
+
+              {/* Library filter — hidden unless more than one enabled library exists */}
+              {showLibraryFilter && (
+                <LibraryFilter
+                  libraries={enabledLibraries}
+                  selected={urlLibs}
+                  onToggle={toggleLibrary}
+                  onClear={clearLibs}
+                  isDark={isDark}
+                />
+              )}
             </div>
 
             {/* Right cluster: compact/full toggle (grid only) + view toggle */}
