@@ -70,6 +70,10 @@ services:
       DATABASE_URL: "postgresql+asyncpg://partfolder3d:${POSTGRES_PASSWORD:-changeme}@db:5432/partfolder3d"
       REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
       DATA_DIR: /data
+      # Folders the admin "Add library" browser may pick from. Main lives at /library;
+      # /library2 is a second, separate root (see the extra volume below). Add each
+      # extra library's container mount path here or it won't appear in the picker.
+      FS_BROWSE_ROOTS: '["/library","/library2"]'
       DEBUG: "true"
       RUN_MIGRATIONS: "true"
       # Dev runs over plain HTTP, so session/CSRF cookies must NOT be Secure
@@ -81,6 +85,7 @@ services:
       - ./backend:/app                       # source bind-mount for live reload
       - ./private_data/data/app:/data        # app data (config, thumbnails, inbox, renders…)
       - ./private_data/data/library:/library # dev library mount (add more via Admin → Libraries)
+      - ./private_data/data/library2:/library2 # second, separate library root (browsable via FS_BROWSE_ROOTS)
     depends_on:
       db:
         condition: service_healthy
@@ -133,6 +138,7 @@ services:
       - ./backend:/app
       - ./private_data/data/app:/data
       - ./private_data/data/library:/library # dev library mount (same as backend)
+      - ./private_data/data/library2:/library2 # second library root (mirror backend)
     depends_on:
       db:
         condition: service_healthy
