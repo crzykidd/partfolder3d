@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 import shutil
 import uuid
 from datetime import UTC, datetime
@@ -19,6 +20,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,6 +65,22 @@ router = APIRouter(tags=["import"])
 _CT_TO_EXT: dict[str, str] = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
+
+
+# Allowed image types/extensions for session-image (viewport-capture) uploads.
+_ALLOWED_IMAGE_TYPES: set[str] = {
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+}
+_ALLOWED_IMAGE_EXTS: set[str] = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+_IMAGE_CT_TO_EXT: dict[str, str] = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
     "image/webp": ".webp",
     "image/gif": ".gif",
 }
@@ -260,6 +278,159 @@ async def upload_session_files(
             selectinload(ImportSession.images),
         )
         .where(ImportSession.id == session.id)
+    )
+    return _session_out(result.scalar_one())
+
+
+@router.get("/api/import-sessions/{session_id}/files/{filename:path}")
+async def serve_session_file(
+    session_id: str,
+    filename: str,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> FileResponse:
+    """Stream a single staged file from an import session's staging directory.
+
+    Used by the in-browser 3D viewer during the import wizard to fetch a staged
+    model file (the item does not exist yet, so /api/items/... can't serve it).
+
+    ``filename`` is relative to the session's staging dir (staging is flat, so
+    normally just a basename).  Ownership is enforced via ``_load_session``
+    (admins may access any session).  Path traversal is refused: the resolved
+    path must remain inside the staging dir — mirrors the item download barrier.
+    """
+    session = await _load_session(session_id, db, user)
+
+    if not session.staging_dir:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session has no staged files.",
+        )
+
+    staging_dir = Path(session.staging_dir).resolve()
+    # Sanitise: strip any leading slashes so joinpath doesn't override the base.
+    clean_path = filename.lstrip("/")
+    requested = (staging_dir / clean_path).resolve()
+
+    # Path traversal containment barrier: resolved path must stay inside staging.
+    if not requested.is_relative_to(staging_dir):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file path (outside staging directory).",
+        )
+
+    if not requested.exists() or not requested.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File not found."
+        )
+
+    return FileResponse(
+        path=str(requested),
+        filename=requested.name,
+        media_type="application/octet-stream",
+    )
+
+
+@router.post(
+    "/api/import-sessions/{session_id}/images",
+    response_model=ImportSessionOut,
+    status_code=status.HTTP_200_OK,
+)
+async def upload_session_image(
+    session_id: str,
+    user: Annotated[User, Depends(get_current_user)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    file: UploadFile = File(...),
+    source: str = Query(default="captured"),
+) -> ImportSessionOut:
+    """Save a single image onto an import session as an ImportSessionImage row.
+
+    Used by the wizard's "Try to render file" viewport capture (#26): the
+    browser renders a staged model in the 3D viewer, grabs a PNG of the current
+    view, and POSTs it here.  The image is written into the session's staging
+    dir and materialised as a local (is_url=False) session image so it shows in
+    the wizard image strip and is carried through to the committed item.
+
+    ``source`` query param: ``captured`` (viewport screenshot, default) or
+    ``uploaded`` (plain image upload).  Allowed while the session is still
+    editable (pending_wizard / draft / failed).
+    """
+    session = await _load_session(session_id, db, user)
+
+    if session.status not in (
+        ImportSessionStatus.pending_wizard,
+        ImportSessionStatus.draft,
+        ImportSessionStatus.failed,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot add images to a session in status '{session.status}'.",
+        )
+    if not session.staging_dir:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Session has no staging area for images.",
+        )
+
+    # Validate content-type / extension.
+    content_type = (file.content_type or "").split(";")[0].strip().lower()
+    suffix = Path(file.filename or "").suffix.lower()
+    if content_type not in _ALLOWED_IMAGE_TYPES and suffix not in _ALLOWED_IMAGE_EXTS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Unsupported image type.  Allowed: png, jpg, jpeg, webp, gif.",
+        )
+
+    safe_ext = (
+        suffix if suffix in _ALLOWED_IMAGE_EXTS else _IMAGE_CT_TO_EXT.get(content_type, ".png")
+    )
+    # Unique, traversal-proof filename (never derived from client input).
+    is_capture = source == "captured"
+    prefix = "capture" if is_capture else "upload"
+    safe_filename = f"{prefix}_{secrets.token_hex(8)}{safe_ext}"
+
+    staging = Path(session.staging_dir)
+    staging.mkdir(parents=True, exist_ok=True)
+    dest = staging / safe_filename
+    data = await file.read()
+    dest.write_bytes(data)
+
+    # Order after all existing images; first image becomes the default.
+    order_result = await db.execute(
+        select(func.max(ImportSessionImage.order)).where(
+            ImportSessionImage.session_id == session.id
+        )
+    )
+    max_order = order_result.scalar_one_or_none()
+    new_order = 0 if max_order is None else max_order + 1
+
+    img = ImportSessionImage(
+        session_id=session.id,
+        path=str(dest),
+        is_url=False,
+        source="capture" if is_capture else "upload",
+        order=new_order,
+        is_default=(max_order is None),
+    )
+    db.add(img)
+    session.updated_at = datetime.now(UTC)
+    await db.flush()
+
+    # Expire the relationship collections so the reload SELECT re-fetches the
+    # freshly-added image (identity-map collections are otherwise stale).
+    session_id_pk = session.id
+    db.expire(session, ["images", "files"])
+
+    from sqlalchemy.orm import selectinload  # noqa: PLC0415
+
+    result = await db.execute(
+        select(ImportSession)
+        .options(
+            selectinload(ImportSession.files),
+            selectinload(ImportSession.images),
+        )
+        .where(ImportSession.id == session_id_pk)
     )
     return _session_out(result.scalar_one())
 

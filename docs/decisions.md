@@ -2,6 +2,34 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-04 — #26 wizard viewport capture: a real session-image save path (not `uploadSessionFiles`)
+
+The #26 handoff assumed a capture could be saved by reusing `uploadSessionFiles`
+(`POST /api/import-sessions/{id}/files`) and would then appear as a strip image. On inspection that
+path does **not** work for a capture: it only accepts `draft` status (409 in `pending_wizard`, where
+the wizard actually runs) and it creates `ImportSessionFile` rows, whereas the strip renders
+`ImportSessionImage` rows. Nothing in the codebase created local (`is_url=False`) session images —
+only the scraper created `is_url=True` ones. So, per issue #26's own note that this needs a
+"session-image upload path distinct from the item-page endpoint," we added a dedicated
+`POST /api/import-sessions/{id}/images` (allowed while editable, writes a token-named PNG into the
+staging dir, creates an `ImportSessionImage(is_url=False, source="capture")`, first image becomes the
+default). Non-obvious choices:
+- **No migration.** `ImageSource.captured` already exists (migration 0022, from #21) and
+  `ImportSessionImage` already models local images (`is_url`, `source`, `path`); the feature is purely
+  additive routing/UI. No schema change.
+- **Repaired the dormant `is_url=False` commit branch.** The commit handler's local-image branch was
+  never exercised (nothing created such rows) and was internally inconsistent — it checked for the
+  file at `item_dir/<name>` but recorded it under `images/<name>`. It now resolves the source bytes
+  from the staged absolute path (falling back to an already-moved root file), copies into
+  `item_dir/images/`, records the matching `images/<name>` path, and maps `source=="capture"` →
+  `ImageSource.captured`. Re-inventory then adds the File row. Verified end-to-end by a commit test.
+- **Strip preview + serve endpoint.** Local session images previously showed only a filename
+  placeholder ("preview after commit"); they now render via the new path-guarded serve endpoint
+  (`GET /api/import-sessions/{id}/files/{filename}`), so a capture is visible immediately.
+- **Renderable set = `.stl/.obj/.3mf` only** (not `.ply` as the prompt listed): the shipped
+  `ModelViewer` has no PLY loader, so offering PLY would open an empty/errored viewer. Gated to what
+  the viewer can actually render.
+
 ## 2026-07-04 — #25 move assets between libraries: copy→verify→remove, and where safety stops
 
 The cross-mount library move (`storage/library_move.py`) is a **copy → verify-by-hash → remove**,

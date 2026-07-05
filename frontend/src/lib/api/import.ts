@@ -185,6 +185,29 @@ export const uploadSessionFiles = (
   return apiFetchForm<ImportSession>(`/api/import-sessions/${id}/files`, form)
 }
 
+/** URL to stream a staged session file (e.g. for the in-browser 3D viewer). */
+export const sessionFileUrl = (sessionId: string, filename: string): string =>
+  `/api/import-sessions/${sessionId}/files/${encodeURIComponent(filename)}`
+
+/**
+ * Upload an image onto an import session (wizard viewport capture, #26).
+ * `source` is 'captured' (3D viewport screenshot, default) or 'uploaded'.
+ * Returns the refreshed session with the new image in its strip.
+ */
+export const uploadSessionImage = (
+  sessionId: string,
+  file: File,
+  source: 'uploaded' | 'captured' = 'captured',
+): Promise<ImportSession> => {
+  const form = new FormData()
+  form.append('file', file)
+  const qs = source !== 'uploaded' ? `?source=${source}` : ''
+  return apiFetchForm<ImportSession>(
+    `/api/import-sessions/${sessionId}/images${qs}`,
+    form,
+  )
+}
+
 export const commitImportSession = (id: string): Promise<CommitResponse> =>
   apiFetch<CommitResponse>(`/api/import-sessions/${id}/commit`, {
     method: 'POST',

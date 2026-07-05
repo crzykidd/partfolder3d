@@ -102,6 +102,17 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **"Try to render file" viewport capture in the Add Asset wizard's Images step.** During an upload
+  import — before the item exists — you can now open a staged model file (`.stl`/`.obj`/`.3mf`) in the
+  in-browser 3D viewer and capture the current view as a session image, which flows through to the
+  committed item (browser capture, reusing the #21 `preserveDrawingBuffer`/`toBlob` mechanics). This
+  is especially useful because 3MF uploads skip server-side rendering and may lack an embedded
+  thumbnail. Multiple captures (different angles / multi-part models) are supported, and the control
+  only appears when the session has a browser-renderable staged model. Backed by a new staged-file
+  serve endpoint (`GET /api/import-sessions/{id}/files/{filename}`, path-traversal-guarded and
+  owner-scoped) and a session-image save endpoint (`POST /api/import-sessions/{id}/images`) that
+  materializes the capture as a session image; the 3D viewer stays lazy-loaded so three.js is never
+  pulled into the wizard's main bundle. (closes #26)
 - **Move item asset(s) between libraries — single + bulk (`POST /api/items/{key}/move` +
   `POST /api/items/move`).** An item can now be relocated from one library mount to another —
   for reorganizing a collection, or to empty a mis-configured library so it can be hard-deleted

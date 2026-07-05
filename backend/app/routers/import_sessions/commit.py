@@ -273,17 +273,35 @@ async def _commit_session_inner(
             except Exception:
                 log.warning("commit: failed to download image %s", _safe_img_url)
         else:
+            # Local (is_url=False) session image — e.g. a wizard viewport
+            # capture (#26) staged in the session's staging dir.  Locate the
+            # source bytes (prefer the staged absolute path; fall back to a file
+            # already sitting in the item dir), copy into images/, and record a
+            # matching images/<name> Image row.
             rel = Path(si.path).name
-            img_path = item_dir / rel
-            if img_path.exists():
-                if si.path.startswith("images/"):
-                    rel_path = si.path
-                else:
-                    rel_path = str(Path("images") / rel)
+            src = Path(si.path)
+            src_file: Path | None = None
+            if src.is_absolute() and src.is_file():
+                src_file = src
+            elif (item_dir / rel).exists():
+                src_file = item_dir / rel
+
+            if src_file is not None:
+                images_dir = item_dir / "images"
+                images_dir.mkdir(exist_ok=True)
+                dest = images_dir / rel
+                if src_file.resolve() != dest.resolve():
+                    shutil.copy2(str(src_file), str(dest))
+                rel_path = str(dest.relative_to(item_dir))
+                img_source = (
+                    ImageSource.captured
+                    if si.source == "capture"
+                    else ImageSource.uploaded
+                )
                 img_obj = Image(
                     item_id=item.id,
                     path=rel_path,
-                    source=ImageSource.uploaded,
+                    source=img_source,
                     is_default=si.is_default,
                     order=img_order,
                 )

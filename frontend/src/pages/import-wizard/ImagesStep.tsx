@@ -5,10 +5,22 @@
  * remove (✕), and upload of additional images.
  */
 
-import { type ChangeEvent, useRef, useState } from 'react'
+import { type ChangeEvent, Suspense, lazy, useCallback, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Box } from 'lucide-react'
 import * as api from '@/lib/api'
 import { AURORA_BTN_GHOST, AURORA_BTN_PRIMARY } from './styles'
+
+// Lazy-load the 3D viewer so three.js stays out of the wizard's main bundle.
+const LazyModelViewer = lazy(() => import('@/components/viewer/ModelViewer'))
+
+// Extensions the in-browser ModelViewer can actually render (mirrors #21).
+const RENDERABLE_EXTS = new Set(['.stl', '.obj', '.3mf'])
+
+function fileExt(name: string): string {
+  const dot = name.lastIndexOf('.')
+  return dot === -1 ? '' : name.slice(dot).toLowerCase()
+}
 
 export interface ImagesStepProps {
   session: api.ImportSession
@@ -20,6 +32,50 @@ export function ImagesStep({ session, onNext, onPrev }: ImagesStepProps) {
   const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Staged model files the viewer can render (upload imports only; URL imports
+  // have no staged files, so the control simply doesn't appear).
+  const renderableFiles = useMemo(
+    () => session.files.filter((f) => RENDERABLE_EXTS.has(fileExt(f.original_name))),
+    [session.files],
+  )
+
+  // Viewer state: which staged model is open (or null), and whether the
+  // multi-file picker is showing.
+  const [viewerFile, setViewerFile] = useState<{ name: string; ext: string } | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
+
+  const captureMutation = useMutation({
+    mutationFn: (blob: Blob) => {
+      const file = new File([blob], 'capture.png', { type: 'image/png' })
+      return api.uploadSessionImage(session.id, file, 'captured')
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['import-session', session.id], updated)
+      void queryClient.invalidateQueries({ queryKey: ['import-session', session.id] })
+    },
+    onError: (err) =>
+      setError(err instanceof Error ? err.message : 'Failed to save captured image.'),
+  })
+
+  const handleCapture = useCallback((blob: Blob) => {
+    setError(null)
+    captureMutation.mutate(blob)
+  }, [captureMutation])
+
+  const openViewerFor = useCallback((name: string) => {
+    setViewerFile({ name, ext: fileExt(name) })
+    setPickerOpen(false)
+  }, [])
+
+  const handleTryRender = useCallback(() => {
+    setError(null)
+    if (renderableFiles.length === 1) {
+      openViewerFor(renderableFiles[0].original_name)
+    } else {
+      setPickerOpen((v) => !v)
+    }
+  }, [renderableFiles, openViewerFor])
 
   const setDefaultMutation = useMutation({
     mutationFn: (path: string) =>
@@ -122,9 +178,13 @@ export function ImagesStep({ session, onNext, onPrev }: ImagesStepProps) {
                     transition: 'border-color 0.15s, box-shadow 0.15s',
                   }}
                 >
-                  {img.is_url ? (
+                  {img.is_url || img.source === 'capture' || img.source === 'upload' ? (
                     <img
-                      src={img.path}
+                      src={
+                        img.is_url
+                          ? img.path
+                          : api.sessionFileUrl(session.id, img.path.split('/').pop() ?? img.path)
+                      }
                       alt=""
                       style={{ height: '100%', width: '100%', objectFit: 'cover', display: 'block' }}
                       onError={(e) => {
@@ -210,6 +270,65 @@ export function ImagesStep({ session, onNext, onPrev }: ImagesStepProps) {
               </div>
             ))}
         </div>
+      )}
+
+      {/* Try to render a staged model file → capture a viewport image (#26).
+          Shown only when the session has ≥1 browser-renderable staged model. */}
+      {renderableFiles.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>
+          <button
+            type="button"
+            onClick={handleTryRender}
+            aria-expanded={renderableFiles.length > 1 ? pickerOpen : undefined}
+            style={{ ...AURORA_BTN_GHOST, display: 'flex', alignItems: 'center', gap: 6 }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
+          >
+            <Box size={14} />
+            Try to render file
+          </button>
+          <p style={{ fontSize: 11, color: 'var(--aurora-muted)', margin: 0 }}>
+            Open a staged model in the 3D viewer and capture the current view as an image.
+          </p>
+
+          {/* Model picker — shown when multiple renderable files exist */}
+          {pickerOpen && renderableFiles.length > 1 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
+              {renderableFiles.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => openViewerFor(f.original_name)}
+                  style={{
+                    ...AURORA_BTN_GHOST,
+                    textAlign: 'left',
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                    padding: '6px 12px',
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
+                >
+                  {f.original_name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Lazy-loaded 3D viewer modal — capture uploads via uploadSessionImage */}
+      {viewerFile && (
+        <Suspense fallback={null}>
+          <LazyModelViewer
+            fileUrl={api.sessionFileUrl(session.id, viewerFile.name)}
+            ext={viewerFile.ext}
+            onClose={() => setViewerFile(null)}
+            isOwner
+            onCapture={handleCapture}
+            isCapturing={captureMutation.isPending}
+          />
+        </Suspense>
       )}
 
       {/* Upload images */}
