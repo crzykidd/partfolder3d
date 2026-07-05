@@ -445,7 +445,10 @@ async def commit_import_session(
     except HTTPException:
         raise
     except Exception as exc:
-        log.exception("commit_import_session: failed for session %s", session_id)
+        # Sanitize CR/LF before logging the user-provided session id (CodeQL py/log-injection).
+        log.exception(
+            "commit_import_session: failed for session %s", sanitize_for_log(session_id)
+        )
         try:
             session.status = ImportSessionStatus.failed
             session.error = str(exc)
