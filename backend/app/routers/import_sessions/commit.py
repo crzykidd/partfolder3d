@@ -457,7 +457,7 @@ async def commit_import_session(
         except Exception:
             log.debug(
                 "commit_import_session: best-effort failed-status flush failed for session %s",
-                session_id,
+                sanitize_for_log(session_id),
                 exc_info=True,
             )
         raise HTTPException(

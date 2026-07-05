@@ -69,6 +69,7 @@ from ...storage.inventory import inventory_item
 from ...storage.journal import MoveError, atomic_rename, move_to_trash
 from ...storage.keys import generate_unique_key
 from ...storage.paths import item_dir_path, item_slug, sidecar_name
+from ...storage.ssrf_guard import sanitize_for_log
 from ...worker.arq_pool import get_arq_pool
 from .helpers import _VALID_SORTS, _build_item_detail, _sort_clause
 from .schemas import (
@@ -437,7 +438,7 @@ async def update_item(
                 db=db,
             )
         except MoveError as exc:
-            log.warning("update_item: rename failed for item %s: %s", key, exc)
+            log.warning("update_item: rename failed for item %s: %s", sanitize_for_log(key), exc)
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Failed to rename item directory.",
@@ -543,7 +544,9 @@ async def delete_item(
         try:
             move_to_trash(item_dir, key)
         except OSError as exc:
-            log.exception("delete_item: failed to move item %s directory to trash", key)
+            log.exception(
+                "delete_item: failed to move item %s directory to trash", sanitize_for_log(key)
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to move item directory to trash.",

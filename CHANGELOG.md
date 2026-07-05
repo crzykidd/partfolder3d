@@ -106,9 +106,11 @@ prefix appears only on git tags and GitHub releases.
 - **CI/CD supply-chain hardening** — all third-party GitHub Actions are pinned to a full
   commit SHA (checkout, setup-python/node, docker/*, codeql-action), and `ci.yml` /
   `dev-checks.yml` gained a top-level least-privilege `permissions: contents: read` block.
-- **Log-injection fix on the commit endpoint** — the single-session import-commit path logged the
-  raw user-supplied `session_id`; it now sanitizes CR/LF before logging (matching the bulk-commit
-  path), closing a CodeQL `py/log-injection` finding.
+- **Log-injection hardening on user-facing endpoints** — several endpoints logged raw user-supplied
+  path params (import-session `session_id`; item `key` on rename / delete / move-between-libraries).
+  They now sanitize CR/LF before logging, closing the CodeQL `py/log-injection` findings. (The
+  `py/path-injection` findings on the same PR are guarded by existing `resolve()` +
+  `is_relative_to()` containment barriers and were confirmed false positives.)
 
 ### Added
 

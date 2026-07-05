@@ -37,6 +37,7 @@ from ...services.item_helpers import _write_item_sidecar
 from ...storage.inventory import inventory_item
 from ...storage.library_move import LibraryMoveError, move_item_to_library
 from ...storage.paths import item_dir_path, sidecar_name
+from ...storage.ssrf_guard import sanitize_for_log
 from .helpers import _build_item_detail
 
 log = logging.getLogger(__name__)
@@ -271,7 +272,7 @@ async def move_item(
     try:
         await _move_one_item(db, item, target)
     except LibraryMoveError as exc:
-        log.warning("move_item: move failed for item %s: %s", key, exc)
+        log.warning("move_item: move failed for item %s: %s", sanitize_for_log(key), exc)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Failed to move item directory to the target library.",
