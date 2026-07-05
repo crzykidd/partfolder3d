@@ -75,6 +75,11 @@ SCHEDULED_JOB_REGISTRY: dict[str, tuple[str, str]] = {
         "orphaned files under items' prints/ dirs.",
         "daily at 05:00 UTC",
     ),
+    "scraper_usage_retention": (
+        "Daily hard-delete of scraper_usage rows older than scraper.usage_retention_days "
+        "(default 30). Covers all providers (AgentQL, FlareSolverr, etc.).",
+        "daily at 05:00 UTC",
+    ),
 }
 
 
@@ -88,6 +93,8 @@ from app.worker.tasks.archive import extract_archives  # noqa: E402
 from app.worker.tasks.bundles import build_zip_bundle  # noqa: E402
 from app.worker.tasks.import_session import (  # noqa: E402, F401
     _try_agentql_fallback,
+    _try_fallback_scrapers,
+    _try_flaresolverr_fallback,
     process_import_session,
 )
 from app.worker.tasks.render import _reconcile_render_images, render_item  # noqa: E402, F401
@@ -99,6 +106,7 @@ from app.worker.tasks.scheduled import (  # noqa: E402
     cron_job_history_retention,
     cron_library_reconcile_scan,
     cron_orphan_cleanup,
+    cron_scraper_usage_retention,
     cron_share_link_expiry_cleanup,
     exec_scheduled_job,
 )
@@ -297,6 +305,7 @@ class WorkerSettings:
         cron(cron_db_backup, hour=4, minute=0, run_at_startup=False),
         cron(cron_job_history_retention, hour=4, minute=30, run_at_startup=False),
         cron(cron_orphan_cleanup, hour=5, minute=0, run_at_startup=False),
+        cron(cron_scraper_usage_retention, hour=5, minute=30, run_at_startup=False),
     ]
 
     allow_abort_jobs = True

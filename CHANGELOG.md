@@ -20,6 +20,31 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Added
+
+- **Pluggable fallback-scraper framework with FlareSolverr backend** (closes #23).
+  The Cloudflare-fallback scrape path is now a generic dispatcher that tries each
+  enabled backend in configurable priority order, so adding a third backend later
+  requires only one module + one registry entry. First two backends:
+  - **FlareSolverr** (priority 1, free/self-hosted): POSTs a `request.get` command
+    to a local FlareSolverr container; parses the resolved HTML with the shared
+    `extract_metadata_from_html` helper; records `scraper_usage` rows at $0.00.
+  - **AgentQL** (priority 2, paid BYO key): unchanged internals; gains configurable
+    `priority` and `timeout_s` settings alongside its existing billing controls.
+  - Per-scraper settings (`scraper.<name>.enabled/priority/timeout_s/base_url`) are
+    stored as settings-table rows — no Alembic migration needed.
+  - **Test Connection** button in the admin UI for each backend (FlareSolverr: pings
+    `/` health endpoint; AgentQL: makes one live API call to validate the key).
+  - **Usage tracking** for all backends: every scraper call writes a `scraper_usage`
+    row; a new daily cron (`scraper_usage_retention`) hard-deletes rows older than
+    `scraper.usage_retention_days` (default 30); a "Clear usage" action per backend.
+  - New API endpoints: `GET/PUT /api/admin/scrapers/flaresolverr`,
+    `POST /api/admin/scrapers/{agentql,flaresolverr}/test-connection`,
+    `GET /api/admin/scrapers/usage` (all-provider), `DELETE /api/admin/scrapers/usage`.
+  - New `flaresolverr` service in `docker-compose.dev.yml`
+    (`ghcr.io/flaresolverr/flaresolverr:latest`; no published ports — worker reaches
+    it at `http://flaresolverr:8191`).
+
 ### Fixed
 
 - **URL-import wizard can now attach model files before commit** (closes #27). The

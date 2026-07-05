@@ -15,6 +15,10 @@ export interface AgentQLSettings {
   monthly_cap_usd: number | null
   per_call_usd: number
   reset_day: number
+  /** Fallback priority (lower = tried first; default 2). */
+  priority: number
+  /** HTTP timeout for AgentQL calls in seconds (default 120). */
+  timeout_s: number
 }
 
 /** Body for PUT /api/admin/agentql. All fields optional (partial update). */
@@ -26,6 +30,8 @@ export interface AgentQLSettingsUpdate {
   budget_mode?: string
   monthly_cap_usd?: number | null
   per_call_usd?: number
+  priority?: number
+  timeout_s?: number
 }
 
 /** Current-window scraper usage returned by GET /api/admin/scraper-usage. */

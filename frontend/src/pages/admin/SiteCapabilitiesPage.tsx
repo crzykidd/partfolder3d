@@ -1,6 +1,6 @@
 /**
  * SiteCapabilitiesPage — admin management of site scraping capabilities
- * (Phase 9 — PRD §13).
+ * (Phase 9 — PRD §13; extended in issue #23 with pluggable fallback scrapers).
  *
  * Route: /admin/site-capabilities
  *
@@ -11,6 +11,11 @@
  *  - Clear Token (DELETE /{domain}/token + confirm; shown when has_token=true).
  *  - Re-probe (POST /{domain}/reprobe).
  *  - Delete (DELETE /{domain} + inline confirm).
+ *
+ * Also shows a "Scrapers" section with per-backend cards (AgentQL + FlareSolverr):
+ *  - Enable toggle, priority, timeout, backend-specific fields.
+ *  - Test Connection button.
+ *  - Usage stats with Clear action.
  *
  * Tokens are NEVER shown back (API never returns plaintext). Only has_token is shown.
  *
@@ -398,6 +403,257 @@ function SiteCapRow({ cap }: { cap: api.AdminSiteCapabilityOut }) {
 }
 
 // ---------------------------------------------------------------------------
+// Shared UsagePanel — per-provider call count + clear button
+// ---------------------------------------------------------------------------
+
+function UsagePanel({ provider }: { provider: string }) {
+  const queryClient = useQueryClient()
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [clearMsg, setClearMsg] = useState<string | null>(null)
+
+  const { data: rows = [] } = useQuery({
+    queryKey: ['admin-scrapers-usage', provider],
+    queryFn: () => api.getAllScraperUsage(provider),
+  })
+
+  const row = rows.find((r) => r.provider === provider)
+  const calls = row?.calls ?? 0
+  const cost = row?.est_cost_usd ?? 0
+
+  const clearMutation = useMutation({
+    mutationFn: () => api.clearScraperUsage(provider),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin-scrapers-usage', provider] })
+      setConfirmClear(false)
+      setClearMsg('Usage cleared.')
+      setTimeout(() => setClearMsg(null), 2500)
+    },
+  })
+
+  return (
+    <div
+      style={{
+        background: 'var(--aurora-glass)',
+        border: '1px solid var(--aurora-glass-border)',
+        borderRadius: 8,
+        padding: '12px 14px',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+        <div>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            Usage (all-time)
+          </span>
+          <p style={{ fontSize: 13, color: 'var(--aurora-text)', marginTop: 4, marginBottom: 0 }}>
+            <strong>{calls}</strong> call{calls !== 1 ? 's' : ''}
+            {' · '}~${cost.toFixed(4)} est.
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {clearMsg && <span style={{ fontSize: 11, color: '#16A34A' }}>{clearMsg}</span>}
+          {confirmClear ? (
+            <>
+              <Button
+                variant="danger"
+                size="sm"
+                disabled={clearMutation.isPending}
+                onClick={() => clearMutation.mutate()}
+              >
+                {clearMutation.isPending ? '…' : 'Confirm clear'}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setConfirmClear(false)}>
+                Cancel
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              extraStyle={{ color: '#D97706', borderColor: 'rgba(217,119,6,0.3)', background: 'rgba(217,119,6,0.06)' }}
+              onClick={() => setConfirmClear(true)}
+            >
+              Clear usage
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// FlareSolverr fallback scraper card
+// ---------------------------------------------------------------------------
+
+function FlareSolverrCard() {
+  const queryClient = useQueryClient()
+  const [saveStatus, setSaveStatus] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null)
+
+  const { data: settings, isLoading } = useQuery({
+    queryKey: ['admin-flaresolverr-settings'],
+    queryFn: api.getFlareSolverrSettings,
+  })
+
+  const [formEnabled, setFormEnabled] = useState<boolean | undefined>(undefined)
+  const [formBaseUrl, setFormBaseUrl] = useState('')
+  const [formTimeoutS, setFormTimeoutS] = useState('')
+  const [formPriority, setFormPriority] = useState('')
+
+  React.useEffect(() => {
+    if (settings && formEnabled === undefined) {
+      setFormEnabled(settings.enabled)
+      setFormBaseUrl(settings.base_url)
+      setFormTimeoutS(String(settings.timeout_s))
+      setFormPriority(String(settings.priority))
+    }
+  }, [settings, formEnabled])
+
+  const updateMutation = useMutation({
+    mutationFn: (body: api.FlareSolverrSettingsUpdate) => api.updateFlareSolverrSettings(body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin-flaresolverr-settings'] })
+      setSaveStatus('Saved.')
+      setTimeout(() => setSaveStatus(null), 2500)
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : 'Save failed.'),
+  })
+
+  const testMutation = useMutation({
+    mutationFn: api.testFlareSolverrConnection,
+    onSuccess: (result) => setTestResult(result),
+    onError: (err) =>
+      setTestResult({ ok: false, message: err instanceof Error ? err.message : 'Test failed.' }),
+  })
+
+  function handleSave() {
+    setError(null)
+    const body: api.FlareSolverrSettingsUpdate = {}
+    if (formEnabled !== undefined) body.enabled = formEnabled
+    body.base_url = formBaseUrl.trim()
+    const t = parseInt(formTimeoutS, 10)
+    if (!isNaN(t) && t > 0) body.timeout_s = t
+    const p = parseInt(formPriority, 10)
+    if (!isNaN(p) && p >= 1) body.priority = p
+    updateMutation.mutate(body)
+  }
+
+  const effectiveEnabled = formEnabled !== undefined ? formEnabled : (settings?.enabled ?? false)
+
+  return (
+    <Card style={{ marginBottom: 24 }}>
+      <SectionHeader>Scraper — FlareSolverr (free, self-hosted)</SectionHeader>
+
+      <p style={{ fontSize: 13, color: 'var(--aurora-text-dim)', marginBottom: 16, lineHeight: 1.6 }}>
+        Free, self-hosted fallback for Cloudflare-gated sites. Runs a headless browser
+        to solve challenges. Add the service to your{' '}
+        <code style={{ fontSize: 12 }}>docker-compose.dev.yml</code> (already included
+        in this release) and point this card at{' '}
+        <code style={{ fontSize: 12 }}>http://flaresolverr:8191</code>. Off by default.
+      </p>
+
+      {isLoading ? (
+        <p style={{ fontSize: 13, color: 'var(--aurora-muted)' }}>Loading…</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Enable toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <AuroraToggle
+              checked={effectiveEnabled}
+              onChange={() => {
+                setFormEnabled(!effectiveEnabled)
+                setError(null)
+              }}
+              disabled={updateMutation.isPending}
+              ariaLabel="Enable FlareSolverr fallback"
+            />
+            <span style={{ fontSize: 13, color: 'var(--aurora-text)' }}>
+              {effectiveEnabled ? 'Enabled' : 'Disabled'}
+            </span>
+            {settings && (
+              <Badge variant={settings.enabled ? 'success' : 'muted'}>
+                {settings.enabled ? 'Active' : 'Off'}
+              </Badge>
+            )}
+          </div>
+
+          {/* Base URL */}
+          <Field label="Base URL">
+            <AuroraInput
+              type="text"
+              value={formBaseUrl}
+              onChange={(e) => {
+                setFormBaseUrl(e.target.value)
+                setError(null)
+              }}
+              placeholder="http://flaresolverr:8191"
+            />
+            <p style={{ fontSize: 11, color: 'var(--aurora-muted)', marginTop: 4 }}>
+              Internal Docker service URL. Not exposed to the internet.
+            </p>
+          </Field>
+
+          {/* Priority + timeout row */}
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <Field label="Priority (lower = tried first)">
+              <AuroraInput
+                type="number"
+                value={formPriority}
+                onChange={(e) => setFormPriority(e.target.value)}
+                style={{ width: 80 }}
+                min={1}
+              />
+            </Field>
+            <Field label="Solve timeout (seconds)">
+              <AuroraInput
+                type="number"
+                value={formTimeoutS}
+                onChange={(e) => setFormTimeoutS(e.target.value)}
+                style={{ width: 100 }}
+                min={5}
+              />
+              <p style={{ fontSize: 11, color: 'var(--aurora-muted)', marginTop: 4 }}>
+                Default 60s. Increase if challenges time out.
+              </p>
+            </Field>
+          </div>
+
+          {/* Usage */}
+          <UsagePanel provider="flaresolverr" />
+
+          {/* Test result */}
+          {testResult && (
+            <p style={{ fontSize: 12, color: testResult.ok ? '#16A34A' : 'var(--aurora-danger)', margin: 0 }}>
+              {testResult.ok ? '✓' : '✗'} {testResult.message}
+            </p>
+          )}
+
+          {/* Actions */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <Button onClick={handleSave} disabled={updateMutation.isPending}>
+              {updateMutation.isPending ? 'Saving…' : 'Save settings'}
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={testMutation.isPending}
+              onClick={() => {
+                setTestResult(null)
+                testMutation.mutate()
+              }}
+            >
+              {testMutation.isPending ? 'Testing…' : 'Test connection'}
+            </Button>
+            {saveStatus && <span style={{ fontSize: 12, color: '#16A34A' }}>{saveStatus}</span>}
+            {error && <span style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>{error}</span>}
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // AgentQL fallback scraper card
 // ---------------------------------------------------------------------------
 
@@ -406,6 +662,7 @@ function AgentQLCard() {
   const [apiKeyInput, setApiKeyInput] = useState('')
   const [saveStatus, setSaveStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null)
 
   const { data: settings, isLoading: settingsLoading } = useQuery({
     queryKey: ['admin-agentql-settings'],
@@ -422,6 +679,8 @@ function AgentQLCard() {
   const [formBudgetMode, setFormBudgetMode] = useState<string>('')
   const [formCapUsd, setFormCapUsd] = useState<string>('')
   const [formPerCall, setFormPerCall] = useState<string>('')
+  const [formPriority, setFormPriority] = useState<string>('')
+  const [formTimeoutS, setFormTimeoutS] = useState<string>('')
 
   // Populate form from loaded settings (once)
   React.useEffect(() => {
@@ -431,6 +690,8 @@ function AgentQLCard() {
       setFormBudgetMode(settings.budget_mode)
       setFormCapUsd(settings.monthly_cap_usd != null ? String(settings.monthly_cap_usd) : '')
       setFormPerCall(String(settings.per_call_usd))
+      setFormPriority(String(settings.priority ?? 2))
+      setFormTimeoutS(String(settings.timeout_s ?? 120))
     }
   }, [settings, formEnabled])
 
@@ -448,6 +709,13 @@ function AgentQLCard() {
     },
   })
 
+  const testMutation = useMutation({
+    mutationFn: api.testAgentQLConnection,
+    onSuccess: (result) => setTestResult(result),
+    onError: (err) =>
+      setTestResult({ ok: false, message: err instanceof Error ? err.message : 'Test failed.' }),
+  })
+
   function handleSave() {
     setError(null)
     const body: api.AgentQLSettingsUpdate = {}
@@ -462,6 +730,10 @@ function AgentQLCard() {
     }
     const perCallNum = parseFloat(formPerCall)
     if (!isNaN(perCallNum)) body.per_call_usd = perCallNum
+    const p = parseInt(formPriority, 10)
+    if (!isNaN(p) && p >= 1) body.priority = p
+    const t = parseInt(formTimeoutS, 10)
+    if (!isNaN(t) && t >= 1) body.timeout_s = t
     updateMutation.mutate(body)
   }
 
@@ -526,6 +798,31 @@ function AgentQLCard() {
               Stored encrypted. Never returned. Leave blank to keep existing key.
             </p>
           </Field>
+
+          {/* Priority + timeout row */}
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <Field label="Priority (lower = tried first)">
+              <AuroraInput
+                type="number"
+                value={formPriority}
+                onChange={(e) => setFormPriority(e.target.value)}
+                style={{ width: 80 }}
+                min={1}
+              />
+            </Field>
+            <Field label="Request timeout (seconds)">
+              <AuroraInput
+                type="number"
+                value={formTimeoutS}
+                onChange={(e) => setFormTimeoutS(e.target.value)}
+                style={{ width: 100 }}
+                min={10}
+              />
+              <p style={{ fontSize: 11, color: 'var(--aurora-muted)', marginTop: 4 }}>
+                Default 120s (browser + proxy + challenge can take ~20s).
+              </p>
+            </Field>
+          </div>
 
           {/* Free allowance */}
           <Field label="Free allowance (calls / month)">
@@ -595,7 +892,7 @@ function AgentQLCard() {
             </p>
           </Field>
 
-          {/* Usage display */}
+          {/* Usage display (AgentQL billing window) */}
           <div
             style={{
               background: 'var(--aurora-glass)',
@@ -629,6 +926,16 @@ function AgentQLCard() {
             ) : null}
           </div>
 
+          {/* All-time usage with clear */}
+          <UsagePanel provider="agentql" />
+
+          {/* Test result */}
+          {testResult && (
+            <p style={{ fontSize: 12, color: testResult.ok ? '#16A34A' : 'var(--aurora-danger)', margin: 0 }}>
+              {testResult.ok ? '✓' : '✗'} {testResult.message}
+            </p>
+          )}
+
           {/* Actions */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <Button
@@ -637,6 +944,16 @@ function AgentQLCard() {
             >
               {updateMutation.isPending ? 'Saving…' : 'Save settings'}
             </Button>
+            <Button
+              variant="ghost"
+              disabled={testMutation.isPending}
+              onClick={() => {
+                setTestResult(null)
+                testMutation.mutate()
+              }}
+            >
+              {testMutation.isPending ? 'Testing…' : 'Test connection'}
+            </Button>
             {saveStatus && (
               <span style={{ fontSize: 12, color: '#16A34A' }}>{saveStatus}</span>
             )}
@@ -644,6 +961,9 @@ function AgentQLCard() {
               <span style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>{error}</span>
             )}
           </div>
+          <p style={{ fontSize: 11, color: 'var(--aurora-muted)', fontStyle: 'italic', margin: 0 }}>
+            Test connection makes one real AgentQL API call (counts against your quota).
+          </p>
         </div>
       )}
     </Card>
@@ -670,8 +990,17 @@ export function SiteCapabilitiesPage() {
         meta={isLoading ? undefined : `${caps.length} domain${caps.length === 1 ? '' : 's'}`}
       />
 
-      {/* AgentQL fallback scraper card */}
-      <AgentQLCard />
+      {/* Scrapers section — one card per registered backend */}
+      <div style={{ marginBottom: 8 }}>
+        <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 16 }}>
+          Fallback scrapers
+          <span style={{ marginLeft: 8, fontWeight: 400, textTransform: 'none', fontSize: 12, letterSpacing: 0 }}>
+            — tried in priority order when the primary scraper is blocked (lower priority number = tried first)
+          </span>
+        </p>
+        <FlareSolverrCard />
+        <AgentQLCard />
+      </div>
 
       {isError && (
         <div style={{ fontSize: 12, color: 'var(--aurora-danger)' }}>

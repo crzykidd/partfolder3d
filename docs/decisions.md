@@ -2,6 +2,53 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-05 — #23 pluggable fallback-scraper framework (FlareSolverr + AgentQL seam)
+
+**Context:** The Cloudflare-fallback path in `import_session.py` was hardcoded to AgentQL.
+Issue #23 introduced FlareSolverr as a free alternative and required a generic dispatch seam.
+
+**Key decisions:**
+
+- **Backend-seam abstraction.** Rather than bolting FlareSolverr alongside AgentQL as a
+  parallel hardcoded path, a `_try_fallback_scrapers` dispatcher reads each backend's
+  `scraper.<name>.priority` setting row and calls them in ascending order.  Adding a third
+  backend later requires only a client module + one entry in `_backends` + its settings rows.
+
+- **Settings-table approach (no migration).** All per-scraper config (`enabled`, `priority`,
+  `timeout_s`, `base_url`) is stored as JSON rows in the existing `settings` table under the
+  `scraper.<name>.*` namespace.  The existing `agentql.*` billing keys are kept as-is for
+  backward compatibility; the generic keys supplement them.
+
+- **SSRF posture: target URL guarded, service host exempt.**  The *target* URL (the page to
+  scrape) is always passed through `assert_safe_url` so FlareSolverr cannot be abused as an
+  SSRF proxy.  The FlareSolverr `base_url` (an admin-configured internal Docker host) is
+  intentionally NOT guarded — it's operator-configured, not user-supplied.
+
+- **Default priority order: FlareSolverr (1) before AgentQL (2).** FlareSolverr is free, so
+  it's tried first.  Both defaults are overridable via the admin UI priority inputs.
+
+- **Usage tracking for every backend.** Every fallback call (including FlareSolverr, at
+  `est_cost_usd=0.0`) writes a `scraper_usage` row so the admin dashboard is always
+  accurate.  A new daily cron (`scraper_usage_retention`) hard-deletes rows older than
+  `scraper.usage_retention_days` (default 30); a manual clear action per-provider is also
+  available from the UI.
+
+- **FlareSolverr in dev compose only.**  The `flaresolverr` service was added to
+  `docker-compose.dev.yml` (no published ports; worker reaches it at
+  `http://flaresolverr:8191`).  The production `docker-compose.yml` is unchanged — the
+  owner can add FlareSolverr there when ready for production use.
+
+- **`extract_metadata_from_html` refactor.**  The HTML → ScrapeResult logic was extracted
+  from the inline block in `scrape_url` into a module-level helper so FlareSolverr (which
+  returns raw resolved HTML, not structured data) can reuse the same extraction pipeline.
+  The scrape_url call path is behaviorally identical — it now simply calls the helper.
+
+- **AgentQL test-connection makes a real API call.**  A dedicated no-cost validation
+  endpoint would require AgentQL to expose one (they don't).  The test-connection endpoint
+  makes a real request to `example.com` and checks for a 401/auth-failure; any other
+  result is treated as "key accepted."  This costs one call (~$0.02) and is noted in
+  the UI.  FlareSolverr test-connection hits only the free `GET /` health endpoint.
+
 ## 2026-07-05 — #27 resolution: manual mid-wizard file attach (option b; auto-fetch deferred to #23)
 
 Owner chose **option b**: let the user download the model file themselves from the source site and

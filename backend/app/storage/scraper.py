@@ -362,6 +362,113 @@ def _extract_tags(tree: object) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Shared HTML → ScrapeResult extraction helper
+# ---------------------------------------------------------------------------
+
+
+def extract_metadata_from_html(
+    html: str,
+    url: str,
+    domain: str,
+    max_images: int,
+) -> ScrapeResult:
+    """Parse resolved HTML into a ScrapeResult (title/desc/images/tags/creator/license).
+
+    Used by both the static scraper (scrape_url) and HTML-returning fallback
+    backends (FlareSolverr) so they all produce identical metadata extraction.
+
+    Returns a ScrapeResult; never raises.  On parse failure sets result.note
+    and returns an empty result (blocked=False — the HTTP call succeeded; only
+    the HTML parse failed).
+    """
+    result = ScrapeResult(url=url, domain=domain)
+
+    tree = _parse_html(html)
+    if tree is None:
+        result.note = "HTML parse failed"
+        return result
+
+    # Title: OG → <title>.  Keep the raw title for creator extraction (the
+    # "<name> by <Creator>" pattern lives before the boilerplate pipe), then
+    # strip SEO boilerplate for the user-facing value (issue #27).
+    raw_title = (
+        _og(tree, "og:title")
+        or (_meta_name(tree, "title"))
+    )
+    if not raw_title:
+        try:
+            title_node = tree.css_first("title")  # type: ignore[union-attr]
+            if title_node:
+                raw_title = (title_node.text() or "").strip() or None
+        except Exception:
+            pass
+    result.title = _clean_title(raw_title)
+
+    # Description (strip trailing " | ..." boilerplate — issue #27)
+    result.description = _clean_description(
+        _og(tree, "og:description")
+        or _meta_name(tree, "description")
+    )
+
+    # Site name
+    result.source_site = _og(tree, "og:site_name") or domain
+
+    # Images
+    result.image_urls = _extract_images(tree, url, max_images)
+
+    # Tags
+    result.raw_tags = _extract_tags(tree)
+
+    # Creator name: common author meta patterns, then fall back to the
+    # "<name> by <Creator>" title pattern (Printables exposes no author meta
+    # but shows the creator in the title) — issue #27.
+    name = (
+        _meta_name(tree, "author")
+        or _meta_name(tree, "article:author")
+        or _og(tree, "article:author")
+    )
+    # article:author is sometimes a profile URL rather than a display name;
+    # that belongs in creator_profile_url, not the name.
+    if name and name.strip().lower().startswith("http"):
+        name = None
+    if not name:
+        name = _creator_from_title(raw_title)
+    result.creator_name = (name or "").strip() or None
+
+    # Creator profile URL: previously modeled but never assigned (issue #27).
+    # Best-effort from rel=author links/anchors or a URL-valued article:author.
+    profile_url: str | None = None
+    for sel in ('link[rel="author"]', 'a[rel="author"]'):
+        try:
+            node = tree.css_first(sel)  # type: ignore[union-attr]
+        except Exception:
+            node = None
+        if node is not None:
+            href = (node.attributes.get("href") or "").strip()
+            if href:
+                absolute = urljoin(url, href)
+                if absolute.startswith("http"):
+                    profile_url = absolute
+                    break
+    if not profile_url:
+        author_meta = (
+            _og(tree, "article:author") or _meta_name(tree, "article:author") or ""
+        ).strip()
+        if author_meta.lower().startswith("http"):
+            profile_url = author_meta
+    result.creator_profile_url = profile_url
+
+    # License: try to find a cc/license link or meta
+    for a in tree.css('a[rel="license"], link[rel="license"]'):  # type: ignore[union-attr]
+        href = a.attributes.get("href", "")
+        if href:
+            result.license = href
+            break
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Main scrape function
 # ---------------------------------------------------------------------------
 
@@ -458,88 +565,7 @@ def scrape_url(
         log.warning("scrape_url: error for %s: %s", _safe_url, exc)
         return result
 
-    tree = _parse_html(html)
-    if tree is None:
-        result.note = "HTML parse failed"
-        return result
-
-    # Title: OG → <title>.  Keep the raw title for creator extraction (the
-    # "<name> by <Creator>" pattern lives before the boilerplate pipe), then
-    # strip SEO boilerplate for the user-facing value (issue #27).
-    raw_title = (
-        _og(tree, "og:title")
-        or (_meta_name(tree, "title"))
-    )
-    if not raw_title:
-        try:
-            title_node = tree.css_first("title")  # type: ignore[union-attr]
-            if title_node:
-                raw_title = (title_node.text() or "").strip() or None
-        except Exception:
-            pass
-    result.title = _clean_title(raw_title)
-
-    # Description (strip trailing " | ..." boilerplate — issue #27)
-    result.description = _clean_description(
-        _og(tree, "og:description")
-        or _meta_name(tree, "description")
-    )
-
-    # Site name
-    result.source_site = _og(tree, "og:site_name") or domain
-
-    # Images
-    result.image_urls = _extract_images(tree, url, max_images)
-
-    # Tags
-    result.raw_tags = _extract_tags(tree)
-
-    # Creator name: common author meta patterns, then fall back to the
-    # "<name> by <Creator>" title pattern (Printables exposes no author meta
-    # but shows the creator in the title) — issue #27.
-    name = (
-        _meta_name(tree, "author")
-        or _meta_name(tree, "article:author")
-        or _og(tree, "article:author")
-    )
-    # article:author is sometimes a profile URL rather than a display name;
-    # that belongs in creator_profile_url, not the name.
-    if name and name.strip().lower().startswith("http"):
-        name = None
-    if not name:
-        name = _creator_from_title(raw_title)
-    result.creator_name = (name or "").strip() or None
-
-    # Creator profile URL: previously modeled but never assigned (issue #27).
-    # Best-effort from rel=author links/anchors or a URL-valued article:author.
-    profile_url: str | None = None
-    for sel in ('link[rel="author"]', 'a[rel="author"]'):
-        try:
-            node = tree.css_first(sel)  # type: ignore[union-attr]
-        except Exception:
-            node = None
-        if node is not None:
-            href = (node.attributes.get("href") or "").strip()
-            if href:
-                absolute = urljoin(url, href)
-                if absolute.startswith("http"):
-                    profile_url = absolute
-                    break
-    if not profile_url:
-        author_meta = (
-            _og(tree, "article:author") or _meta_name(tree, "article:author") or ""
-        ).strip()
-        if author_meta.lower().startswith("http"):
-            profile_url = author_meta
-    result.creator_profile_url = profile_url
-
-    # License: try to find a cc/license link or meta
-    for a in tree.css('a[rel="license"], link[rel="license"]'):  # type: ignore[union-attr]
-        href = a.attributes.get("href", "")
-        if href:
-            result.license = href
-            break
-
+    result = extract_metadata_from_html(html, url, domain, max_images)
     log.debug(
         "scrape_url: %s → title=%r images=%d tags=%d",
         _safe_url, result.title, len(result.image_urls), len(result.raw_tags),
