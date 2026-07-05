@@ -1,84 +1,109 @@
 # Start-new-session — PartFolder 3D
 
 **Read this first when you (re)open this project.** This is the **live-state handoff** — a
-current, limited view so a new session can orient fast, then go deeper via the docs it points
-to. It is NOT a full reference: durable rules live in `CLAUDE.md`, the module map + gotchas in
+current, limited view so a new session can orient fast, then go deeper via the docs it points to.
+It is NOT a full reference: durable rules live in `CLAUDE.md`, the module map + gotchas in
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
-"Current state" before every `/clear`.
+"Current state" + "Next phases" before every `/clear`.
 
-**Last updated:** 2026-07-04 — **v0.3.0 released** on `main`; large unreleased batch on `dev` (audit remediation + features/bug-fixes below).
+**Last updated:** 2026-07-05 — v0.3.0 on `main`; a **large unreleased batch on `dev` is ready**;
+the **immediate next action is to cut the release**.
 
 ## Current state
 
-- **Latest release: `v0.3.0`** (tagged, GitHub release live). The full app is built and shipping
+- **Latest release: `v0.3.0`** on `main` (tagged, GitHub release live). Full app shipping
   (identity, libraries + atomic-move storage, import wizard + bulk import, catalog, item pages with
-  3D viewer + object breakdown, reconcile, print history + sharing, AI tagging, admin, worker
-  resource limits). Feature detail: `CHANGELOG.md`.
-- **`dev` is now AHEAD of `main`:** a two-round **audit-remediation** batch shipped on `dev`
-  (`docs/audit-2026-07-03.md` is the worklist, ~83/93 done). Round 1 = docs/PRD/Claude-ergonomics;
-  round 2 = the security cluster (SSRF, XSS, authz, Redis auth + nginx headers + DB-fail-fast + CORS +
-  CI pinning, exception hygiene, data-safety), operational hygiene (crash recovery + reclamation cron),
-  and the file-split refactors (items→package, catalog/imports pages, commit.py, issue_action).
-  Deferred items + rationale are in `docs/decisions.md`.
-- **Then a feature/bug-fix run (all on `dev`, unreleased, all CI-green):** bug fixes — catalog
-  pagination bounce, scraped-images-missing-from-file-list, dev-worker DEBUG boot; features —
-  **#20+#30** queued/analyze job visibility, **#28** full-res scraper images + title/desc/creator
-  cleanup, **#27 partial** (tags-immediate + Files row; core "URL import attaches no file" is an
-  OPEN owner design fork — see decisions.md), **#31** auto-approve-tags setting + bulk approve-all,
-  **#25** move-assets-between-libraries (single + bulk endpoints; single-item UI; bulk UI deferred —
-  needs catalog multi-select), **#26** wizard "Try to render file" viewport capture. Suites: backend
-  ≈769, frontend ≈357. `closes #N` in commits → auto-close on the dev→main merge (still open now).
-- **`[Unreleased]` has a batch of Security/Fixed entries** ready for the next release. ⚠️ **Release
-  deploy note:** the arq job serializer changed pickle→JSON — **drain the worker queue across that
-  upgrade** (in-flight pickled jobs won't deserialize; queue is normally empty). Also new opt-in knobs
-  to surface in release notes: `REDIS_PASSWORD`, `TRASH_RETENTION_DAYS`, `ORPHAN_PRINTS_DELETE`,
-  `SCRAPE_IMAGE_MAX_MB`/`SCRAPE_HTML_MAX_MB`; and prod now **fails fast on a `changeme` DB password**.
-- **Next release:** `/release-prep <next>` → merge PR (clean) → `:latest` publishes → `/release-cut <next>`.
-  Likely a minor (broad security batch) — owner's call. **We do NOT archive old changelog series** (owner preference).
+  3D viewer + object breakdown, reconcile, print history + sharing, AI tagging, admin, worker limits).
+- **`dev` is well AHEAD of `main` — a big unreleased batch, every push CI-green, suites ≈769 backend / ≈357 frontend:**
+  - **Audit remediation** (two rounds; `docs/audit-2026-07-03.md`, ~83/93 done): docs/PRD/
+    Claude-ergonomics; the **security cluster** (SSRF, `javascript:` XSS, authz, Redis auth + nginx
+    headers + DB-fail-fast + CORS + CI SHA-pinning, exception hygiene, data-safety); operational
+    hygiene (generalized crash recovery + daily reclamation cron); file-split refactors
+    (items→package, catalog/imports pages, commit.py, issue_action).
+  - **Features / bug-fixes:** #20+#30 queued/analyze job visibility · #28 full-res scraper images +
+    title/desc/creator cleanup · #27 **partial** (tags-immediate + Files row) · #31 auto-approve-tags
+    + bulk approve-all · #25 move-assets-between-libraries · #26 wizard "Try to render file" capture ·
+    analyze-on-import fix · catalog-pagination + scraped-images-in-file-list + dev-worker-DEBUG fixes ·
+    second-library compose support (`FS_BROWSE_ROOTS`).
+  - `closes #N` is in the commits → those issues auto-close on the **dev→main merge** (still open now).
+- **Owner is testing** the app (notably the new **second-library** setup) before cutting the release.
+  The `:dev` docker stack runs **on this host** — diagnose live via `docker logs`/`exec` + the app DB
+  (`docker exec partfolder3d-db-1 psql -U partfolder3d -d partfolder3d`).
+
+## Next phases (roadmap)
+
+**Phase 1 — CUT THE RELEASE (immediate next action).** The dev batch is a broad security + features
+release. Flow: `/release-prep <version>` → merge the dev→main PR (only when all required checks are
+green) → `:latest` publishes → `/release-cut <version>`. Likely a **minor** (e.g. `0.4.0`) — owner
+picks the number. We do **NOT** archive old changelog series.
+⚠️ **Upgrade caveats to put in the release notes:**
+  - **Drain the worker queue** across the upgrade — the arq serializer changed pickle→JSON (in-flight
+    pickled jobs won't deserialize; queue is normally empty, so usually a non-event).
+  - Prod now **fails fast on the default `changeme` DB password** — operators must set a real
+    `POSTGRES_PASSWORD` **and** `REDIS_PASSWORD` (Redis now runs with `--requirepass`).
+  - New knobs to mention: `TRASH_RETENTION_DAYS`, `ORPHAN_PRINTS_DELETE`, `SCRAPE_IMAGE_MAX_MB` /
+    `SCRAPE_HTML_MAX_MB`, `FS_BROWSE_ROOTS` (multi-library).
+  - CodeQL may flag items on the release PR — fix real ones, dismiss FPs (CI notes in `docs/architecture.md`).
+
+**Phase 2 — owner-decision items (BLOCKED on owner input — don't guess).** All in `docs/decisions.md`:
+  - **#27 core fork** — URL import attaches no model file. Pick: (a) auto-fetch the file
+    (fragile/login-gated on most sites), (b) add a manual-upload step to the URL wizard, or
+    (c) accept metadata-only (the Files-row 0-file warning already ships).
+  - **#23 FlareSolverr** — the written prompt (`prompts/2026-07-03-23-flaresolverr.md`) has OPEN
+    design questions (Q1/Q5 on the pluggable-scraper-backend UI). Answer those first; also wants a
+    live FlareSolverr instance to validate end-to-end.
+  - **Bulk move-assets UI** (#25 follow-up) — the backend bulk endpoint is live + tested; the UI needs
+    a catalog **multi-select** affordance that doesn't exist yet (a real UX decision).
+
+**Phase 3 — remaining backlog** — `gh issue list` after the above.
 
 ## How we work (recap — full rules in `CLAUDE.md`)
 
 - Central **Opus planning session**: plan, write handoff prompts in `prompts/`, dispatch **Sonnet
   subagents** to execute, report back. Owner doesn't babysit. Bigger than ~1–2 files → handoff prompt.
 - **Auto-commit on `dev`** with conventional prefixes; **`main` is PR-only, never direct-push.** Use
-  `closes #N` so issues auto-close. Every feat/fix commit updates `CHANGELOG.md [Unreleased]` in the
-  same commit.
-- **Live-iteration caveat:** the owner runs the **vite dev server on this repo**, so inline edits
-  hot-reload into their live app. For bigger changes while they test, dispatch to an **isolated
-  worktree** (Agent `isolation: worktree`).
-- **Verify + gotchas are NOT here anymore.** Verify discipline lives in `CLAUDE.md` +
-  `scripts/verify-*.sh` (`make verify`); the load-bearing technical gotchas (render backend, 3MF,
-  modals, worker-no-hot-reload, CI shape, merge-dup-symbols) live in `docs/architecture.md`.
+  `closes #N` so issues auto-close. Every feat/fix commit updates `CHANGELOG.md [Unreleased]` same commit.
+- **During active build/test sessions the owner wants each verified item committed AND pushed to `dev`**
+  (not just committed) so pushing rebuilds the `:dev` images and the owner's on-host stack + testers can
+  pull. Gate each push on `make verify` (full backend suite + fresh frontend build/vitest).
+- **Flag genuine design forks** (like #27 core / #23 open questions) for the owner instead of guessing.
+- **Live-iteration caveat:** owner runs the vite dev server / the `:dev` stack on this repo; for bigger
+  changes while they test, dispatch to an **isolated worktree** (Agent `isolation: worktree`).
+- **Verify + gotchas are NOT here.** Verify discipline: `CLAUDE.md` + `scripts/verify-*.sh` (`make verify`).
+  Load-bearing gotchas (render backend, 3MF, modals, worker-no-hot-reload, CI shape, merge-dup-symbols):
+  `docs/architecture.md`.
 
-## Backlog (themes only — full list + current scope: `gh issue list`)
+## Backlog (themes — `gh issue list` is the source of truth for what we build **now**, not the PRD)
 
-GitHub issues are the source of truth for what we're building **now** (not the PRD). Current threads:
-- **Job visibility:** #20 (queued jobs invisible), #30 (`analyze_item` creates no Job row) — fix together.
-- **Scraper:** #23 (FlareSolverr alt — planned, `prompts/2026-07-03-23-flaresolverr.md`), #28 (full-res vs Printables og:image).
-- **Libraries:** #25 (move assets between libraries). **Import wizard:** #26 (render-capture), #27 (URL-import cleanup). **Tags:** #31 (auto-approve pending).
+- **Done on `dev`, awaiting release:** #20, #30, #28, #31, #25, #26 (+ #27 partial).
+- **Needs owner decision (Phase 2):** #27 core, #23 (FlareSolverr, open Qs), bulk-move UI.
+- Older PRD §18 notes: real slicing for filament estimates, trash-purge UI, `.bgcode`/multi-filament gcode.
 
 ## Session start order
 
-1. **This file** — live state + what's in progress.
+1. **This file** — live state + next phases.
 2. **`CLAUDE.md`** — operating rules + verify discipline.
 3. **`docs/architecture.md`** — where things live (module map) + load-bearing gotchas.
-4. **`docs/audit-2026-07-03.md`** — the current worklist.
-5. **`docs/decisions.md`** (newest-first ADR log) + **`CHANGELOG.md`** — the detailed look-back.
+4. **`docs/decisions.md`** (newest-first ADR log) + **`CHANGELOG.md`** — the detailed look-back.
+5. **`docs/audit-2026-07-03.md`** — the audit worklist (mostly done; deferrals noted).
 
 ## Repo, remotes, environment (quick-start)
 
 - **Code:** GitHub [`crzykidd/partfolder3d`](https://github.com/crzykidd/partfolder3d). `main` protected
   (PR-only, 6 required CI checks). Work on `dev`. `gh` authed as `crzykidd`.
-- **Run:** `cp .env.example .env` then `docker compose -f docker-compose.dev.yml up --build` (dev) or
-  `docker compose up -d --build` (prod) → http://localhost:8973 first-run wizard. Migrations auto-run via
-  the backend image entrypoint. External port **8973** (nginx).
+- **Live stack on THIS host:** `partfolder3d-{backend,worker,db,redis,nginx,frontend}-1` on `:dev`
+  images. `docker logs`/`exec` to diagnose; app DB via `docker exec partfolder3d-db-1 psql -U
+  partfolder3d -d partfolder3d`. Separate ephemeral **test** pg: `pf3d-pg-v` on :5433 (pytest only).
+- **Run from scratch:** `cp .env.example .env` → `docker compose -f docker-compose.dev.yml up --build`
+  (dev) or `docker compose up -d --build` (prod) → http://localhost:8973 first-run wizard. Migrations
+  auto-run via the backend entrypoint. External port **8973** (nginx).
 - **No sandbox here** — bash may prompt unless auto-approve is on. **System Python is PEP-668** (pip
   blocked); a scratchpad venv exists for image work — recreate if gone.
 
 ## Before-`/clear` checklist
 
-1. Update **Last updated** + **Current state** (release, `dev` vs `main`, what's in progress).
-2. Refresh **Backlog** *themes* — `gh issue list` is the source of truth; don't enumerate.
+1. Update **Last updated** + **Current state** + **Next phases** (release cut? `dev` vs `main`?).
+2. Refresh **Backlog** themes — `gh issue list` is the source of truth; don't enumerate.
 3. Ensure in-flight `prompts/` frontmatter + `done|failed/` placement is right; record decisions in
    `docs/decisions.md`.
-4. Confirm work is committed on `dev` (note anything intentionally uncommitted).
+4. Confirm work is committed **and pushed** on `dev` (note anything intentionally unpushed).
