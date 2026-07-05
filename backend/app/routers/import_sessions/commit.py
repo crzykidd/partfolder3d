@@ -44,6 +44,7 @@ from ...models.tag import Tag, TagStatus
 from ...models.user import User
 from ...services.item_helpers import (
     _attach_tags,
+    _enqueue_analyze,
     _enqueue_extract_archives,
     _update_search_vector,
     _write_item_sidecar,
@@ -362,11 +363,15 @@ async def _commit_session_inner(
             except Exception:
                 log.warning("commit: failed to clean staging dir %s", staging_path)
 
-    # ---- 13. Enqueue render (fire-and-forget) ----
+    # ---- 13. Enqueue render + analyze (fire-and-forget) ----
     # Pass db so a queued Job row is written now — makes a bulk-import backlog
     # visible in the Jobs UI before any worker starts (#20).
     if render != "off":
         await _sessions._enqueue_render(item.id, pool=pool, db=db)
+    # Analyze runs regardless of render.mode (slice/mesh metadata, 3MF thumbnails).
+    # Without this, an imported item with no ZIP was never analyzed until a manual
+    # rescan — every other create/upload/rescan path already enqueues it.
+    await _enqueue_analyze(item.id, pool=pool, db=db)
 
     # ---- 14. Enqueue ZIP extraction when the item contains any ZIP ----
     from ...models.file import FileRole as _FileRole  # noqa: PLC0415

@@ -164,6 +164,11 @@ prefix appears only on git tags and GitHub releases.
 
 ### Fixed
 
+- **Imported items are now analyzed automatically.** The import-commit path enqueued render
+  and ZIP-extraction jobs but not **analyze**, so an item imported as a direct `.stl`/`.3mf`
+  (no ZIP to trigger it indirectly) was never mesh-analyzed until a manual **Rescan disk** —
+  its object breakdown / slice details stayed empty. Commit now enqueues analyze like every
+  other create/upload/rescan path.
 - **Import wizard: existing tags render immediately + zero-file commits are flagged**
   (partial #27). Existing catalog tags now render right away on the Tags step as a
   "Popular tags" quick-pick, independent of the AI suggest-tags call, so a slow or unconfigured

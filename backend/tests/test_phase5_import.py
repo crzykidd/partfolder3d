@@ -1078,3 +1078,15 @@ async def test_commit_scraped_images_unique_filenames(
             f"scraped image {p!r} missing from the file list (File rows); "
             f"got {sorted(file_paths)}"
         )
+
+    # Commit must enqueue an analyze job (a queued Job row of type 'analyze') — every
+    # other create/upload/rescan path does. Without this an imported item with no ZIP
+    # was never analyzed until a manual rescan.
+    from app.models.job import Job as _JobRow  # noqa: PLC0415
+
+    job_res = await db_session.execute(
+        _select(_JobRow).where(_JobRow.item_id == item_id, _JobRow.type == "analyze")
+    )
+    assert job_res.scalars().first() is not None, (
+        "commit did not enqueue an analyze job for the item"
+    )
