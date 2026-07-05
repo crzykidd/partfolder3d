@@ -6,7 +6,7 @@ to. It is NOT a full reference: durable rules live in `CLAUDE.md`, the module ma
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
 "Current state" before every `/clear`.
 
-**Last updated:** 2026-07-03 — **v0.3.0 released** on `main`; audit-remediation batch landed on `dev` (unreleased).
+**Last updated:** 2026-07-04 — **v0.3.0 released** on `main`; large unreleased batch on `dev` (audit remediation + features/bug-fixes below).
 
 ## Current state
 
@@ -20,6 +20,14 @@ to. It is NOT a full reference: durable rules live in `CLAUDE.md`, the module ma
   CI pinning, exception hygiene, data-safety), operational hygiene (crash recovery + reclamation cron),
   and the file-split refactors (items→package, catalog/imports pages, commit.py, issue_action).
   Deferred items + rationale are in `docs/decisions.md`.
+- **Then a feature/bug-fix run (all on `dev`, unreleased, all CI-green):** bug fixes — catalog
+  pagination bounce, scraped-images-missing-from-file-list, dev-worker DEBUG boot; features —
+  **#20+#30** queued/analyze job visibility, **#28** full-res scraper images + title/desc/creator
+  cleanup, **#27 partial** (tags-immediate + Files row; core "URL import attaches no file" is an
+  OPEN owner design fork — see decisions.md), **#31** auto-approve-tags setting + bulk approve-all,
+  **#25** move-assets-between-libraries (single + bulk endpoints; single-item UI; bulk UI deferred —
+  needs catalog multi-select), **#26** wizard "Try to render file" viewport capture. Suites: backend
+  ≈769, frontend ≈357. `closes #N` in commits → auto-close on the dev→main merge (still open now).
 - **`[Unreleased]` has a batch of Security/Fixed entries** ready for the next release. ⚠️ **Release
   deploy note:** the arq job serializer changed pickle→JSON — **drain the worker queue across that
   upgrade** (in-flight pickled jobs won't deserialize; queue is normally empty). Also new opt-in knobs
