@@ -34,6 +34,42 @@ meta, no JSON-LD, and no "by Creator" title pattern — all data is in the embed
   `extract_metadata_from_html` readable and leaves a clear extension point for other
   Next.js-based sites later.
 
+## 2026-07-05 — Scrapers UI: collapsible sections + drag-to-reorder (ScraperSection)
+
+**Context:** The two scraper cards (FlareSolverr, AgentQL) on the Site Capabilities
+admin page were always-open with numeric priority inputs. Owner requested collapsible
+sections with drag-to-reorder priority.
+
+**Key decisions:**
+
+- **Drag zone is the header div, not the outer section or just the grip span.**
+  Setting `draggable` on the full outer section would allow drag initiation from
+  inputs/text in the expanded body (breaking text selection). Setting it only on the
+  grip `<span>` would show a tiny ghost image. Setting it on the header div (which
+  contains the grip + label + badge) is a middle ground: visible ghost, drag doesn't
+  interfere with body inputs, and the expand/collapse toggle button still works as a
+  click (click ≠ drag in browser event handling).
+
+- **Touch/pointer events: desktop-only.** Native HTML5 DnD has no touch support.
+  Adding `pointermove`/`pointerup` based reorder is non-trivial and out of scope.
+  The feature is fully functional on desktop; mobile users see the sections but
+  cannot reorder them by touch. Noted in the prompt report.
+
+- **Priority state in `ScrapersList`, not in card bodies.** The card bodies
+  (`FlareSolverrBody`, `AgentQLBody`) no longer own or display priority. The
+  `ScrapersList` component owns the display order (via `orderedNames` state,
+  initialized once from query data). On drop, it PUTs both settings with new
+  sequential priorities and invalidates the queries. Rollback on failure.
+
+- **sessionStorage (not localStorage) for expand state.** The spec requires
+  per-session memory. Each section's expanded state is stored under
+  `pf3d.scrapers.expanded.<name>`. Reads are guarded with try/catch for
+  private-browsing environments.
+
+- **`reorderScrapers` exported for testability.** Native DnD events are unreliable
+  in jsdom/vitest, so the reorder+reprioritize logic is a pure exported function
+  tested independently. Component tests cover the collapse/expand/sessionStorage
+  paths; drop handler logic is exercised by calling the API stubs directly.
 
 ## 2026-07-05 — #23 pluggable fallback-scraper framework (FlareSolverr + AgentQL seam)
 

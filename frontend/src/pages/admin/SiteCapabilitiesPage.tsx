@@ -12,22 +12,22 @@
  *  - Re-probe (POST /{domain}/reprobe).
  *  - Delete (DELETE /{domain} + inline confirm).
  *
- * Also shows a "Scrapers" section with per-backend cards (AgentQL + FlareSolverr):
- *  - Enable toggle, priority, timeout, backend-specific fields.
- *  - Test Connection button.
- *  - Usage stats with Clear action.
+ * Also shows a "Scrapers" section with collapsible, drag-reorderable per-backend
+ * sections (AgentQL + FlareSolverr). Priority is set by dragging; each section
+ * remembers its expand/collapse state in sessionStorage.
  *
  * Tokens are NEVER shown back (API never returns plaintext). Only has_token is shown.
  *
  * Styling: Aurora aesthetic (B3b restyle — visual pass, all behavior preserved).
  */
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { GripVertical, ChevronDown, ChevronRight } from 'lucide-react'
 import * as api from '@/lib/api'
 import {
   AdminPage, PageHeader,
-  Card, SectionHeader,
+  Card,
   Badge,
   Button,
   AuroraToggle,
@@ -482,10 +482,30 @@ function UsagePanel({ provider }: { provider: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// FlareSolverr fallback scraper card
+// Reorder helper — pure function, exported for tests
 // ---------------------------------------------------------------------------
 
-function FlareSolverrCard() {
+/**
+ * Reorder a list of scraper entries by moving the item at `fromIndex` to
+ * `toIndex`, then reassign sequential priorities (1-based).
+ */
+export function reorderScrapers<T extends { priority: number }>(
+  items: T[],
+  fromIndex: number,
+  toIndex: number,
+): T[] {
+  if (fromIndex === toIndex) return items.map((item, idx) => ({ ...item, priority: idx + 1 }))
+  const result = [...items]
+  const [moved] = result.splice(fromIndex, 1)
+  result.splice(toIndex, 0, moved)
+  return result.map((item, idx) => ({ ...item, priority: idx + 1 }))
+}
+
+// ---------------------------------------------------------------------------
+// FlareSolverrBody — card body (wrapped by ScraperSection chrome)
+// ---------------------------------------------------------------------------
+
+function FlareSolverrBody() {
   const queryClient = useQueryClient()
   const [saveStatus, setSaveStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -499,14 +519,12 @@ function FlareSolverrCard() {
   const [formEnabled, setFormEnabled] = useState<boolean | undefined>(undefined)
   const [formBaseUrl, setFormBaseUrl] = useState('')
   const [formTimeoutS, setFormTimeoutS] = useState('')
-  const [formPriority, setFormPriority] = useState('')
 
   React.useEffect(() => {
     if (settings && formEnabled === undefined) {
       setFormEnabled(settings.enabled)
       setFormBaseUrl(settings.base_url)
       setFormTimeoutS(String(settings.timeout_s))
-      setFormPriority(String(settings.priority))
     }
   }, [settings, formEnabled])
 
@@ -534,17 +552,13 @@ function FlareSolverrCard() {
     body.base_url = formBaseUrl.trim()
     const t = parseInt(formTimeoutS, 10)
     if (!isNaN(t) && t > 0) body.timeout_s = t
-    const p = parseInt(formPriority, 10)
-    if (!isNaN(p) && p >= 1) body.priority = p
     updateMutation.mutate(body)
   }
 
   const effectiveEnabled = formEnabled !== undefined ? formEnabled : (settings?.enabled ?? false)
 
   return (
-    <Card style={{ marginBottom: 24 }}>
-      <SectionHeader>Scraper — FlareSolverr (free, self-hosted)</SectionHeader>
-
+    <>
       <p style={{ fontSize: 13, color: 'var(--aurora-text-dim)', marginBottom: 16, lineHeight: 1.6 }}>
         Free, self-hosted fallback for Cloudflare-gated sites. Runs a headless browser
         to solve challenges. Add the service to your{' '}
@@ -594,30 +608,19 @@ function FlareSolverrCard() {
             </p>
           </Field>
 
-          {/* Priority + timeout row */}
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <Field label="Priority (lower = tried first)">
-              <AuroraInput
-                type="number"
-                value={formPriority}
-                onChange={(e) => setFormPriority(e.target.value)}
-                style={{ width: 80 }}
-                min={1}
-              />
-            </Field>
-            <Field label="Solve timeout (seconds)">
-              <AuroraInput
-                type="number"
-                value={formTimeoutS}
-                onChange={(e) => setFormTimeoutS(e.target.value)}
-                style={{ width: 100 }}
-                min={5}
-              />
-              <p style={{ fontSize: 11, color: 'var(--aurora-muted)', marginTop: 4 }}>
-                Default 60s. Increase if challenges time out.
-              </p>
-            </Field>
-          </div>
+          {/* Timeout */}
+          <Field label="Solve timeout (seconds)">
+            <AuroraInput
+              type="number"
+              value={formTimeoutS}
+              onChange={(e) => setFormTimeoutS(e.target.value)}
+              style={{ width: 100 }}
+              min={5}
+            />
+            <p style={{ fontSize: 11, color: 'var(--aurora-muted)', marginTop: 4 }}>
+              Default 60s. Increase if challenges time out.
+            </p>
+          </Field>
 
           {/* Usage */}
           <UsagePanel provider="flaresolverr" />
@@ -649,15 +652,15 @@ function FlareSolverrCard() {
           </div>
         </div>
       )}
-    </Card>
+    </>
   )
 }
 
 // ---------------------------------------------------------------------------
-// AgentQL fallback scraper card
+// AgentQLBody — card body (wrapped by ScraperSection chrome)
 // ---------------------------------------------------------------------------
 
-function AgentQLCard() {
+function AgentQLBody() {
   const queryClient = useQueryClient()
   const [apiKeyInput, setApiKeyInput] = useState('')
   const [saveStatus, setSaveStatus] = useState<string | null>(null)
@@ -679,7 +682,6 @@ function AgentQLCard() {
   const [formBudgetMode, setFormBudgetMode] = useState<string>('')
   const [formCapUsd, setFormCapUsd] = useState<string>('')
   const [formPerCall, setFormPerCall] = useState<string>('')
-  const [formPriority, setFormPriority] = useState<string>('')
   const [formTimeoutS, setFormTimeoutS] = useState<string>('')
 
   // Populate form from loaded settings (once)
@@ -690,7 +692,6 @@ function AgentQLCard() {
       setFormBudgetMode(settings.budget_mode)
       setFormCapUsd(settings.monthly_cap_usd != null ? String(settings.monthly_cap_usd) : '')
       setFormPerCall(String(settings.per_call_usd))
-      setFormPriority(String(settings.priority ?? 2))
       setFormTimeoutS(String(settings.timeout_s ?? 120))
     }
   }, [settings, formEnabled])
@@ -730,8 +731,6 @@ function AgentQLCard() {
     }
     const perCallNum = parseFloat(formPerCall)
     if (!isNaN(perCallNum)) body.per_call_usd = perCallNum
-    const p = parseInt(formPriority, 10)
-    if (!isNaN(p) && p >= 1) body.priority = p
     const t = parseInt(formTimeoutS, 10)
     if (!isNaN(t) && t >= 1) body.timeout_s = t
     updateMutation.mutate(body)
@@ -741,9 +740,7 @@ function AgentQLCard() {
   const effectiveBudgetMode = formBudgetMode || settings?.budget_mode || 'free_only'
 
   return (
-    <Card style={{ marginBottom: 24 }}>
-      <SectionHeader>Scraper — AgentQL Fallback</SectionHeader>
-
+    <>
       <p style={{ fontSize: 13, color: 'var(--aurora-text-dim)', marginBottom: 16, lineHeight: 1.6 }}>
         Optional BYO-key fallback for Cloudflare-gated sites (e.g. MakerWorld). Invoked{' '}
         <strong>only when the built-in scraper is blocked.</strong> Bring your own key at{' '}
@@ -799,30 +796,19 @@ function AgentQLCard() {
             </p>
           </Field>
 
-          {/* Priority + timeout row */}
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <Field label="Priority (lower = tried first)">
-              <AuroraInput
-                type="number"
-                value={formPriority}
-                onChange={(e) => setFormPriority(e.target.value)}
-                style={{ width: 80 }}
-                min={1}
-              />
-            </Field>
-            <Field label="Request timeout (seconds)">
-              <AuroraInput
-                type="number"
-                value={formTimeoutS}
-                onChange={(e) => setFormTimeoutS(e.target.value)}
-                style={{ width: 100 }}
-                min={10}
-              />
-              <p style={{ fontSize: 11, color: 'var(--aurora-muted)', marginTop: 4 }}>
-                Default 120s (browser + proxy + challenge can take ~20s).
-              </p>
-            </Field>
-          </div>
+          {/* Timeout */}
+          <Field label="Request timeout (seconds)">
+            <AuroraInput
+              type="number"
+              value={formTimeoutS}
+              onChange={(e) => setFormTimeoutS(e.target.value)}
+              style={{ width: 100 }}
+              min={10}
+            />
+            <p style={{ fontSize: 11, color: 'var(--aurora-muted)', marginTop: 4 }}>
+              Default 120s (browser + proxy + challenge can take ~20s).
+            </p>
+          </Field>
 
           {/* Free allowance */}
           <Field label="Free allowance (calls / month)">
@@ -966,7 +952,298 @@ function AgentQLCard() {
           </p>
         </div>
       )}
-    </Card>
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ScraperSection — collapsible section with drag handle for reordering
+// ---------------------------------------------------------------------------
+
+interface ScraperSectionProps {
+  /** Unique key used for sessionStorage (e.g. 'flaresolverr') */
+  name: string
+  /** Display label shown in the collapsed header */
+  label: string
+  /** Current saved enabled state (undefined = still loading) */
+  enabled: boolean | undefined
+  /** True when another item is being dragged over this section (drop indicator) */
+  isDragOver: boolean
+  /** Fires when the user starts dragging from the header */
+  onHeaderDragStart: (e: React.DragEvent) => void
+  /** Fires when the drag ends (dropped or cancelled) */
+  onHeaderDragEnd: () => void
+  /** Fires when a dragged item is over this section */
+  onDragOver: (e: React.DragEvent) => void
+  /** Fires when a dragged item is dropped on this section */
+  onDrop: (e: React.DragEvent) => void
+  children: React.ReactNode
+}
+
+function ScraperSection({
+  name,
+  label,
+  enabled,
+  isDragOver,
+  onHeaderDragStart,
+  onHeaderDragEnd,
+  onDragOver,
+  onDrop,
+  children,
+}: ScraperSectionProps) {
+  const storageKey = `pf3d.scrapers.expanded.${name}`
+
+  // Default: expanded. Read from sessionStorage on first render.
+  const [expanded, setExpanded] = useState<boolean>(() => {
+    try {
+      const raw = window.sessionStorage.getItem(storageKey)
+      return raw !== null ? raw === 'true' : true
+    } catch {
+      return true
+    }
+  })
+
+  function toggleExpanded() {
+    const next = !expanded
+    setExpanded(next)
+    try {
+      window.sessionStorage.setItem(storageKey, String(next))
+    } catch {
+      // Ignore (private browsing / storage unavailable)
+    }
+  }
+
+  const enabledVariant = enabled === true ? 'success' : 'muted'
+  const enabledText = enabled === undefined ? '—' : enabled ? 'Enabled' : 'Disabled'
+
+  return (
+    <div
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      style={{
+        marginBottom: 12,
+        outline: isDragOver ? '2px solid var(--aurora-accent)' : '2px solid transparent',
+        borderRadius: 14,
+        transition: 'outline-color 0.12s',
+      }}
+    >
+      <Card style={{ marginBottom: 0 }}>
+        {/* ── Header row (draggable; clicking toggle button expands/collapses) ── */}
+        <div
+          draggable
+          onDragStart={onHeaderDragStart}
+          onDragEnd={onHeaderDragEnd}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            marginBottom: expanded ? 16 : 0,
+            /* Prevent text selection during drag */
+            userSelect: 'none',
+          }}
+        >
+          {/* Drag handle */}
+          <span
+            aria-label="Drag to reorder"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              color: 'var(--aurora-muted)',
+              cursor: 'grab',
+              flexShrink: 0,
+            }}
+          >
+            <GripVertical size={16} />
+          </span>
+
+          {/* Expand/collapse toggle */}
+          <button
+            type="button"
+            onClick={(e) => {
+              // Stop propagation so clicking the button doesn't also trigger
+              // a drag (though a click normally won't, this is a safety guard).
+              e.stopPropagation()
+              toggleExpanded()
+            }}
+            aria-expanded={expanded}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flex: 1,
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: 0,
+              fontFamily: 'inherit',
+              textAlign: 'left',
+            }}
+          >
+            {expanded
+              ? <ChevronDown size={14} style={{ color: 'var(--aurora-muted)', flexShrink: 0 }} />
+              : <ChevronRight size={14} style={{ color: 'var(--aurora-muted)', flexShrink: 0 }} />
+            }
+            <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--aurora-text)' }}>
+              {label}
+            </span>
+            <Badge variant={enabledVariant}>{enabledText}</Badge>
+          </button>
+        </div>
+
+        {/* ── Expanded body (not part of the draggable header) ── */}
+        {expanded && (
+          <div>
+            {children}
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ScrapersList — manages ordering, drag-to-reorder, and priority persistence
+// ---------------------------------------------------------------------------
+
+/** Lightweight entry used for ordering. Full settings live in each body's query. */
+type ScraperOrderEntry = {
+  name: string
+  priority: number
+}
+
+function ScrapersList() {
+  const queryClient = useQueryClient()
+
+  const { data: fsSettings } = useQuery({
+    queryKey: ['admin-flaresolverr-settings'],
+    queryFn: api.getFlareSolverrSettings,
+  })
+
+  const { data: aqlSettings } = useQuery({
+    queryKey: ['admin-agentql-settings'],
+    queryFn: api.getAgentQLSettings,
+  })
+
+  // Ordered names — initialized from priorities once both queries load.
+  // After that, only drag-and-drop updates this list (not query re-fetches).
+  const [orderedNames, setOrderedNames] = useState<string[]>([])
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [dropIndex, setDropIndex] = useState<number | null>(null)
+  const [dropError, setDropError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (orderedNames.length === 0 && fsSettings && aqlSettings) {
+      const entries: ScraperOrderEntry[] = [
+        { name: 'flaresolverr', priority: fsSettings.priority },
+        { name: 'agentql', priority: aqlSettings.priority },
+      ]
+      entries.sort((a, b) => a.priority - b.priority)
+      setOrderedNames(entries.map((e) => e.name))
+    }
+  }, [orderedNames.length, fsSettings, aqlSettings])
+
+  function getEnabled(name: string): boolean | undefined {
+    if (name === 'flaresolverr') return fsSettings?.enabled
+    if (name === 'agentql') return aqlSettings?.enabled
+    return undefined
+  }
+
+  function getLabel(name: string): string {
+    if (name === 'flaresolverr') return 'FlareSolverr (free, self-hosted)'
+    if (name === 'agentql') return 'AgentQL Fallback'
+    return name
+  }
+
+  function getBody(name: string): React.ReactNode {
+    if (name === 'flaresolverr') return <FlareSolverrBody />
+    if (name === 'agentql') return <AgentQLBody />
+    return null
+  }
+
+  // ── Drag handlers ──────────────────────────────────────────────────────────
+
+  function handleDragStart(e: React.DragEvent, index: number) {
+    setDragIndex(index)
+    setDropError(null)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(index))
+  }
+
+  function handleDragEnd() {
+    setDragIndex(null)
+    setDropIndex(null)
+  }
+
+  function handleDragOver(e: React.DragEvent, index: number) {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setDropIndex(index)
+  }
+
+  async function handleDrop(e: React.DragEvent, toIndex: number) {
+    e.preventDefault()
+    const from = dragIndex
+    setDragIndex(null)
+    setDropIndex(null)
+
+    if (from === null || from === toIndex) return
+
+    // Optimistic reorder
+    const prevOrder = [...orderedNames]
+    const newOrder = [...orderedNames]
+    const [moved] = newOrder.splice(from, 1)
+    newOrder.splice(toIndex, 0, moved)
+    setOrderedNames(newOrder)
+
+    try {
+      // Persist: PUT priority = position (1-based) for each scraper
+      await Promise.all(
+        newOrder.map((name, idx) => {
+          const priority = idx + 1
+          if (name === 'flaresolverr') return api.updateFlareSolverrSettings({ priority })
+          if (name === 'agentql') return api.updateAgentQLSettings({ priority })
+          return Promise.resolve()
+        }),
+      )
+      void queryClient.invalidateQueries({ queryKey: ['admin-flaresolverr-settings'] })
+      void queryClient.invalidateQueries({ queryKey: ['admin-agentql-settings'] })
+    } catch (err) {
+      // Rollback on failure
+      setOrderedNames(prevOrder)
+      setDropError(err instanceof Error ? err.message : 'Failed to save priority order.')
+    }
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  if (orderedNames.length === 0) {
+    return <p style={{ fontSize: 13, color: 'var(--aurora-muted)' }}>Loading scrapers…</p>
+  }
+
+  return (
+    <div>
+      <p style={{ fontSize: 12, color: 'var(--aurora-muted)', marginBottom: 12, fontStyle: 'italic' }}>
+        Drag to set fallback order — top is tried first.
+      </p>
+      {dropError && (
+        <p style={{ fontSize: 12, color: 'var(--aurora-danger)', marginBottom: 8 }}>{dropError}</p>
+      )}
+      {orderedNames.map((name, index) => (
+        <ScraperSection
+          key={name}
+          name={name}
+          label={getLabel(name)}
+          enabled={getEnabled(name)}
+          isDragOver={dropIndex === index && dragIndex !== index}
+          onHeaderDragStart={(e) => handleDragStart(e, index)}
+          onHeaderDragEnd={handleDragEnd}
+          onDragOver={(e) => handleDragOver(e, index)}
+          onDrop={(e) => { void handleDrop(e, index) }}
+        >
+          {getBody(name)}
+        </ScraperSection>
+      ))}
+    </div>
   )
 }
 
@@ -990,16 +1267,15 @@ export function SiteCapabilitiesPage() {
         meta={isLoading ? undefined : `${caps.length} domain${caps.length === 1 ? '' : 's'}`}
       />
 
-      {/* Scrapers section — one card per registered backend */}
+      {/* Scrapers section — collapsible per-backend sections, drag-to-reorder */}
       <div style={{ marginBottom: 8 }}>
         <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 16 }}>
           Fallback scrapers
           <span style={{ marginLeft: 8, fontWeight: 400, textTransform: 'none', fontSize: 12, letterSpacing: 0 }}>
-            — tried in priority order when the primary scraper is blocked (lower priority number = tried first)
+            — tried in priority order when the primary scraper is blocked
           </span>
         </p>
-        <FlareSolverrCard />
-        <AgentQLCard />
+        <ScrapersList />
       </div>
 
       {isError && (

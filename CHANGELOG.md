@@ -20,6 +20,17 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Changed
+
+- **Scrapers admin UI: collapsible sections + drag-to-reorder priority.** Each
+  fallback scraper on the Site Capabilities admin page is now a collapsible section
+  (expanded by default; state persisted per browser session via `sessionStorage`).
+  The collapsed header shows the scraper name and its current Enabled/Disabled state.
+  Priority is now set by dragging sections up or down — the list position is the
+  priority (top = tried first). Numeric priority inputs have been removed from both
+  cards. A new generic `ScraperSection` wrapper means adding a third scraper requires
+  only one entry in `ScrapersList` with no bespoke chrome.
+
 ### Added
 
 - **Pluggable fallback-scraper framework with FlareSolverr backend** (closes #23).
