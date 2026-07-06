@@ -441,6 +441,11 @@ export function SideNavShell() {
             WebkitBackdropFilter: 'blur(24px)',
             borderBottom: '1px solid var(--aurora-glass-border)',
             flexShrink: 0,
+            // backdrop-filter puts this header in its own stacking context; without an
+            // explicit z-index the later stat-strip/rail siblings (also stacking contexts)
+            // paint over the user-menu dropdown.
+            position: 'relative',
+            zIndex: 100,
           } as React.CSSProperties}
         >
           <div style={{ flex: 1 }} />

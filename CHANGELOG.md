@@ -20,6 +20,27 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-07-05
+
+> ⚠️ **nginx config changed** — if you are running a custom nginx config
+> (the `./nginx/nginx.conf` bind-mount in `docker-compose.yml`), compare your
+> copy against the updated `nginx/nginx.conf` in this release and reconcile any
+> differences before upgrading.
+
+### Fixed
+
+- **Prod nginx CSP blanked all scraped-image previews in the import wizard.** The
+  production Content-Security-Policy allowed only `img-src 'self' data: blob:`, so the
+  wizard's hotlinked source-site image URLs (scraped `is_url` session images, shown
+  until commit downloads them server-side) were blocked by the browser and hidden by
+  the tile's `onError` handler — imports looked like the scrape found no images. The
+  dev nginx config has no CSP, which is why dev looked fine. `img-src` now also allows
+  `https:`.
+- **Side-nav layout: the user-profile dropdown no longer renders behind the stat strip
+  and the right widget rail.** The top bar's `backdrop-filter` traps the dropdown in the
+  header's stacking context; the header now carries its own `z-index` so the menu paints
+  above its sibling panels.
+
 ## [0.5.0] — 2026-07-05
 
 ### Changed
@@ -1115,7 +1136,8 @@ detail in this one file. (An earlier plan to archive closed minor series into
 <!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
      earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
 
-[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/crzykidd/partfolder3d/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/crzykidd/partfolder3d/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/crzykidd/partfolder3d/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/crzykidd/partfolder3d/compare/v0.2.5...v0.3.0
