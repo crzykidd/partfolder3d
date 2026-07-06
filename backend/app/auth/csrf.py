@@ -38,12 +38,18 @@ def generate_csrf_token() -> str:
 
 def set_csrf_cookie(response, token: str, *, secure: bool) -> None:  # type: ignore[type-arg]
     """Attach the readable CSRF cookie to *response*."""
+    from ..models.session import SESSION_LIFETIME_DAYS  # noqa: PLC0415
+
     response.set_cookie(
         key=CSRF_COOKIE_NAME,
         value=token,
         httponly=False,  # JS must be able to read this
         secure=secure,
         samesite="lax",
+        # Must match the session cookie's lifetime: without max_age this is a
+        # browser-session cookie, so a browser restart leaves the user logged in
+        # (session cookie persists) but unable to pass CSRF on any write.
+        max_age=SESSION_LIFETIME_DAYS * 86400,
         path="/",
     )
 

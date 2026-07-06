@@ -47,6 +47,12 @@ prefix appears only on git tags and GitHub releases.
 
 ### Fixed
 
+- **CSRF cookie now persists across browser restarts.** The `pf3d_csrf` cookie was
+  set without `max_age`, making it a browser-session cookie while the auth session
+  cookie persists for `SESSION_LIFETIME_DAYS` — after a browser restart users stayed
+  logged in but every write failed with "Missing X-CSRF-Token header" until they
+  logged out and back in. The CSRF cookie now carries the same `max_age` as the
+  session cookie.
 - **URL-import wizard can now attach model files before commit** (closes #27). The
   Review & Commit step now shows a mid-wizard "Attach Model Files" section for `url`
   and `upload` sessions: staged files are listed with name, role, and a per-file
