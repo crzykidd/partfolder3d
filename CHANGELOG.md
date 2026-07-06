@@ -20,6 +20,13 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Side-nav layout: the user-profile dropdown no longer renders behind the stat strip
+  and the right widget rail.** The top bar's `backdrop-filter` traps the dropdown in the
+  header's stacking context; the header now carries its own `z-index` so the menu paints
+  above its sibling panels.
+
 ## [0.5.0] — 2026-07-05
 
 ### Changed
