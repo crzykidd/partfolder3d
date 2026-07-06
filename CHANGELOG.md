@@ -20,6 +20,8 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-07-05
+
 ### Changed
 
 - **Zero-file URL imports now show an explicit attach-or-create-without-objects modal**
@@ -1113,7 +1115,8 @@ detail in this one file. (An earlier plan to archive closed minor series into
 <!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
      earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
 
-[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/crzykidd/partfolder3d/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/crzykidd/partfolder3d/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/crzykidd/partfolder3d/compare/v0.2.5...v0.3.0
 [0.2.5]: https://github.com/crzykidd/partfolder3d/compare/v0.2.4...v0.2.5
