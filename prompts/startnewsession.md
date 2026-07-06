@@ -6,15 +6,15 @@ It is NOT a full reference: durable rules live in `CLAUDE.md`, the module map + 
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
 "Current state" + "Next phases" before every `/clear`.
 
-**Last updated:** 2026-07-05 (late) — **post-v0.4.0 batch of 8 commits on `dev`, pushed** (`:dev`
-images rebuilding). #27 + #23 both RESOLVED on `dev` (auto-close on next merge to `main`). Next up =
-bulk move-assets UI (last Phase 2 item) or release the batch.
+**Last updated:** 2026-07-05 (v0.5.0 released) — **v0.5.0 tagged + GitHub release live + release
+images published**; `dev` == `main`; #23 + #27 auto-closed on merge (PR #34). Next up = bulk
+move-assets UI (last Phase 2 item), then `gh issue list`.
 
 ## Current state
 
-- **Latest release: `v0.4.0`** (2026-07-05, in prod). **`dev` is now 8 commits ahead of `main`**
-  (pushed to origin; suites 822 backend / 401 frontend green). The batch (details in
-  `CHANGELOG.md [Unreleased]` + `docs/decisions.md`):
+- **Latest release: `v0.5.0`** (2026-07-05 — tagged from `main`, release-event image build green:
+  `:latest`/`:0.5.0`/`:0` on all three images). **`dev` == `main`, nothing queued.** Suites at
+  release: 822 backend / 401 frontend. What shipped (full detail `CHANGELOG.md [0.5.0]`):
   - **#23 DONE** — pluggable fallback-scraper framework per `docs/scrapers-spec.md`: dispatcher tries
     enabled backends by priority (default FlareSolverr → AgentQL); per-scraper enable/priority/timeout/
     test-connection; usage rows + daily retention cron + manual clear; `flaresolverr` service added to
@@ -49,14 +49,12 @@ bulk move-assets UI (last Phase 2 item) or release the batch.
     a catalog **multi-select** affordance that doesn't exist yet (a real UX decision — discuss with
     owner before building).
 
-**Phase 3 — release v0.5.0 (owner approved 2026-07-05), then remaining backlog.** Owner chose
-**0.5.0** (feature batch → minor bump; 0.4.1 rejected as misleading). Pre-release items already
-handled on `dev`: prod `docker-compose.yml` has a **commented-out FlareSolverr example** (owner:
-users opt in themselves; not enabled by default) and the CHANGELOG carries the **CSRF re-login
-upgrade note**. **Release gotcha:** the CodeQL PR check surfaces pre-existing/moved alerts on large
-diffs — fix real log-injections (`sanitize_for_log`), dismiss path-injection FPs that already have a
-`resolve()`+`is_relative_to()` barrier. CodeQL is non-required but shows red. Then `gh issue list`
-for the rest.
+**Phase 3 — v0.5.0 released ✅ (2026-07-05, PR #34; CodeQL came up clean this time).** Next release
+is `/release-prep <next>` when the next batch is ready. Standing release gotchas: CodeQL on large
+diffs surfaces pre-existing/moved alerts (fix real log-injections via `sanitize_for_log`; dismiss
+path-injection FPs that already have a `resolve()`+`is_relative_to()` barrier); prod users opt into
+FlareSolverr via the commented example block in `docker-compose.yml`. Then `gh issue list` for the
+rest.
 
 ## How we work (recap — full rules in `CLAUDE.md`)
 
@@ -76,7 +74,7 @@ for the rest.
 
 ## Backlog (themes — `gh issue list` is the source of truth for what we build **now**, not the PRD)
 
-- **Done on `dev`, awaiting release:** #23, #27 (auto-close on merge; both have status comments).
+- **Shipped in v0.5.0:** #23, #27 (auto-closed by PR #34; both have status comments).
 - **Needs owner decision:** bulk-move multi-select UI; whether to file the opportunistic
   auto-fetch-model-file idea as an issue.
 - Older PRD §18 notes: real slicing for filament estimates, trash-purge UI, `.bgcode`/multi-filament gcode.
