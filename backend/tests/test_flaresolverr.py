@@ -650,3 +650,154 @@ async def test_clear_scraper_usage_per_provider(
     providers = {r["provider"]: r for r in data}
     assert "agentql" in providers
     assert "flaresolverr" not in providers
+
+
+# ---------------------------------------------------------------------------
+# 11. __NEXT_DATA__ enrichment (MakerWorld)
+# ---------------------------------------------------------------------------
+
+import json as _json  # noqa: E402  (used only in fixtures below)
+
+_MAKERWORLD_NEXT_DATA = _json.dumps({
+    "props": {
+        "pageProps": {
+            "design": {
+                "title": "Knitted Goose",
+                "designCreator": {
+                    "name": "Smoggy3D",
+                    "handle": "Smoggy3D",
+                },
+                "categories": [
+                    {"name": "Animals"},
+                    {"name": "Miniatures"},
+                ],
+            }
+        }
+    }
+})
+
+_MAKERWORLD_HTML = f"""<html>
+<head>
+  <meta property="og:title"
+        content="Knitted Goose - Free 3D Print Model - MakerWorld" />
+  <meta property="og:description" content="A nice model" />
+  <meta property="og:site_name" content="MakerWorld" />
+  <script id="__NEXT_DATA__" type="application/json">{_MAKERWORLD_NEXT_DATA}</script>
+</head>
+<body></body>
+</html>"""
+
+
+def test_next_data_makerworld_happy_path() -> None:
+    """NEXT_DATA enrichment: clean title, creator name+URL, and category tags."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    sr = extract_metadata_from_html(
+        _MAKERWORLD_HTML,
+        "https://makerworld.com/en/models/2990447-knitted-goose",
+        "makerworld.com",
+        20,
+    )
+    # Clean title from NEXT_DATA (no site-suffix boilerplate)
+    assert sr.title == "Knitted Goose"
+    # Creator from NEXT_DATA (no meta author present)
+    assert sr.creator_name == "Smoggy3D"
+    assert sr.creator_profile_url == "https://makerworld.com/en/@Smoggy3D"
+    # Categories appended as tags
+    assert "Animals" in sr.raw_tags
+    assert "Miniatures" in sr.raw_tags
+    assert sr.blocked is False
+
+
+def test_next_data_malformed_json_degrades_gracefully() -> None:
+    """Malformed __NEXT_DATA__ JSON leaves the scrape intact (doesn't raise)."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    html = """<html>
+    <head>
+      <meta property="og:title" content="Some Model" />
+      <script id="__NEXT_DATA__" type="application/json">{ THIS IS NOT JSON </script>
+    </head>
+    <body></body>
+    </html>"""
+
+    sr = extract_metadata_from_html(
+        html,
+        "https://makerworld.com/en/models/1",
+        "makerworld.com",
+        20,
+    )
+    # og:title-derived title still present; enrichment silently skipped
+    assert sr.title == "Some Model"
+    assert sr.creator_name is None
+    assert sr.creator_profile_url is None
+    assert sr.blocked is False
+
+
+def test_next_data_meta_author_wins_over_next_data() -> None:
+    """Existing meta author takes priority; NEXT_DATA creator is not applied."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    nd = _json.dumps({
+        "props": {
+            "pageProps": {
+                "design": {
+                    "title": "Clean Title",
+                    "designCreator": {
+                        "name": "NDCreator",
+                        "handle": "ndcreator",
+                    },
+                }
+            }
+        }
+    })
+    html = f"""<html>
+    <head>
+      <meta property="og:title" content="Clean Title" />
+      <meta name="author" content="MetaAuthor" />
+      <script id="__NEXT_DATA__" type="application/json">{nd}</script>
+    </head>
+    <body></body>
+    </html>"""
+
+    sr = extract_metadata_from_html(
+        html,
+        "https://makerworld.com/en/models/2",
+        "makerworld.com",
+        20,
+    )
+    # Meta author wins
+    assert sr.creator_name == "MetaAuthor"
+    # NEXT_DATA creator never applied
+    assert sr.creator_name != "NDCreator"
+
+
+def test_next_data_non_makerworld_shape_no_effect() -> None:
+    """NEXT_DATA with a different JSON shape produces no enrichment."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    nd = _json.dumps({
+        "props": {
+            "initialState": {
+                "thing": {"creator": "SomeCreator"},
+            }
+        }
+    })
+    html = f"""<html>
+    <head>
+      <meta property="og:title" content="Some Other Site Model" />
+      <script id="__NEXT_DATA__" type="application/json">{nd}</script>
+    </head>
+    <body></body>
+    </html>"""
+
+    sr = extract_metadata_from_html(
+        html,
+        "https://othernextjssite.com/model/42",
+        "othernextjssite.com",
+        20,
+    )
+    # og:title kept (NEXT_DATA had no matching path)
+    assert sr.title == "Some Other Site Model"
+    assert sr.creator_name is None
+    assert sr.creator_profile_url is None

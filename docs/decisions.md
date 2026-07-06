@@ -2,6 +2,39 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-05 — MakerWorld `__NEXT_DATA__` enrichment in `extract_metadata_from_html`
+
+**Context:** Live FlareSolverr testing showed MakerWorld URL imports left the Designer
+blank and kept the SEO-suffixed og:title. MakerWorld is a Next.js SPA with no author
+meta, no JSON-LD, and no "by Creator" title pattern — all data is in the embedded
+`<script id="__NEXT_DATA__">` JSON blob.
+
+**Key decisions:**
+
+- **Shape-gated, not domain-gated.** The `props.pageProps.design` path lookup simply
+  returns nothing on sites whose NEXT_DATA has a different structure — no domain check
+  needed.  This means regional/mirror MakerWorld domains and any future Next.js site
+  using the same shape benefit automatically.
+
+- **Existing meta signals win for creator fields.** `_enrich_from_next_data` fills
+  `creator_name` and `creator_profile_url` only when they are still empty after the
+  normal meta/title heuristic pass.  OG/meta author takes priority; NEXT_DATA is a
+  last-resort fallback.
+
+- **NEXT_DATA title overrides og:title.** The `design.title` field from NEXT_DATA is
+  the clean, unsuffixed title (MakerWorld's og:title appends " - Free 3D Print Model -
+  MakerWorld").  We prefer it over the og:title-derived value and still run it through
+  `_clean_title` for consistency.
+
+- **Guard order: size cap → JSON parse → shape walk.** The blob is capped at 5 MB
+  before parsing; any exception (malformed JSON, missing keys, wrong types) is caught
+  and logged at DEBUG.  A bad NEXT_DATA blob never breaks the scrape.
+
+- **Implemented as a separate helper (`_enrich_from_next_data`), not inline.**  Keeps
+  `extract_metadata_from_html` readable and leaves a clear extension point for other
+  Next.js-based sites later.
+
+
 ## 2026-07-05 — #23 pluggable fallback-scraper framework (FlareSolverr + AgentQL seam)
 
 **Context:** The Cloudflare-fallback path in `import_session.py` was hardcoded to AgentQL.

@@ -47,6 +47,14 @@ prefix appears only on git tags and GitHub releases.
 
 ### Fixed
 
+- **MakerWorld imports now pre-fill Designer, clean title, and category tags** via
+  `__NEXT_DATA__`. Live testing found that MakerWorld (a Next.js SPA) has no author
+  meta tags, no JSON-LD, and no "by Creator" title pattern — all metadata lives only in
+  the embedded `<script id="__NEXT_DATA__">` blob. The scraper now parses that blob
+  (shape-gated, not domain-gated; capped at 5 MB; any parse error silently ignored) and
+  enriches the result: `designCreator.name`/`.handle` → Designer + profile URL (fallback
+  only — existing meta signals still win); `design.title` → clean, unsuffixed title
+  (overrides the og:title boilerplate); `categories[].name` → appended to raw tags.
 - **CSRF cookie now persists across browser restarts.** The `pf3d_csrf` cookie was
   set without `max_age`, making it a browser-session cookie while the auth session
   cookie persists for `SESSION_LIFETIME_DAYS` — after a browser restart users stayed

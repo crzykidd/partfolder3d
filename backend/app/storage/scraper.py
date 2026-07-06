@@ -48,6 +48,9 @@ _ROBOTS_MAX_BYTES = 512 * 1024
 # Default HTML body cap (bytes) if a caller doesn't override it.  The worker
 # passes settings.SCRAPE_HTML_MAX_MB; this default keeps direct/test callers safe.
 _DEFAULT_HTML_MAX_BYTES = 5 * 1024 * 1024
+# Cap on the __NEXT_DATA__ blob before JSON-parsing it (the HTML itself is already
+# capped by the caller, but the blob may still be large; guard separately).
+_NEXT_DATA_MAX_BYTES = 5 * 1024 * 1024
 
 # ---------------------------------------------------------------------------
 # Result data structure
@@ -362,6 +365,106 @@ def _extract_tags(tree: object) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Next.js __NEXT_DATA__ enrichment helper
+# ---------------------------------------------------------------------------
+
+
+def _enrich_from_next_data(result: ScrapeResult, html: str) -> None:
+    """Best-effort enrichment from a Next.js ``__NEXT_DATA__`` embedded JSON blob.
+
+    Handles the MakerWorld shape (``props.pageProps.design.*``); silently
+    does nothing for other sites whose NEXT_DATA has a different structure.
+    Shape-gated, not domain-gated — regional/mirror domains still benefit.
+
+    Priority rules:
+      - ``design.title`` *replaces* the og:title-derived title (it's the
+        unsuffixed clean title); still run through ``_clean_title``.
+      - ``designCreator.name`` and ``designCreator.handle`` / profile URL are
+        used **only** when the existing meta/title heuristics found nothing
+        (existing signals always win for creator fields).
+      - ``categories[].name`` are appended to ``raw_tags``; dupes skipped.
+
+    Never raises.  A malformed/huge JSON blob is silently ignored.
+    """
+    try:
+        import json  # noqa: PLC0415
+
+        # Locate the script tag by id without re-running the full HTML parser.
+        marker = '<script id="__NEXT_DATA__"'
+        start = html.find(marker)
+        if start == -1:
+            return
+
+        tag_end = html.find(">", start)
+        if tag_end == -1:
+            return
+        script_end = html.find("</script>", tag_end)
+        if script_end == -1:
+            return
+
+        blob = html[tag_end + 1 : script_end]
+        if len(blob) > _NEXT_DATA_MAX_BYTES:
+            log.debug(
+                "_enrich_from_next_data: blob too large (%d bytes), skipping",
+                len(blob),
+            )
+            return
+
+        data = json.loads(blob)
+
+        # Navigate to MakerWorld's design node; harmless on other shapes.
+        design = (
+            data.get("props", {})
+            .get("pageProps", {})
+            .get("design")
+        )
+        if not isinstance(design, dict):
+            return
+
+        # 1. Clean title — prefer NEXT_DATA's unsuffixed title over og:title.
+        nd_title = design.get("title")
+        if isinstance(nd_title, str) and nd_title.strip():
+            cleaned = _clean_title(nd_title)
+            if cleaned:
+                result.title = cleaned
+
+        # 2 & 3. Creator name + profile URL — fallback only.
+        creator = design.get("designCreator")
+        if isinstance(creator, dict):
+            if not result.creator_name:
+                nd_name = creator.get("name")
+                if isinstance(nd_name, str) and nd_name.strip():
+                    result.creator_name = nd_name.strip()
+            if not result.creator_profile_url:
+                nd_handle = creator.get("handle")
+                if isinstance(nd_handle, str) and nd_handle.strip():
+                    result.creator_profile_url = (
+                        f"https://makerworld.com/en/@{nd_handle.strip()}"
+                    )
+
+        # 4. Categories → additional tags (dedupe, cap at 50).
+        categories = design.get("categories")
+        if isinstance(categories, list):
+            existing_lower = {t.lower() for t in result.raw_tags}
+            for cat in categories:
+                if isinstance(cat, dict):
+                    cat_name = cat.get("name")
+                elif isinstance(cat, str):
+                    cat_name = cat
+                else:
+                    continue
+                if isinstance(cat_name, str) and cat_name.strip():
+                    norm = cat_name.strip()
+                    if norm.lower() not in existing_lower:
+                        result.raw_tags.append(norm)
+                        existing_lower.add(norm.lower())
+            result.raw_tags = result.raw_tags[:50]
+
+    except Exception:
+        log.debug("_enrich_from_next_data: failed to parse NEXT_DATA (ignored)")
+
+
+# ---------------------------------------------------------------------------
 # Shared HTML → ScrapeResult extraction helper
 # ---------------------------------------------------------------------------
 
@@ -464,6 +567,12 @@ def extract_metadata_from_html(
         if href:
             result.license = href
             break
+
+    # Next.js __NEXT_DATA__ enrichment (MakerWorld et al.).  Runs last so
+    # existing meta signals already populate the result — creator fields are
+    # only filled in when still empty; the clean NEXT_DATA title overrides the
+    # og:title-suffixed one.
+    _enrich_from_next_data(result, html)
 
     return result
 
