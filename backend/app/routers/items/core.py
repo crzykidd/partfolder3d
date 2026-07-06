@@ -51,7 +51,7 @@ from sqlalchemy.orm import selectinload
 from ...auth.deps import csrf_protect, get_current_user, get_db, get_optional_user
 from ...models.creator import Creator
 from ...models.favorite import Favorite
-from ...models.file import File
+from ...models.file import File, FileRole
 from ...models.image import Image
 from ...models.item import Item
 from ...models.job import Job
@@ -86,6 +86,12 @@ from .schemas import (
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/items", tags=["items"])
+
+# Roles that count as "print assets" for the has_asset flag / filter.
+# model — 3D model files (.stl, .3mf, .obj, etc.)
+# gcode — sliced G-code ready to print (.gcode, .gco, .bgcode)
+# See docs/decisions.md for the rationale (zip excluded: packaging, not printable per se).
+_PRINT_ASSET_ROLES = [FileRole.model, FileRole.gcode]
 
 
 @router.post("", response_model=ItemDetail, status_code=status.HTTP_201_CREATED)
@@ -228,6 +234,10 @@ async def list_items(
         default="created_at_desc",
         description=f"Sort order: {', '.join(sorted(_VALID_SORTS))}",
     ),
+    has_asset: bool | None = Query(
+        default=None,
+        description="If true, only items with model/gcode files; if false, only items without",
+    ),
 ) -> PaginatedItems:
     """List items (paginated, searchable, filterable).
 
@@ -280,6 +290,17 @@ async def list_items(
             Favorite.item_id == Item.id,
             Favorite.user_id == user.id,
         ))
+
+    # Print-asset filter: IN / NOT IN the set of item_ids that have model/gcode files.
+    # files.item_id is NOT NULL (FK constraint) so NOT IN is safe against NULL edge cases.
+    if has_asset is not None:
+        asset_subq = select(File.item_id).where(
+            File.role.in_(_PRINT_ASSET_ROLES)
+        ).scalar_subquery()
+        if has_asset:
+            query = query.where(Item.id.in_(asset_subq))
+        else:
+            query = query.where(Item.id.notin_(asset_subq))
 
     # Count (same filters, no pagination)
     count_q = select(func.count()).select_from(query.subquery())
@@ -337,6 +358,15 @@ async def list_items(
         )
         favorited_ids = {row[0] for row in fav_result.all()}
 
+    # Batch-load has_asset flags: set of item_ids that have at least one print asset.
+    asset_result = await db.execute(
+        select(File.item_id).distinct().where(
+            File.item_id.in_(item_ids),
+            File.role.in_(_PRINT_ASSET_ROLES),
+        )
+    )
+    has_asset_ids: set[int] = {row[0] for row in asset_result.all()}
+
     items_out = [
         ItemSummary(
             id=item.id,
@@ -351,6 +381,7 @@ async def list_items(
             creator_name=item.creator.name if item.creator else None,
             tag_names=tags_by_item.get(item.id, []),
             favorited=item.id in favorited_ids,
+            has_asset=item.id in has_asset_ids,
         )
         for item in items
     ]

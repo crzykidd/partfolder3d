@@ -2,6 +2,25 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-05 — "Print asset" role-set for has_asset flag and catalog filter
+
+**Context:** The catalog "has print asset" filter (#28) needs a precise definition of which
+`File.role` values count as printable assets. The prompt specifically asks about gcode and
+whether it should count; the role taxonomy (model, gcode, zip, image, render, photo, other)
+has ambiguous members.
+
+**Decision:** Print asset = `FileRole.model` + `FileRole.gcode`. Specifically:
+
+- **model** (`.stl`, `.3mf`, `.obj`, `.ply`, `.blend`, `.f3d`, `.step`, `.stp`, `.fcstd`,
+  `.amf`, `.dae`) — unambiguously a 3D model file, always counts.
+- **gcode** (`.gcode`, `.gco`, `.bgcode`) — a ready-to-print sliced file; counts as a
+  print asset (prompt explicitly recommended yes).
+- **zip** — excluded. A zip archive _may_ contain models but is a packaging format, not
+  intrinsically a printable file. Including it would give false positives for metadata-only
+  zips. (If the zip is re-inventoried and extracted, the inner model files would earn their
+  own `model` roles and flip `has_asset` at that point.)
+- **image, render, photo, other** — never count (not printable).
+
 ## 2026-07-05 — MakerWorld gallery images: NEXT_DATA authoritative; hygiene filters heuristic
 
 **Context:** Live FlareSolverr testing against a real MakerWorld import showed 6 stored

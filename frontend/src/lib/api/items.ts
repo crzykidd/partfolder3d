@@ -17,6 +17,8 @@ export interface ItemSummary {
   creator_name: string | null
   tag_names: string[]
   favorited: boolean
+  /** True when the item has at least one model or gcode file. */
+  has_asset: boolean
 }
 
 export interface TagOut {
@@ -202,6 +204,12 @@ export interface ItemListParams {
   library_id?: number
   /** Filter by one or more library ids (repeatable ?library_ids=1&library_ids=2). */
   library_ids?: number[]
+  /**
+   * If true, only items with model/gcode files.
+   * If false, only items without model/gcode files.
+   * Absent = all items.
+   */
+  has_asset?: boolean
 }
 
 export interface TagSummary {
@@ -338,6 +346,7 @@ export const listItems = (params: ItemListParams = {}): Promise<PaginatedItems> 
   if (params.per_page != null) sp.set('per_page', String(params.per_page))
   if (params.library_id != null) sp.set('library_id', String(params.library_id))
   if (params.library_ids) params.library_ids.forEach((id) => sp.append('library_ids', String(id)))
+  if (params.has_asset !== undefined) sp.set('has_asset', String(params.has_asset))
   const qs = sp.toString()
   return apiFetch<PaginatedItems>(`/api/items${qs ? `?${qs}` : ''}`)
 }

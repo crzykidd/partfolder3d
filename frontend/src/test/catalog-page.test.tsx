@@ -78,6 +78,7 @@ function makeItem(overrides: Partial<api.ItemSummary> & { key: string; title: st
     creator_name: null,
     tag_names: [],
     favorited: false,
+    has_asset: false,
     ...overrides,
   }
 }
@@ -259,5 +260,94 @@ describe('CatalogPage', () => {
       )
       expect(screen.getByText('Library:')).toBeInTheDocument()
     })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Asset filter
+  // ---------------------------------------------------------------------------
+
+  it('renders the asset filter with All / With files / Without files options', async () => {
+    vi.mocked(api.listItems).mockResolvedValue(itemsResponse([]))
+
+    renderCatalog('/catalog?view=table')
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^All$/ })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /With files/i })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Without files/i })).toBeInTheDocument()
+    })
+  })
+
+  it('selecting "With files" re-queries listItems with has_asset=true', async () => {
+    vi.mocked(api.listItems).mockResolvedValue(
+      itemsResponse([makeItem({ key: 'aaa1111', title: 'Benchy Boat', has_asset: true })]),
+    )
+
+    renderCatalog('/catalog?view=table')
+
+    const withFilesBtn = await screen.findByRole('button', { name: /With files/i })
+    fireEvent.click(withFilesBtn)
+
+    await waitFor(() => {
+      expect(vi.mocked(api.listItems)).toHaveBeenCalledWith(
+        expect.objectContaining({ has_asset: true }),
+      )
+    })
+  })
+
+  it('selecting "Without files" re-queries listItems with has_asset=false', async () => {
+    vi.mocked(api.listItems).mockResolvedValue(itemsResponse([]))
+
+    renderCatalog('/catalog?view=table')
+
+    const withoutBtn = await screen.findByRole('button', { name: /Without files/i })
+    fireEvent.click(withoutBtn)
+
+    await waitFor(() => {
+      expect(vi.mocked(api.listItems)).toHaveBeenCalledWith(
+        expect.objectContaining({ has_asset: false }),
+      )
+    })
+  })
+
+  it('selecting "All" clears has_asset from the query', async () => {
+    vi.mocked(api.listItems).mockResolvedValue(itemsResponse([]))
+
+    // Start with asset=true active.
+    renderCatalog('/catalog?view=table&asset=true')
+
+    // Click "All" to reset.
+    const allBtn = await screen.findByRole('button', { name: /^All$/ })
+    fireEvent.click(allBtn)
+
+    await waitFor(() => {
+      // has_asset should be absent (undefined) in the last call.
+      const lastArgs = vi.mocked(api.listItems).mock.lastCall?.[0]
+      expect(lastArgs?.has_asset).toBeUndefined()
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Card icon (table view resolves items but we can check the API call shape here;
+  // the Box icon is only rendered in the VirtualGrid/ItemCard — TableView has its own layout)
+  // ---------------------------------------------------------------------------
+
+  it('shows "Print files attached" icon for has_asset=true items and hides it for has_asset=false', async () => {
+    vi.mocked(api.listItems).mockResolvedValue(
+      itemsResponse([
+        makeItem({ key: 'aaa1111', title: 'With Asset', has_asset: true }),
+        makeItem({ key: 'bbb2222', title: 'No Asset', has_asset: false }),
+      ]),
+    )
+
+    renderCatalog('/catalog?view=table')
+
+    await waitFor(() => {
+      expect(screen.getByText('With Asset')).toBeInTheDocument()
+      expect(screen.getByText('No Asset')).toBeInTheDocument()
+    })
+
+    // Exactly one "Print files attached" icon should appear (for the has_asset=true item only).
+    expect(screen.getAllByTitle('Print files attached')).toHaveLength(1)
   })
 })

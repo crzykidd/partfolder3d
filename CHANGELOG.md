@@ -45,6 +45,14 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **Catalog "has print asset" filter + card icon** (closes #28). A three-state toolbar
+  filter (All / With files / Without files) lets users find items that have model or
+  gcode files attached vs. metadata-only URL imports. Each catalog card and table row
+  also shows a small `Box` icon ("Print files attached") when the item has print assets;
+  the icon's absence signals a metadata-only entry without any warning styling. The flag
+  is computed server-side with a batch EXISTS query (no N+1). "Print asset" means
+  `FileRole.model` or `FileRole.gcode`; see `docs/decisions.md` for the rationale.
+
 - **Pluggable fallback-scraper framework with FlareSolverr backend** (closes #23).
   The Cloudflare-fallback scrape path is now a generic dispatcher that tries each
   enabled backend in configurable priority order, so adding a third backend later
