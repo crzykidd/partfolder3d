@@ -219,8 +219,10 @@ describe('ScraperSection — collapse/expand', () => {
 
     renderPage()
 
-    // Wait for sections to render
-    const btn = await screen.findByRole('button', { name: /FlareSolverr/i }, { timeout: 3000 })
+    // Wait for sections to render.
+    // Use /^FlareSolverr/ so the regex anchors to the start of the accessible name,
+    // excluding the new arrow buttons whose names begin with "Move FlareSolverr…".
+    const btn = await screen.findByRole('button', { name: /^FlareSolverr/i }, { timeout: 3000 })
     expect(btn).toHaveAttribute('aria-expanded', 'true')
   })
 
@@ -230,7 +232,7 @@ describe('ScraperSection — collapse/expand', () => {
 
     renderPage()
 
-    const btn = await screen.findByRole('button', { name: /FlareSolverr/i }, { timeout: 3000 })
+    const btn = await screen.findByRole('button', { name: /^FlareSolverr/i }, { timeout: 3000 })
     expect(btn).toHaveAttribute('aria-expanded', 'true')
 
     fireEvent.click(btn)
@@ -243,7 +245,7 @@ describe('ScraperSection — collapse/expand', () => {
 
     renderPage()
 
-    const btn = await screen.findByRole('button', { name: /FlareSolverr/i }, { timeout: 3000 })
+    const btn = await screen.findByRole('button', { name: /^FlareSolverr/i }, { timeout: 3000 })
     fireEvent.click(btn) // collapse
     await waitFor(() => expect(btn).toHaveAttribute('aria-expanded', 'false'))
 
@@ -272,7 +274,9 @@ describe('ScraperSection — sessionStorage', () => {
 
     renderPage()
 
-    const btn = await screen.findByRole('button', { name: /FlareSolverr/i }, { timeout: 3000 })
+    // /^FlareSolverr/ anchors to the start of the accessible name,
+    // excluding arrow buttons whose names begin with "Move FlareSolverr…".
+    const btn = await screen.findByRole('button', { name: /^FlareSolverr/i }, { timeout: 3000 })
     fireEvent.click(btn) // collapse
 
     await waitFor(() => {
@@ -286,7 +290,7 @@ describe('ScraperSection — sessionStorage', () => {
 
     renderPage()
 
-    const btn = await screen.findByRole('button', { name: /FlareSolverr/i }, { timeout: 3000 })
+    const btn = await screen.findByRole('button', { name: /^FlareSolverr/i }, { timeout: 3000 })
     fireEvent.click(btn) // collapse
     await waitFor(() => {
       expect(window.sessionStorage.getItem('pf3d.scrapers.expanded.flaresolverr')).toBe('false')
@@ -307,7 +311,7 @@ describe('ScraperSection — sessionStorage', () => {
 
     renderPage()
 
-    const btn = await screen.findByRole('button', { name: /FlareSolverr/i }, { timeout: 3000 })
+    const btn = await screen.findByRole('button', { name: /^FlareSolverr/i }, { timeout: 3000 })
     // Should start collapsed (sessionStorage value honoured)
     expect(btn).toHaveAttribute('aria-expanded', 'false')
   })
@@ -408,5 +412,72 @@ describe('drop handler logic — reorderScrapers + PUT', () => {
 
     expect(api.updateAgentQLSettings).toHaveBeenCalledWith({ priority: 1 })
     expect(api.updateFlareSolverrSettings).toHaveBeenCalledWith({ priority: 2 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Up/down arrow buttons
+// ---------------------------------------------------------------------------
+
+describe('ScrapersList — up/down arrow buttons', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    window.sessionStorage.clear()
+  })
+
+  it('renders up and down arrow buttons for each section', async () => {
+    vi.mocked(api.getFlareSolverrSettings).mockResolvedValue(makeFSSettings({ priority: 1 }))
+    vi.mocked(api.getAgentQLSettings).mockResolvedValue(makeAQLSettings({ priority: 2 }))
+
+    renderPage()
+
+    await screen.findByText('FlareSolverr (free, self-hosted)', {}, { timeout: 3000 })
+
+    // FlareSolverr section arrows
+    expect(screen.getByRole('button', { name: /Move FlareSolverr.*up in fallback order/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Move FlareSolverr.*down in fallback order/i })).toBeInTheDocument()
+
+    // AgentQL section arrows
+    expect(screen.getByRole('button', { name: /Move AgentQL.*up in fallback order/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Move AgentQL.*down in fallback order/i })).toBeInTheDocument()
+  })
+
+  it('disables "up" on the first section and "down" on the last section', async () => {
+    // FlareSolverr priority 1 (first), AgentQL priority 2 (last)
+    vi.mocked(api.getFlareSolverrSettings).mockResolvedValue(makeFSSettings({ priority: 1 }))
+    vi.mocked(api.getAgentQLSettings).mockResolvedValue(makeAQLSettings({ priority: 2 }))
+
+    renderPage()
+
+    await screen.findByText('FlareSolverr (free, self-hosted)', {}, { timeout: 3000 })
+
+    const fsUp   = screen.getByRole('button', { name: /Move FlareSolverr.*up in fallback order/i })
+    const fsDown = screen.getByRole('button', { name: /Move FlareSolverr.*down in fallback order/i })
+    const aqlUp  = screen.getByRole('button', { name: /Move AgentQL.*up in fallback order/i })
+    const aqlDown = screen.getByRole('button', { name: /Move AgentQL.*down in fallback order/i })
+
+    expect(fsUp).toBeDisabled()      // first → up disabled
+    expect(fsDown).not.toBeDisabled() // first → down enabled
+    expect(aqlUp).not.toBeDisabled()  // last  → up enabled
+    expect(aqlDown).toBeDisabled()   // last  → down disabled
+  })
+
+  it('clicking "down" on the first scraper persists the new priority order', async () => {
+    vi.mocked(api.getFlareSolverrSettings).mockResolvedValue(makeFSSettings({ priority: 1 }))
+    vi.mocked(api.getAgentQLSettings).mockResolvedValue(makeAQLSettings({ priority: 2 }))
+    vi.mocked(api.updateFlareSolverrSettings).mockResolvedValue(makeFSSettings({ priority: 2 }))
+    vi.mocked(api.updateAgentQLSettings).mockResolvedValue(makeAQLSettings({ priority: 1 }))
+
+    renderPage()
+
+    await screen.findByText('FlareSolverr (free, self-hosted)', {}, { timeout: 3000 })
+
+    const fsDown = screen.getByRole('button', { name: /Move FlareSolverr.*down in fallback order/i })
+    fireEvent.click(fsDown)
+
+    await waitFor(() => {
+      expect(api.updateFlareSolverrSettings).toHaveBeenCalledWith({ priority: 2 })
+      expect(api.updateAgentQLSettings).toHaveBeenCalledWith({ priority: 1 })
+    })
   })
 })
