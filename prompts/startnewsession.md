@@ -49,11 +49,14 @@ bulk move-assets UI (last Phase 2 item) or release the batch.
     a catalog **multi-select** affordance that doesn't exist yet (a real UX decision — discuss with
     owner before building).
 
-**Phase 3 — release the batch, then remaining backlog** — `/release-prep <next>` when owner says the
-batch is ready (no hurry per owner). **Release gotcha:** the CodeQL PR check surfaces pre-existing/
-moved alerts on large diffs — fix real log-injections (`sanitize_for_log`), dismiss path-injection FPs
-that already have a `resolve()`+`is_relative_to()` barrier. CodeQL is non-required but shows red.
-Then `gh issue list` for the rest.
+**Phase 3 — release v0.5.0 (owner approved 2026-07-05), then remaining backlog.** Owner chose
+**0.5.0** (feature batch → minor bump; 0.4.1 rejected as misleading). Pre-release items already
+handled on `dev`: prod `docker-compose.yml` has a **commented-out FlareSolverr example** (owner:
+users opt in themselves; not enabled by default) and the CHANGELOG carries the **CSRF re-login
+upgrade note**. **Release gotcha:** the CodeQL PR check surfaces pre-existing/moved alerts on large
+diffs — fix real log-injections (`sanitize_for_log`), dismiss path-injection FPs that already have a
+`resolve()`+`is_relative_to()` barrier. CodeQL is non-required but shows red. Then `gh issue list`
+for the rest.
 
 ## How we work (recap — full rules in `CLAUDE.md`)
 

@@ -74,7 +74,9 @@ prefix appears only on git tags and GitHub releases.
     `GET /api/admin/scrapers/usage` (all-provider), `DELETE /api/admin/scrapers/usage`.
   - New `flaresolverr` service in `docker-compose.dev.yml`
     (`ghcr.io/flaresolverr/flaresolverr:latest`; no published ports — worker reaches
-    it at `http://flaresolverr:8191`).
+    it at `http://flaresolverr:8191`). The production `docker-compose.yml` ships a
+    **commented-out example block** — uncomment it (or run your own instance) and set
+    the base URL in Admin → Site Capabilities to enable.
 
 ### Fixed
 
@@ -102,6 +104,9 @@ prefix appears only on git tags and GitHub releases.
   logged in but every write failed with "Missing X-CSRF-Token header" until they
   logged out and back in. The CSRF cookie now carries the same `max_age` as the
   session cookie.
+  **Upgrade note:** sessions created before this release still carry the old
+  browser-session CSRF cookie — if a save fails with "Missing X-CSRF-Token header"
+  after upgrading, log out and back in once to get the persistent cookie.
 - **URL-import wizard can now attach model files before commit** (closes #27). The
   Review & Commit step now shows a mid-wizard "Attach Model Files" section for `url`
   and `upload` sessions: staged files are listed with name, role, and a per-file
