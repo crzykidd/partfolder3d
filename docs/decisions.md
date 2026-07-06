@@ -2,6 +2,32 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-05 — URL-import attach modal: "Create without objects" + once-per-visit
+
+**Context:** Owner found the inline "Attach Model Files" section on the Review & Commit
+step (shipped as #27) not obvious enough for zero-file URL imports. Requested an explicit
+modal prompt on step mount.
+
+**Key decisions:**
+
+- **"Create without objects" commits directly via the same mutation.** The modal's
+  secondary action reuses `handleCommit()` (which calls `commitMutation.mutate()`) — no
+  duplicate logic. Disabled / pending state is computed from the same `commitDisabled`
+  flag as the main "Commit to Library" button.
+
+- **Once-per-wizard-visit via sessionStorage, not lifted prop.** sessionStorage keyed by
+  `pf3d-attach-modal-dismissed-${session.id}` survives step-back → step-forward
+  navigation without prop drilling to `ImportWizardPage`. The key is session-scoped so
+  revisiting a different import later still shows the modal if applicable.
+
+- **Portal to `<body>`.** The Aurora card for the wizard step uses
+  `backdropFilter: 'blur(16px)'`, which creates a stacking context that traps
+  `position:fixed` children inline. Per the existing architecture constraint, the modal
+  is rendered via `createPortal(…, document.body)`.
+
+- **Modal is an extra nudge, not a replacement.** The inline "Attach Model Files"
+  section remains in place; the modal supplements it.
+
 ## 2026-07-05 — MakerWorld `__NEXT_DATA__` enrichment in `extract_metadata_from_html`
 
 **Context:** Live FlareSolverr testing showed MakerWorld URL imports left the Designer

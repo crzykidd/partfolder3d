@@ -3,9 +3,14 @@
  *
  * Read-only review of all session data plus a mid-wizard file-attach affordance
  * for URL and upload sessions (#27).  Commit (→ item page) or Cancel import.
+ *
+ * For URL imports with zero staged files, shows an explicit attach-or-create-without-
+ * objects modal on mount (once per wizard visit, keyed by session id in sessionStorage).
+ * Modal portals to <body> to escape the Aurora card's backdrop-filter stacking context.
  */
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as api from '@/lib/api'
@@ -74,6 +79,136 @@ function SummaryRow({
 }
 
 // ---------------------------------------------------------------------------
+// AttachOrCommitModal — portals to <body> to escape backdrop-filter contexts.
+// Shown once per wizard visit for url+0-file sessions.
+// ---------------------------------------------------------------------------
+
+interface AttachOrCommitModalProps {
+  domain: string | null
+  commitDisabled: boolean
+  commitPending: boolean
+  onAttach: () => void
+  onCommit: () => void
+  onDismiss: () => void
+}
+
+function AttachOrCommitModal({
+  domain,
+  commitDisabled,
+  commitPending,
+  onAttach,
+  onCommit,
+  onDismiss,
+}: AttachOrCommitModalProps) {
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onDismiss()
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onDismiss])
+
+  const bodyText = domain
+    ? `Site "${domain}" needs auth to download print assets. Please attach.`
+    : 'This import has no model files attached.'
+
+  return createPortal(
+    /* Backdrop — aurora dark blur */
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 100,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'rgba(5,13,28,0.82)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+        padding: 16,
+      } as React.CSSProperties}
+      onClick={onDismiss}
+    >
+      {/* Dialog panel — aurora palette card */}
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="No model files attached"
+        style={{
+          background: 'var(--aurora-palette-bg)',
+          border: '1px solid var(--aurora-palette-border)',
+          borderRadius: 16,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.5)',
+          backdropFilter: 'blur(40px)',
+          WebkitBackdropFilter: 'blur(40px)',
+          width: '100%',
+          maxWidth: 440,
+          color: 'var(--aurora-text)',
+          padding: '24px 24px 20px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+        } as React.CSSProperties}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 style={{ fontSize: 15, fontWeight: 700, color: 'var(--aurora-text)', margin: 0 }}>
+          No model files attached
+        </h2>
+        <p style={{ fontSize: 13, color: 'var(--aurora-text-dim)', margin: 0, lineHeight: 1.55 }}>
+          {bodyText}
+        </p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 8 }}>
+          {/* Secondary: create without objects — same commit handler, same disabled state */}
+          <button
+            type="button"
+            disabled={commitDisabled}
+            onClick={onCommit}
+            style={{
+              background: 'var(--aurora-glass)',
+              border: '1px solid var(--aurora-glass-border)',
+              borderRadius: 20,
+              color: commitDisabled ? 'var(--aurora-muted)' : 'var(--aurora-text-dim)',
+              fontSize: 13,
+              padding: '7px 16px',
+              cursor: commitDisabled ? 'not-allowed' : 'pointer',
+              opacity: commitDisabled ? 0.5 : 1,
+              transition: 'all 0.15s',
+              display: 'inline-flex',
+              alignItems: 'center',
+            }}
+          >
+            {commitPending ? 'Committing…' : 'Create without objects'}
+          </button>
+          {/* Primary: attach files */}
+          <button
+            type="button"
+            onClick={onAttach}
+            style={{
+              background: 'var(--aurora-accent)',
+              border: 'none',
+              borderRadius: 20,
+              color: 'var(--aurora-accent-fg)',
+              fontSize: 13,
+              fontWeight: 700,
+              padding: '8px 20px',
+              cursor: 'pointer',
+              boxShadow: '0 4px 14px var(--aurora-accent-glow)',
+              transition: 'opacity 0.15s',
+              display: 'inline-flex',
+              alignItems: 'center',
+            }}
+          >
+            Attach files
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+// ---------------------------------------------------------------------------
 // SummaryStep
 // ---------------------------------------------------------------------------
 
@@ -83,6 +218,21 @@ export interface SummaryStepProps {
   onCancelled: () => void
 }
 
+/** sessionStorage key used to track that the modal was already dismissed for a given session. */
+function modalDismissedKey(sessionId: string) {
+  return `pf3d-attach-modal-dismissed-${sessionId}`
+}
+
+/** Extract hostname from a URL string, stripping a leading "www.". Returns null on failure. */
+function extractDomain(url: string | null | undefined): string | null {
+  if (!url) return null
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return null
+  }
+}
+
 export function SummaryStep({ session, onPrev, onCancelled }: SummaryStepProps) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -90,6 +240,24 @@ export function SummaryStep({ session, onPrev, onCancelled }: SummaryStepProps) 
   const [cancelling, setCancelling] = useState(false)
   const [attachError, setAttachError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const attachSectionRef = useRef<HTMLDivElement>(null)
+
+  // Modal: show once per wizard visit for url+0-file sessions.
+  // Session-keyed dismissal state lives in sessionStorage so it survives
+  // step-back → step-forward navigation (component unmount/remount).
+  const [modalOpen, setModalOpen] = useState<boolean>(
+    () =>
+      session.source_type === 'url' &&
+      session.files.length === 0 &&
+      !sessionStorage.getItem(modalDismissedKey(session.id)),
+  )
+
+  const dismissModal = () => {
+    sessionStorage.setItem(modalDismissedKey(session.id), '1')
+    setModalOpen(false)
+  }
+
+  const domain = extractDomain(session.source_url)
 
   // Fetch libraries to display name instead of raw ID in the summary.
   // Uses the shared ['libraries'] key so the result is served from cache if
@@ -163,11 +331,47 @@ export function SummaryStep({ session, onPrev, onCancelled }: SummaryStepProps) 
     cancelMutation.mutate()
   }
 
+  // Commit is disabled when no library is set or when a commit is already in-flight.
+  const commitDisabled = commitMutation.isPending || !session.library_id
+
+  const handleCommit = () => {
+    setCommitError(null)
+    commitMutation.mutate()
+  }
+
+  // Modal action: open the file picker and scroll to the attach section.
+  const handleModalAttach = () => {
+    dismissModal()
+    // Guard: scrollIntoView is not available in all environments (e.g. jsdom).
+    if (typeof attachSectionRef.current?.scrollIntoView === 'function') {
+      attachSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+    fileInputRef.current?.click()
+  }
+
+  // Modal action: commit without objects (same handler + disabled logic as the main button).
+  const handleModalCommit = () => {
+    dismissModal()
+    handleCommit()
+  }
+
   const confirmed = session.tag_state?.confirmed ?? []
   const title = session.confirmed_title ?? session.suggested_title ?? '—'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {/* Attach-or-create modal — portals to <body> to escape backdrop-filter stacking */}
+      {modalOpen && (
+        <AttachOrCommitModal
+          domain={domain}
+          commitDisabled={commitDisabled}
+          commitPending={commitMutation.isPending}
+          onAttach={handleModalAttach}
+          onCommit={handleModalCommit}
+          onDismiss={dismissModal}
+        />
+      )}
+
       {/* Summary table */}
       <div style={{ ...AURORA_CARD, overflow: 'hidden' }}>
         <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
@@ -217,7 +421,10 @@ export function SummaryStep({ session, onPrev, onCancelled }: SummaryStepProps) 
 
       {/* Attach files section (url + upload sessions) */}
       {canAttach && (
-        <div style={{ ...AURORA_CARD, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div
+          ref={attachSectionRef}
+          style={{ ...AURORA_CARD, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}
+        >
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--aurora-muted)' }}>
             Attach Model Files
           </div>
@@ -364,8 +571,8 @@ export function SummaryStep({ session, onPrev, onCancelled }: SummaryStepProps) 
           </button>
           <button
             type="button"
-            disabled={commitMutation.isPending || !session.library_id}
-            onClick={() => { setCommitError(null); commitMutation.mutate() }}
+            disabled={commitDisabled}
+            onClick={handleCommit}
             style={{
               background: '#16A34A',
               border: 'none',
@@ -374,21 +581,21 @@ export function SummaryStep({ session, onPrev, onCancelled }: SummaryStepProps) 
               fontSize: 13,
               fontWeight: 700,
               padding: '8px 24px',
-              cursor: commitMutation.isPending || !session.library_id ? 'not-allowed' : 'pointer',
+              cursor: commitDisabled ? 'not-allowed' : 'pointer',
               boxShadow: '0 4px 14px rgba(22,163,74,0.28)',
               transition: 'opacity 0.15s',
-              opacity: commitMutation.isPending || !session.library_id ? 0.5 : 1,
+              opacity: commitDisabled ? 0.5 : 1,
               display: 'inline-flex',
               alignItems: 'center',
               gap: 6,
             }}
             onMouseEnter={(e) => {
-              if (!commitMutation.isPending && session.library_id)
+              if (!commitDisabled)
                 (e.currentTarget as HTMLButtonElement).style.opacity = '0.85'
             }}
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLButtonElement).style.opacity =
-                commitMutation.isPending || !session.library_id ? '0.5' : '1'
+                commitDisabled ? '0.5' : '1'
             }}
           >
             {commitMutation.isPending ? 'Committing…' : 'Commit to Library →'}

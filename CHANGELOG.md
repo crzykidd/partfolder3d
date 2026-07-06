@@ -22,6 +22,15 @@ prefix appears only on git tags and GitHub releases.
 
 ### Changed
 
+- **Zero-file URL imports now show an explicit attach-or-create-without-objects modal**
+  at Review & Commit. When a URL import reaches the Summary step with no staged files,
+  a modal prompts: _Site "«domain»" needs auth to download print assets. Please attach._
+  (generic copy when no source URL). Primary action **Attach files** closes the modal
+  and opens the inline file picker. Secondary action **Create without objects** commits
+  directly using the same handler and disabled state as the main commit button. Modal
+  appears at most once per wizard visit (sessionStorage keyed by session id); the
+  existing inline "Attach Model Files" section is retained.
+
 - **Scrapers admin UI: collapsible sections + drag-to-reorder priority.** Each
   fallback scraper on the Site Capabilities admin page is now a collapsible section
   (expanded by default; state persisted per browser session via `sessionStorage`).

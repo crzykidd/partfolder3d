@@ -10,6 +10,9 @@
  *  - SummaryStep mid-wizard file attach UI (#27 fix): staged file list renders,
  *    attach calls uploadSessionFiles and refetches, remove calls deleteSessionFile,
  *    url sessions get a source-site-specific zero-file warning.
+ *  - SummaryStep attach-or-create modal: shown once per wizard visit for url+0-file
+ *    sessions; dismissed via sessionStorage; "Attach files" closes modal; "Create
+ *    without objects" triggers the same commit handler as the main button.
  *
  * Hermetic: the @/lib/api module is mocked — no real network is touched.
  */
@@ -37,6 +40,7 @@ vi.mock('@/lib/api', async () => {
     listLibraries: vi.fn(),
     uploadSessionFiles: vi.fn(),
     deleteSessionFile: vi.fn(),
+    commitImportSession: vi.fn(),
   }
 })
 
@@ -132,6 +136,8 @@ describe('TagsStep — existing tags decoupled from AI (#27 step 3)', () => {
 describe('SummaryStep — Files row surfaces zero-file commit (#27 step 5)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Dismiss modal for all url sessions in this suite so tests focus on the inline row.
+    sessionStorage.setItem('pf3d-attach-modal-dismissed-sess-1', '1')
     vi.mocked(api.listLibraries).mockResolvedValue([])
   })
 
@@ -203,6 +209,8 @@ describe('SummaryStep — Files row surfaces zero-file commit (#27 step 5)', () 
 describe('SummaryStep — mid-wizard file attach UI (#27 fix)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Dismiss modal so these tests focus on the inline attach section.
+    sessionStorage.setItem('pf3d-attach-modal-dismissed-sess-1', '1')
     vi.mocked(api.listLibraries).mockResolvedValue([])
   })
 
@@ -218,7 +226,8 @@ describe('SummaryStep — mid-wizard file attach UI (#27 fix)', () => {
     await waitFor(() => {
       expect(screen.getByText('Attach Model Files')).toBeInTheDocument()
     })
-    expect(screen.getByRole('button', { name: /attach files/i })).toBeInTheDocument()
+    // The inline button text is '+ Attach files' — distinct from the modal's 'Attach files'.
+    expect(screen.getByRole('button', { name: '+ Attach files' })).toBeInTheDocument()
   })
 
   it('renders the "Attach files" affordance for upload sessions', async () => {
@@ -335,5 +344,195 @@ describe('SummaryStep — mid-wizard file attach UI (#27 fix)', () => {
       expect(screen.getByText('Files')).toBeInTheDocument()
     })
     expect(screen.queryByText('Attach Model Files')).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Modal tests — attach-or-create modal for url+0-file sessions
+// ---------------------------------------------------------------------------
+
+describe('SummaryStep — attach-or-create modal for url+0-file sessions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // Clear sessionStorage so prior dismissals don't leak between tests.
+    sessionStorage.clear()
+    vi.mocked(api.listLibraries).mockResolvedValue([])
+    vi.mocked(api.commitImportSession).mockResolvedValue({
+      item_key: 'test-key',
+      item_id: 1,
+      session_id: 'sess-1',
+    })
+  })
+
+  it('shows the modal for url sessions with 0 files, with the domain in the copy', async () => {
+    renderWithProviders(
+      <SummaryStep
+        session={makeSession({
+          source_type: 'url',
+          files: [],
+          source_url: 'https://www.makerworld.com/thing/123',
+        })}
+        onPrev={() => {}}
+        onCancelled={() => {}}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+    expect(screen.getByText('No model files attached')).toBeInTheDocument()
+    // Domain with www. stripped
+    expect(
+      screen.getByText(/Site "makerworld\.com" needs auth to download print assets/),
+    ).toBeInTheDocument()
+  })
+
+  it('shows generic copy when the session has no source_url', async () => {
+    renderWithProviders(
+      <SummaryStep
+        session={makeSession({ source_type: 'url', files: [], source_url: null })}
+        onPrev={() => {}}
+        onCancelled={() => {}}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+    expect(
+      screen.getByText('This import has no model files attached.'),
+    ).toBeInTheDocument()
+  })
+
+  it('does not show the modal for upload sessions', async () => {
+    renderWithProviders(
+      <SummaryStep
+        session={makeSession({ source_type: 'upload', files: [] })}
+        onPrev={() => {}}
+        onCancelled={() => {}}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('Files')).toBeInTheDocument()
+    })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('does not show the modal when files are already attached', async () => {
+    renderWithProviders(
+      <SummaryStep
+        session={makeSession({
+          source_type: 'url',
+          files: [
+            { id: 1, staged_path: '/s/a.stl', original_name: 'a.stl', role: 'model', size: 42 },
+          ],
+        })}
+        onPrev={() => {}}
+        onCancelled={() => {}}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('1 file(s)')).toBeInTheDocument()
+    })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('"Attach files" button closes the modal', async () => {
+    renderWithProviders(
+      <SummaryStep
+        session={makeSession({ source_type: 'url', files: [] })}
+        onPrev={() => {}}
+        onCancelled={() => {}}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Attach files' }))
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+  })
+
+  it('"Create without objects" calls the same commit handler as the main button', async () => {
+    renderWithProviders(
+      <SummaryStep
+        session={makeSession({ source_type: 'url', files: [], library_id: 1 })}
+        onPrev={() => {}}
+        onCancelled={() => {}}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /create without objects/i }))
+
+    await waitFor(() => {
+      expect(vi.mocked(api.commitImportSession)).toHaveBeenCalledWith('sess-1')
+    })
+  })
+
+  it('"Create without objects" is disabled when no library is set', async () => {
+    renderWithProviders(
+      <SummaryStep
+        session={makeSession({ source_type: 'url', files: [], library_id: null })}
+        onPrev={() => {}}
+        onCancelled={() => {}}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+
+    const createBtn = screen.getByRole('button', { name: /create without objects/i })
+    expect(createBtn).toBeDisabled()
+  })
+
+  it('clicking outside the modal dismisses it', async () => {
+    renderWithProviders(
+      <SummaryStep
+        session={makeSession({ source_type: 'url', files: [] })}
+        onPrev={() => {}}
+        onCancelled={() => {}}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+
+    // The backdrop is the dialog's parent — click it (not the dialog itself)
+    const backdrop = screen.getByRole('dialog').parentElement!
+    fireEvent.click(backdrop)
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+  })
+
+  it('dismissed modal does not re-show when the step re-mounts (sessionStorage)', async () => {
+    // Simulate a previously dismissed modal by setting the key before mount.
+    sessionStorage.setItem('pf3d-attach-modal-dismissed-sess-1', '1')
+
+    renderWithProviders(
+      <SummaryStep
+        session={makeSession({ source_type: 'url', files: [] })}
+        onPrev={() => {}}
+        onCancelled={() => {}}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('Files')).toBeInTheDocument()
+    })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })
