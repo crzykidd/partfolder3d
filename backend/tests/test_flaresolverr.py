@@ -801,3 +801,266 @@ def test_next_data_non_makerworld_shape_no_effect() -> None:
     assert sr.title == "Some Other Site Model"
     assert sr.creator_name is None
     assert sr.creator_profile_url is None
+
+
+# ---------------------------------------------------------------------------
+# 11b. design_pictures gallery replacement + image hygiene filters
+# ---------------------------------------------------------------------------
+
+_MW_GALLERY_ND = _json.dumps({
+    "props": {
+        "pageProps": {
+            "design": {
+                "title": "Whistle",
+                "coverUrl": "https://cdn.makerworld.com/gallery/pic1.jpg",
+                "designExtension": {
+                    "design_pictures": [
+                        {"url": "https://cdn.makerworld.com/gallery/pic1.jpg"},
+                        {"url": "https://cdn.makerworld.com/gallery/pic2.jpg"},
+                        {"url": "https://cdn.makerworld.com/gallery/pic3.jpg"},
+                    ]
+                },
+                "designCreator": {"name": "Maker", "handle": "maker"},
+                "categories": [],
+            }
+        }
+    }
+})
+
+_MW_OG_CARD_URL = (
+    "https://cdn.makerworld.com/og-card.jpg"
+    "?x-oss-process=image/resize,w_1200"
+)
+_MW_THUMB_URL = (
+    "https://cdn.makerworld.com/instance/thumb.jpg"
+    "?x-oss-process=image/resize,w_100,m_fill,h_100"
+)
+
+_MW_GALLERY_HTML = f"""<html>
+<head>
+  <meta property="og:title" content="Whistle - Free 3D Print Model - MakerWorld" />
+  <meta property="og:image" content="{_MW_OG_CARD_URL}" />
+  <script id="__NEXT_DATA__" type="application/json">{_MW_GALLERY_ND}</script>
+</head>
+<body>
+  <img src="{_MW_THUMB_URL}" />
+  <img src="https://cdn.example.com/comment/user-photo.jpg" />
+</body>
+</html>"""
+
+
+def test_next_data_gallery_replaces_dom_images() -> None:
+    """design_pictures gallery replaces DOM-scraped image_urls entirely."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    sr = extract_metadata_from_html(
+        _MW_GALLERY_HTML,
+        "https://makerworld.com/en/models/2999228",
+        "makerworld.com",
+        20,
+    )
+    assert sr.image_urls == [
+        "https://cdn.makerworld.com/gallery/pic1.jpg",
+        "https://cdn.makerworld.com/gallery/pic2.jpg",
+        "https://cdn.makerworld.com/gallery/pic3.jpg",
+    ]
+
+
+def test_next_data_gallery_respects_max_images_cap() -> None:
+    """design_pictures gallery is capped at max_images."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    sr = extract_metadata_from_html(
+        _MW_GALLERY_HTML,
+        "https://makerworld.com/en/models/2999228",
+        "makerworld.com",
+        2,
+    )
+    assert len(sr.image_urls) == 2
+    assert sr.image_urls[0] == "https://cdn.makerworld.com/gallery/pic1.jpg"
+    assert sr.image_urls[1] == "https://cdn.makerworld.com/gallery/pic2.jpg"
+
+
+def test_next_data_gallery_cover_url_reorder() -> None:
+    """coverUrl is moved to first position when it differs from picture[0]."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    nd = _json.dumps({
+        "props": {
+            "pageProps": {
+                "design": {
+                    "title": "Widget",
+                    "coverUrl": "https://cdn.makerworld.com/gallery/pic3.jpg",
+                    "designExtension": {
+                        "design_pictures": [
+                            {"url": "https://cdn.makerworld.com/gallery/pic1.jpg"},
+                            {"url": "https://cdn.makerworld.com/gallery/pic2.jpg"},
+                            {"url": "https://cdn.makerworld.com/gallery/pic3.jpg"},
+                        ]
+                    },
+                }
+            }
+        }
+    })
+    html = f"""<html><head>
+      <meta property="og:title" content="Widget" />
+      <script id="__NEXT_DATA__" type="application/json">{nd}</script>
+    </head><body></body></html>"""
+
+    sr = extract_metadata_from_html(
+        html, "https://makerworld.com/en/models/1", "makerworld.com", 20
+    )
+    # coverUrl (pic3) should be first; pic3 removed from its original position.
+    assert sr.image_urls[0] == "https://cdn.makerworld.com/gallery/pic3.jpg"
+    assert "https://cdn.makerworld.com/gallery/pic1.jpg" in sr.image_urls
+    assert "https://cdn.makerworld.com/gallery/pic2.jpg" in sr.image_urls
+    # pic3 should appear exactly once.
+    assert sr.image_urls.count("https://cdn.makerworld.com/gallery/pic3.jpg") == 1
+
+
+def test_next_data_no_design_pictures_keeps_dom_images() -> None:
+    """When design_pictures is absent, DOM-scraped images are preserved."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    nd = _json.dumps({
+        "props": {
+            "pageProps": {
+                "design": {
+                    "title": "No Gallery",
+                    "designCreator": {"name": "Alice", "handle": "alice"},
+                }
+            }
+        }
+    })
+    html = f"""<html><head>
+      <meta property="og:title" content="No Gallery - MakerWorld" />
+      <meta property="og:image" content="https://cdn.example.com/og.jpg" />
+      <script id="__NEXT_DATA__" type="application/json">{nd}</script>
+    </head><body></body></html>"""
+
+    sr = extract_metadata_from_html(
+        html, "https://makerworld.com/en/models/2", "makerworld.com", 20
+    )
+    # No design_pictures → DOM og:image is kept.
+    assert "https://cdn.example.com/og.jpg" in sr.image_urls
+
+
+# ---------------------------------------------------------------------------
+# Generic image hygiene (applies to all sites via _extract_images)
+# ---------------------------------------------------------------------------
+
+
+def test_image_hygiene_query_string_dedupe() -> None:
+    """Same base URL with different query strings → only first occurrence kept."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    html = """<html><head>
+      <meta property="og:image" content="https://cdn.example.com/photo.jpg?w=1200" />
+      <meta property="og:image" content="https://cdn.example.com/photo.jpg?w=1000" />
+      <meta property="og:image" content="https://cdn.example.com/other.jpg" />
+    </head><body></body></html>"""
+
+    sr = extract_metadata_from_html(html, "https://example.com", "example.com", 20)
+    # Both ?w=1200 and ?w=1000 share the same base path → only first survives.
+    photo_urls = [u for u in sr.image_urls if "photo.jpg" in u]
+    assert len(photo_urls) == 1
+    assert "w=1200" in photo_urls[0]
+    # Unrelated image is still present.
+    assert any("other.jpg" in u for u in sr.image_urls)
+
+
+def test_image_hygiene_oss_w100_thumbnail_dropped() -> None:
+    """URL with x-oss-process resize w_100 (< 400) is dropped."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    thumb_url = (
+        "https://cdn.example.com/thumb.jpg"
+        "?x-oss-process=image/resize,w_100,m_fill,h_100"
+    )
+    full_url = (
+        "https://cdn.example.com/full.jpg"
+        "?x-oss-process=image/resize,w_1000"
+    )
+    html = f"""<html><head>
+      <meta property="og:image" content="{thumb_url}" />
+      <meta property="og:image" content="{full_url}" />
+    </head><body></body></html>"""
+
+    sr = extract_metadata_from_html(html, "https://example.com", "example.com", 20)
+    # thumb.jpg (w_100) must be absent; full.jpg (w_1000) must be present.
+    assert not any("thumb.jpg" in u for u in sr.image_urls)
+    assert any("full.jpg" in u for u in sr.image_urls)
+
+
+def test_image_hygiene_oss_urlencoded_w100_dropped() -> None:
+    """URL-encoded x-oss-process resize w_100 is also dropped."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    enc_url = (
+        "https://cdn.example.com/enc_thumb.jpg"
+        "?x-oss-process=image%2Fresize%2Cw_100%2Cm_fill"
+    )
+    html = f"""<html><head>
+      <meta property="og:image" content="{enc_url}" />
+      <meta property="og:image" content="https://cdn.example.com/full2.jpg" />
+    </head><body></body></html>"""
+
+    sr = extract_metadata_from_html(html, "https://example.com", "example.com", 20)
+    assert not any("enc_thumb.jpg" in u for u in sr.image_urls)
+    assert any("full2.jpg" in u for u in sr.image_urls)
+
+
+def test_image_hygiene_no_width_hint_kept() -> None:
+    """URL with no width hint is always kept (heuristic only fires when hint present)."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    html = """<html><head>
+      <meta property="og:image" content="https://cdn.example.com/mystery.jpg" />
+    </head><body></body></html>"""
+
+    sr = extract_metadata_from_html(html, "https://example.com", "example.com", 20)
+    assert any("mystery.jpg" in u for u in sr.image_urls)
+
+
+def test_image_hygiene_comment_path_dropped() -> None:
+    """/comment/ path-segment images are dropped."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    html = """<html><head>
+      <meta property="og:image"
+            content="https://cdn.example.com/comment/user-abc123.jpg?w=400" />
+      <meta property="og:image" content="https://cdn.example.com/model/photo.jpg" />
+    </head><body></body></html>"""
+
+    sr = extract_metadata_from_html(html, "https://example.com", "example.com", 20)
+    assert not any("/comment/" in u for u in sr.image_urls)
+    assert any("model/photo.jpg" in u for u in sr.image_urls)
+
+
+def test_image_hygiene_comments_path_dropped() -> None:
+    """/comments/ path-segment images are dropped."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    html = """<html><head>
+      <meta property="og:image"
+            content="https://cdn.example.com/comments/abc/photo.jpg" />
+      <meta property="og:image" content="https://cdn.example.com/gallery/shot.jpg" />
+    </head><body></body></html>"""
+
+    sr = extract_metadata_from_html(html, "https://example.com", "example.com", 20)
+    assert not any("/comments/" in u for u in sr.image_urls)
+    assert any("gallery/shot.jpg" in u for u in sr.image_urls)
+
+
+def test_image_hygiene_model_slug_with_comment_word_kept() -> None:
+    """Model slug containing 'comment' in path (not as segment) is not dropped."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    # e.g. a model literally named "comment-holder" — path has /comment-holder/ not /comment/
+    html = """<html><head>
+      <meta property="og:image"
+            content="https://cdn.example.com/models/comment-holder/photo.jpg" />
+    </head><body></body></html>"""
+
+    sr = extract_metadata_from_html(html, "https://example.com", "example.com", 20)
+    assert any("comment-holder" in u for u in sr.image_urls)

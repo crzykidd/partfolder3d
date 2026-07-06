@@ -2,6 +2,42 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-05 — MakerWorld gallery images: NEXT_DATA authoritative; hygiene filters heuristic
+
+**Context:** Live FlareSolverr testing against a real MakerWorld import showed 6 stored
+images: one og:image social card (visually a re-encode of gallery photo #1 but a
+different file hash — URL-dedupe can't catch it), 3 real gallery photos, one `w_100`
+print-profile thumbnail, and one comment-section user photo. The og:image + thumbnail +
+comment photo are noise; only the 3 gallery photos are authoritative.
+
+**Key decisions:**
+
+- **NEXT_DATA gallery (`designExtension.design_pictures`) is the authoritative source
+  and fully replaces DOM-scraped images when present.** The og:image visual-duplicate of
+  gallery photo #1 cannot be detected by URL deduplication (different resize params →
+  different hash); the only correct fix is to use the official gallery and discard the
+  og:image entirely. When NEXT_DATA provides `≥1` picture URL, `_enrich_from_next_data`
+  replaces `result.image_urls` with those clean, full-res base URLs (no `x-oss-process`
+  params), capped at `max_images`. `coverUrl` is placed first when it differs from
+  `pictures[0]` (they're usually the same).
+
+- **Width-based thumbnail filter (< 400 px) and comment-path filter are generic and
+  heuristic.** They run in `_extract_images` for all sites (both static scraper and
+  FlareSolverr paths) when NEXT_DATA does not provide a gallery. These are best-effort:
+  a width hint must be present in recognized params (`x-oss-process=image/resize,w_N`,
+  `?w=N`, `?width=N`, including URL-encoded forms); URLs with no hint are always kept.
+  Comment-path matching uses `/comment/` and `/comments/` as path segments (with
+  surrounding slashes) so a model slug like `/models/comment-holder/` is unaffected.
+
+- **Query-string dedupe by base URL ignores resize params.** The previous exact-URL
+  dedupe let `?w_1200` and `?w_1000` variants of the same image both survive. The new
+  dedupe key is `scheme://netloc/path` (no query string); the first occurrence in bucket
+  priority order wins (srcset > lazy > og:image > plain src).
+
+- **NEXT_DATA gallery fires shape-gated, same as other NEXT_DATA enrichment.** No
+  domain check — the `designExtension.design_pictures` path is MakerWorld-specific in
+  practice but free to benefit any future Next.js site that uses the same shape.
+
 ## 2026-07-05 — URL-import attach modal: "Create without objects" + once-per-visit
 
 **Context:** Owner found the inline "Attach Model Files" section on the Review & Commit

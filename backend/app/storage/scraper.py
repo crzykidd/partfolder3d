@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, unquote, urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
 import httpx
@@ -260,6 +260,46 @@ def _srcset_largest(srcset: str) -> str | None:
     return best_url or first_url
 
 
+def _parse_url_width(url: str) -> int | None:
+    """Return the pixel width hint encoded in a URL, or None if not detectable.
+
+    Recognises:
+      - ``x-oss-process=image/resize,...,w_N,...``  (Alibaba OSS CDN; raw or
+        URL-encoded value — e.g. ``image%2Fresize%2Cw_100``).
+      - ``?w=N``  or  ``&w=N``  query param.
+      - ``?width=N``  or  ``&width=N``  query param.
+
+    Returns ``None`` when no width hint is found — the caller keeps the URL.
+    Never raises.
+    """
+    try:
+        parsed = urlparse(url)
+        qs_raw = parsed.query
+        if not qs_raw:
+            return None
+        # URL-decode the full query string so both raw and percent-encoded OSS
+        # process params ("image%2Fresize%2Cw_100") normalise to the same form.
+        qs_decoded = unquote(qs_raw)
+
+        # Alibaba OSS: x-oss-process=image/resize[,...,]w_N[,...]
+        m = re.search(r"x-oss-process=image/resize[^&]*\bw_(\d+)", qs_decoded)
+        if m:
+            return int(m.group(1))
+
+        # Plain ?w=N or ?width=N
+        params = parse_qs(qs_raw)
+        for key in ("w", "width"):
+            vals = params.get(key) or []
+            if vals:
+                try:
+                    return int(vals[0])
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    return None
+
+
 def _parse_html(html: str) -> object | None:
     """Parse HTML text; returns selectolax HTMLParser or None on failure."""
     try:
@@ -319,14 +359,36 @@ def _extract_images(tree: object, base_url: str, max_images: int) -> list[str]:
         if content:
             og_imgs.append(content)
 
+    seen_bases: set[str] = set()
     seen: list[str] = []
     for bucket in (srcset_imgs, lazy_imgs, og_imgs, plain_imgs):
         for src in bucket:
             absolute = urljoin(base_url, src.strip())
-            if absolute.startswith("http") and absolute not in seen:
-                seen.append(absolute)
-                if len(seen) >= max_images:
-                    return seen
+            if not absolute.startswith("http"):
+                continue
+
+            parsed_abs = urlparse(absolute)
+
+            # Drop comment-section images (path-segment heuristic; keeps URLs
+            # whose path contains only "comment" as part of a model slug).
+            abs_path = parsed_abs.path
+            if "/comment/" in abs_path or "/comments/" in abs_path:
+                continue
+
+            # Drop tiny width variants (width hint < 400 px).  No hint → keep.
+            w = _parse_url_width(absolute)
+            if w is not None and w < 400:
+                continue
+
+            # Dedupe by base URL (scheme + netloc + path), ignoring query
+            # string — catches the og:image ?w=1200 vs gallery ?w=1000 pair.
+            base_key = f"{parsed_abs.scheme}://{parsed_abs.netloc}{parsed_abs.path}"
+            if base_key in seen_bases:
+                continue
+            seen_bases.add(base_key)
+            seen.append(absolute)
+            if len(seen) >= max_images:
+                return seen
     return seen
 
 
@@ -369,7 +431,7 @@ def _extract_tags(tree: object) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _enrich_from_next_data(result: ScrapeResult, html: str) -> None:
+def _enrich_from_next_data(result: ScrapeResult, html: str, max_images: int) -> None:
     """Best-effort enrichment from a Next.js ``__NEXT_DATA__`` embedded JSON blob.
 
     Handles the MakerWorld shape (``props.pageProps.design.*``); silently
@@ -383,6 +445,10 @@ def _enrich_from_next_data(result: ScrapeResult, html: str) -> None:
         used **only** when the existing meta/title heuristics found nothing
         (existing signals always win for creator fields).
       - ``categories[].name`` are appended to ``raw_tags``; dupes skipped.
+      - ``designExtension.design_pictures[].url`` — when present (≥1 entry),
+        the full ordered gallery *replaces* ``result.image_urls`` (DOM-scraped
+        images are discarded).  ``coverUrl`` is kept first if it differs from
+        ``pictures[0]``.  These are clean base URLs with no resize params.
 
     Never raises.  A malformed/huge JSON blob is silently ignored.
     """
@@ -459,6 +525,40 @@ def _enrich_from_next_data(result: ScrapeResult, html: str) -> None:
                         result.raw_tags.append(norm)
                         existing_lower.add(norm.lower())
             result.raw_tags = result.raw_tags[:50]
+
+        # 5. Authoritative gallery from designExtension.design_pictures[].url.
+        #    When present, REPLACES DOM-scraped image_urls entirely — these are
+        #    clean full-res base URLs with no resize params.
+        ext = design.get("designExtension")
+        if isinstance(ext, dict):
+            pictures = ext.get("design_pictures")
+            if isinstance(pictures, list) and pictures:
+                gallery_urls: list[str] = []
+                for pic in pictures:
+                    if isinstance(pic, dict):
+                        u = pic.get("url")
+                    elif isinstance(pic, str):
+                        u = pic
+                    else:
+                        continue
+                    if isinstance(u, str) and u.strip().startswith("http"):
+                        gallery_urls.append(u.strip())
+                if gallery_urls:
+                    # Honour coverUrl ordering: put it first when it differs
+                    # from picture[0] (they're usually the same, but be safe).
+                    cover = design.get("coverUrl")
+                    if (
+                        isinstance(cover, str)
+                        and cover.strip()
+                        and cover.strip() != gallery_urls[0]
+                    ):
+                        cover_clean = cover.strip()
+                        # Remove cover from its current position if present,
+                        # then prepend so it's always first.
+                        gallery_urls = [cover_clean] + [
+                            u for u in gallery_urls if u != cover_clean
+                        ]
+                    result.image_urls = gallery_urls[:max_images]
 
     except Exception:
         log.debug("_enrich_from_next_data: failed to parse NEXT_DATA (ignored)")
@@ -571,8 +671,8 @@ def extract_metadata_from_html(
     # Next.js __NEXT_DATA__ enrichment (MakerWorld et al.).  Runs last so
     # existing meta signals already populate the result — creator fields are
     # only filled in when still empty; the clean NEXT_DATA title overrides the
-    # og:title-suffixed one.
-    _enrich_from_next_data(result, html)
+    # og:title-suffixed one; design_pictures gallery replaces DOM-scraped images.
+    _enrich_from_next_data(result, html, max_images)
 
     return result
 

@@ -70,6 +70,16 @@ prefix appears only on git tags and GitHub releases.
 
 ### Fixed
 
+- **MakerWorld scraped images now use the authoritative gallery.** When the
+  `__NEXT_DATA__` blob contains `designExtension.design_pictures`, those clean
+  full-res URLs replace any DOM-scraped images (og:image social card, thumbnails,
+  comment photos). Generic hygiene applied to all sites when the gallery is absent:
+  same-path URLs with different resize query strings are de-duplicated (first
+  highest-priority occurrence wins); candidates with a detectable width hint
+  < 400 px (`x-oss-process=image/resize,w_N`, `?w=N`, `?width=N`) are dropped as
+  thumbnails; images whose URL path contains `/comment/` or `/comments/` segments
+  are dropped.
+
 - **MakerWorld imports now pre-fill Designer, clean title, and category tags** via
   `__NEXT_DATA__`. Live testing found that MakerWorld (a Next.js SPA) has no author
   meta tags, no JSON-LD, and no "by Creator" title pattern — all metadata lives only in
