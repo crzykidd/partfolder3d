@@ -9,6 +9,19 @@ log = logging.getLogger(__name__)
 # Type alias hint (avoids importing ScrapeResult at module level in the worker)
 ScrapeResultT = object
 
+# Human-readable labels for scraper backends used in scrape_note.
+_BACKEND_LABELS: dict[str, str] = {
+    "agentql": "AgentQL",
+    "flaresolverr": "FlareSolverr",
+}
+
+# Default priority order (lower = tried first).  Overridden per-backend by the
+# ``scraper.<name>.priority`` settings row.
+_DEFAULT_PRIORITIES: dict[str, int] = {
+    "flaresolverr": 1,
+    "agentql": 2,
+}
+
 
 async def _try_agentql_fallback(
     url: str,
@@ -83,6 +96,7 @@ async def _try_agentql_fallback(
         monthly_cap_usd_val = await _setting("agentql.monthly_cap_usd")
         monthly_cap_usd = float(monthly_cap_usd_val) if monthly_cap_usd_val is not None else None
         per_call_usd = float(await _setting("agentql.per_call_usd") or 0.02)
+        timeout_s = int(await _setting("scraper.agentql.timeout_s") or 120)
 
         # Compute budget window start (most recent RESET_DAY at/before now)
         from datetime import UTC, datetime  # noqa: PLC0415
@@ -139,8 +153,9 @@ async def _try_agentql_fallback(
                 )
 
         # Call AgentQL (sync HTTP → run in thread executor)
+        _timeout = timeout_s  # capture for lambda
         sr = await _asyncio.get_event_loop().run_in_executor(
-            None, lambda: agentql_scrape(url, api_key)
+            None, lambda: agentql_scrape(url, api_key, timeout=_timeout)
         )
 
         # Record usage (best-effort: never crash the import)
@@ -165,6 +180,151 @@ async def _try_agentql_fallback(
             "_try_agentql_fallback: unexpected error for %s: %s", _su, exc
         )
         return None
+
+
+async def _try_flaresolverr_fallback(
+    url: str,
+    db: object,
+    scrape_max_images: int = 20,
+) -> ScrapeResultT | None:
+    """Try FlareSolverr fallback scraping for a blocked URL.
+
+    Reads enabled/base_url/timeout settings, calls flaresolverr_scrape
+    (in an executor), records a scraper_usage row, and returns a ScrapeResult.
+
+    Returns a ScrapeResult with blocked=True when FlareSolverr is disabled or
+    not configured.  Returns None on unexpected error (caller treats as graceful
+    failure).  Best-effort: never raises.
+    """
+    import asyncio as _asyncio  # noqa: PLC0415
+    import json as _json  # noqa: PLC0415
+
+    import sqlalchemy as sa  # noqa: PLC0415
+
+    from app.models.scraper_usage import ScraperUsage  # noqa: PLC0415
+    from app.models.setting import Setting  # noqa: PLC0415
+    from app.storage.flaresolverr_client import flaresolverr_scrape  # noqa: PLC0415
+    from app.storage.scraper import ScrapeResult  # noqa: PLC0415
+    from app.storage.ssrf_guard import sanitize_for_log  # noqa: PLC0415
+
+    _su = sanitize_for_log(url)
+
+    async def _setting(key: str) -> object:
+        r = await db.execute(sa.select(Setting).where(Setting.key == key))  # type: ignore[union-attr]
+        row = r.scalar_one_or_none()
+        return _json.loads(row.value) if row else None
+
+    try:
+        enabled = bool(await _setting("scraper.flaresolverr.enabled") or False)
+        if not enabled:
+            return ScrapeResult(
+                url=url, domain="",
+                blocked=True,
+                note=(
+                    "Automated fetch blocked; FlareSolverr fallback is not enabled — "
+                    "enter details manually."
+                ),
+            )
+
+        base_url = str(await _setting("scraper.flaresolverr.base_url") or "").strip()
+        if not base_url:
+            return ScrapeResult(
+                url=url, domain="",
+                blocked=True,
+                note=(
+                    "Automated fetch blocked; FlareSolverr base URL not configured — "
+                    "enter details manually."
+                ),
+            )
+
+        timeout_s = float(await _setting("scraper.flaresolverr.timeout_s") or 60)
+
+        # Call FlareSolverr (sync HTTP → run in thread executor)
+        _base = base_url  # capture for lambda
+        _timeout = timeout_s
+        sr = await _asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: flaresolverr_scrape(
+                url, _base,
+                timeout_s=_timeout,
+                max_images=scrape_max_images,
+            ),
+        )
+
+        # Record usage (best-effort: never crash the import)
+        try:
+            usage_row = ScraperUsage(
+                provider="flaresolverr",
+                source_url=url,
+                success=not sr.blocked,
+                est_cost_usd=0.0,  # FlareSolverr is free / self-hosted
+            )
+            db.add(usage_row)  # type: ignore[union-attr]
+            await db.flush()  # type: ignore[union-attr]
+        except Exception:
+            log.warning(
+                "_try_flaresolverr_fallback: could not record usage row for %s", _su
+            )
+
+        return sr
+
+    except Exception as exc:
+        log.warning(
+            "_try_flaresolverr_fallback: unexpected error for %s: %s", _su, exc
+        )
+        return None
+
+
+async def _try_fallback_scrapers(
+    url: str,
+    db: object,
+    scrape_max_images: int = 20,
+) -> tuple[ScrapeResultT | None, str]:
+    """Dispatch to all enabled fallback scraper backends in priority order.
+
+    Reads ``scraper.<name>.priority`` for each known backend (lower = tried first;
+    defaults: flaresolverr=1, agentql=2).  Iterates backends in ascending priority
+    order and returns on the first one that succeeds (result.blocked=False).
+
+    Returns:
+        (result, backend_name) on success — backend_name is the winner.
+        (last_blocked_result_or_none, "") when every backend is blocked/failed.
+    """
+    import json as _json  # noqa: PLC0415
+
+    import sqlalchemy as sa  # noqa: PLC0415
+
+    from app.models.setting import Setting  # noqa: PLC0415
+
+    async def _setting(key: str) -> object:
+        r = await db.execute(sa.select(Setting).where(Setting.key == key))  # type: ignore[union-attr]
+        row = r.scalar_one_or_none()
+        return _json.loads(row.value) if row else None
+
+    # Registry: (name, try_fn)
+    _backends = [
+        ("flaresolverr", _try_flaresolverr_fallback),
+        ("agentql", _try_agentql_fallback),
+    ]
+
+    # Build priority-ordered list
+    ordered: list[tuple[int, str, object]] = []
+    for name, fn in _backends:
+        priority = int(
+            await _setting(f"scraper.{name}.priority")
+            or _DEFAULT_PRIORITIES.get(name, 99)
+        )
+        ordered.append((priority, name, fn))
+    ordered.sort(key=lambda x: x[0])
+
+    last_result: ScrapeResultT | None = None
+    for _priority, name, fn in ordered:
+        result = await fn(url, db, scrape_max_images=scrape_max_images)  # type: ignore[operator]
+        if result is not None and not result.blocked:  # type: ignore[union-attr]
+            return result, name
+        last_result = result
+
+    return last_result, ""
 
 
 async def process_import_session(ctx: dict, session_id: str) -> None:
@@ -299,8 +459,9 @@ async def process_import_session(ctx: dict, session_id: str) -> None:
                         raw_tags = sr.raw_tags
                         image_urls = sr.image_urls
                     else:
-                        # Static scraper was blocked — try AgentQL fallback
-                        fallback_sr = await _try_agentql_fallback(
+                        # Static scraper was blocked — try fallback backends
+                        # in priority order (flaresolverr=1, agentql=2 by default).
+                        fallback_sr, fallback_backend = await _try_fallback_scrapers(
                             session.source_url,
                             db,
                             scrape_max_images=_settings.SCRAPE_MAX_IMAGES,
@@ -314,16 +475,18 @@ async def process_import_session(ctx: dict, session_id: str) -> None:
                             scraped_source_site = getattr(fallback_sr, "source_site", None)
                             raw_tags = getattr(fallback_sr, "raw_tags", []) or []
                             image_urls = fallback_sr.image_urls
-                            session.scrape_note = "Fetched via AgentQL"
+                            label = _BACKEND_LABELS.get(fallback_backend, fallback_backend)
+                            session.scrape_note = f"Fetched via {label}"
                             log.info(
-                                "process_import_session: AgentQL fallback succeeded for %s "
+                                "process_import_session: %s fallback succeeded for %s "
                                 "(title=%r images=%d)",
+                                label,
                                 sanitize_for_log(session.source_url),
                                 scraped_title,
                                 len(image_urls),
                             )
                         else:
-                            # Both blocked — set a helpful note
+                            # All backends blocked — set a helpful note
                             note_msg = (
                                 getattr(fallback_sr, "note", None)
                                 if fallback_sr is not None
@@ -335,7 +498,7 @@ async def process_import_session(ctx: dict, session_id: str) -> None:
                                 )
                             session.scrape_note = note_msg
                             log.info(
-                                "process_import_session: static + AgentQL both blocked for %s: %s",
+                                "process_import_session: static + all fallbacks blocked for %s: %s",
                                 sanitize_for_log(session.source_url), note_msg,
                             )
 

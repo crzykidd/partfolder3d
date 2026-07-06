@@ -70,16 +70,31 @@ export function TableView({ items, onToggleFavorite, favoritingKey }: TableViewP
       }),
       colHelper.accessor('title', {
         header: 'Title',
-        cell: (info) => (
-          <Link
-            to={`/items/${info.row.original.key}`}
-            style={{ fontWeight: 600, color: 'var(--aurora-text)', textDecoration: 'none', fontSize: 13 }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--aurora-accent)' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--aurora-text)' }}
-          >
-            {info.getValue()}
-          </Link>
-        ),
+        cell: (info) => {
+          const item = info.row.original
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Link
+                to={`/items/${item.key}`}
+                style={{ fontWeight: 600, color: 'var(--aurora-text)', textDecoration: 'none', fontSize: 13 }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--aurora-accent)' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--aurora-text)' }}
+              >
+                {info.getValue()}
+              </Link>
+              {item.has_asset && (
+                <span
+                  role="img"
+                  aria-label="Print files attached"
+                  title="Print files attached"
+                  style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}
+                >
+                  <Box size={11} style={{ color: 'var(--aurora-muted)' }} />
+                </span>
+              )}
+            </div>
+          )
+        },
       }),
       colHelper.accessor('creator_name', {
         header: 'Creator',

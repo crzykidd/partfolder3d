@@ -161,6 +161,18 @@ services:
       - frontend_dist:/dist
     restart: "no"          # runs once to copy assets into the volume; nginx depends on completion
 
+  # ── FlareSolverr (OPTIONAL): free, self-hosted Cloudflare-bypass scraper backend ──
+  # Uncomment to enable, then configure in Admin → Site Capabilities → Scrapers →
+  # FlareSolverr with base URL http://flaresolverr:8191 (no published port needed —
+  # the worker reaches it over the compose network). Harmless to run: it is never
+  # used until enabled in the admin UI. Note: Chrome-based; expect ~0.3–1 GB RAM
+  # spikes while solving a challenge.
+  # flaresolverr:
+  #   image: ghcr.io/flaresolverr/flaresolverr:latest
+  #   restart: unless-stopped
+  #   environment:
+  #     - LOG_LEVEL=info
+
   # ── nginx reverse proxy (serves frontend + proxies /api/) ──
   # The nginx config and logo images are baked into the image — no bind-mounts
   # required for a pull-images-only host. Logos are served under /img/ from the

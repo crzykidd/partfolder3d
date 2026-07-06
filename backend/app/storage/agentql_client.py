@@ -87,6 +87,7 @@ def agentql_scrape(
     url: str,
     api_key: str,
     *,
+    timeout: int = AGENTQL_TIMEOUT,
     proxy_enabled: bool = True,
     proxy_country: str = "US",
     wait_for: int = 6,
@@ -99,6 +100,7 @@ def agentql_scrape(
     Args:
         url: The page URL to scrape.
         api_key: Plaintext AgentQL API key (decrypted by the caller).
+        timeout: HTTP client timeout in seconds (default AGENTQL_TIMEOUT=120).
         proxy_enabled: Use the Tetra proxy (default True; defeats Cloudflare).
         proxy_country: ISO country code for Tetra proxy (default "US").
         wait_for: Seconds for the browser to wait before extraction (default 6).
@@ -132,7 +134,7 @@ def agentql_scrape(
     }
 
     try:
-        with httpx.Client(timeout=AGENTQL_TIMEOUT) as client:
+        with httpx.Client(timeout=timeout) as client:
             resp = client.post(
                 AGENTQL_API_URL,
                 json=body,
@@ -190,7 +192,7 @@ def agentql_scrape(
 
     except httpx.TimeoutException:
         result.blocked = True
-        result.note = f"AgentQL: request timed out after {AGENTQL_TIMEOUT}s."
+        result.note = f"AgentQL: request timed out after {timeout}s."
         log.warning("agentql_scrape: timeout for %s", _su)
         return result
 

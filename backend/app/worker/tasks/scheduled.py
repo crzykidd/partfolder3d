@@ -601,6 +601,49 @@ async def _orphan_cleanup_core(_ctx: dict) -> None:
     )
 
 
+async def _scraper_usage_retention_core(_ctx: dict) -> None:
+    """Daily hard-delete of old scraper_usage rows past their retention window.
+
+    Reads ``scraper.usage_retention_days`` setting (default 30).  Zero or
+    negative disables the cleanup.  Deletes ALL providers' rows older than
+    the cutoff — AgentQL, FlareSolverr, and any future backends.
+    """
+    import json as _json  # noqa: PLC0415
+
+    import sqlalchemy as sa  # noqa: PLC0415
+
+    from app.db import SessionLocal  # noqa: PLC0415
+    from app.models.scraper_usage import ScraperUsage  # noqa: PLC0415
+    from app.models.setting import Setting  # noqa: PLC0415
+
+    async with SessionLocal() as db:
+        # Read retention setting
+        result = await db.execute(
+            sa.select(Setting).where(Setting.key == "scraper.usage_retention_days")
+        )
+        row = result.scalar_one_or_none()
+        retention_days = int(_json.loads(row.value)) if row else 30
+
+        if retention_days <= 0:
+            log.info(
+                "scraper_usage_retention: disabled (scraper.usage_retention_days=%d)",
+                retention_days,
+            )
+            return
+
+        cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+        del_result = await db.execute(
+            sa.delete(ScraperUsage).where(ScraperUsage.created_at < cutoff)
+        )
+        deleted = del_result.rowcount
+        await db.commit()
+
+    log.info(
+        "scraper_usage_retention: deleted %d scraper_usage row(s) older than %d days",
+        deleted, retention_days,
+    )
+
+
 _SCHED_FUNCS = {
     "expired_zip_cleanup": _cleanup_expired_bundles_core,
     "inbox_scan": _inbox_scan_core,
@@ -609,6 +652,7 @@ _SCHED_FUNCS = {
     "db_backup": _db_backup_core,
     "job_history_retention": _job_history_retention_core,
     "orphan_cleanup": _orphan_cleanup_core,
+    "scraper_usage_retention": _scraper_usage_retention_core,
 }
 
 
@@ -639,6 +683,7 @@ async def exec_scheduled_job(ctx: dict, name: str) -> None:
             "db_backup": 4,
             "job_history_retention": 4,
             "orphan_cleanup": 5,
+            "scraper_usage_retention": 5,
         }
         hour = _hour_map.get(name, 1)
         await _sj_finish(name, error=error, hour=hour, minute=0)
@@ -675,3 +720,7 @@ async def cron_job_history_retention(ctx: dict) -> None:
 
 async def cron_orphan_cleanup(ctx: dict) -> None:
     await exec_scheduled_job(ctx, "orphan_cleanup")
+
+
+async def cron_scraper_usage_retention(ctx: dict) -> None:
+    await exec_scheduled_job(ctx, "scraper_usage_retention")

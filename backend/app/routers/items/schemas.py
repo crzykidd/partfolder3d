@@ -122,6 +122,8 @@ class ItemSummary(BaseModel):
     creator_name: str | None = None
     tag_names: list[str] = []
     favorited: bool = False
+    # has_asset: True when the item has at least one model or gcode file.
+    has_asset: bool = False
 
     model_config = {"from_attributes": False}
 

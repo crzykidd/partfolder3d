@@ -105,31 +105,41 @@ export function ItemCard({ item, onToggleFavorite, isFavoriting, gridMode }: Ite
           >
             {item.title}
           </Link>
-          <button
-            onClick={() => onToggleFavorite(item.key, item.favorited)}
-            disabled={isFavoriting}
-            style={{
-              flexShrink: 0,
-              marginTop: 1,
-              opacity: isFavoriting ? 0.5 : 1,
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: 2,
-              display: 'flex',
-            }}
-            title={item.favorited ? 'Remove from favorites' : 'Add to favorites'}
-          >
-            <Star
-              size={15}
-              fill={item.favorited ? '#FBBF24' : 'none'}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, marginTop: 1 }}>
+            {item.has_asset && (
+              <span
+                role="img"
+                aria-label="Print files attached"
+                title="Print files attached"
+                style={{ display: 'flex', alignItems: 'center' }}
+              >
+                <Box size={12} style={{ color: 'var(--aurora-muted)' }} />
+              </span>
+            )}
+            <button
+              onClick={() => onToggleFavorite(item.key, item.favorited)}
+              disabled={isFavoriting}
               style={{
-                color: item.favorited ? '#FBBF24' : 'var(--aurora-muted)',
-                filter: item.favorited ? 'drop-shadow(0 0 4px rgba(251,191,36,0.5))' : 'none',
-                transition: 'all 0.15s',
+                opacity: isFavoriting ? 0.5 : 1,
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: 2,
+                display: 'flex',
               }}
-            />
-          </button>
+              title={item.favorited ? 'Remove from favorites' : 'Add to favorites'}
+            >
+              <Star
+                size={15}
+                fill={item.favorited ? '#FBBF24' : 'none'}
+                style={{
+                  color: item.favorited ? '#FBBF24' : 'var(--aurora-muted)',
+                  filter: item.favorited ? 'drop-shadow(0 0 4px rgba(251,191,36,0.5))' : 'none',
+                  transition: 'all 0.15s',
+                }}
+              />
+            </button>
+          </div>
         </div>
 
         {item.creator_name && (

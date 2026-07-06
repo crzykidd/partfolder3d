@@ -2,6 +2,225 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-05 — "Print asset" role-set for has_asset flag and catalog filter
+
+**Context:** The catalog "has print asset" filter (#28) needs a precise definition of which
+`File.role` values count as printable assets. The prompt specifically asks about gcode and
+whether it should count; the role taxonomy (model, gcode, zip, image, render, photo, other)
+has ambiguous members.
+
+**Decision:** Print asset = `FileRole.model` + `FileRole.gcode`. Specifically:
+
+- **model** (`.stl`, `.3mf`, `.obj`, `.ply`, `.blend`, `.f3d`, `.step`, `.stp`, `.fcstd`,
+  `.amf`, `.dae`) — unambiguously a 3D model file, always counts.
+- **gcode** (`.gcode`, `.gco`, `.bgcode`) — a ready-to-print sliced file; counts as a
+  print asset (prompt explicitly recommended yes).
+- **zip** — excluded. A zip archive _may_ contain models but is a packaging format, not
+  intrinsically a printable file. Including it would give false positives for metadata-only
+  zips. (If the zip is re-inventoried and extracted, the inner model files would earn their
+  own `model` roles and flip `has_asset` at that point.)
+- **image, render, photo, other** — never count (not printable).
+
+## 2026-07-05 — MakerWorld gallery images: NEXT_DATA authoritative; hygiene filters heuristic
+
+**Context:** Live FlareSolverr testing against a real MakerWorld import showed 6 stored
+images: one og:image social card (visually a re-encode of gallery photo #1 but a
+different file hash — URL-dedupe can't catch it), 3 real gallery photos, one `w_100`
+print-profile thumbnail, and one comment-section user photo. The og:image + thumbnail +
+comment photo are noise; only the 3 gallery photos are authoritative.
+
+**Key decisions:**
+
+- **NEXT_DATA gallery (`designExtension.design_pictures`) is the authoritative source
+  and fully replaces DOM-scraped images when present.** The og:image visual-duplicate of
+  gallery photo #1 cannot be detected by URL deduplication (different resize params →
+  different hash); the only correct fix is to use the official gallery and discard the
+  og:image entirely. When NEXT_DATA provides `≥1` picture URL, `_enrich_from_next_data`
+  replaces `result.image_urls` with those clean, full-res base URLs (no `x-oss-process`
+  params), capped at `max_images`. `coverUrl` is placed first when it differs from
+  `pictures[0]` (they're usually the same).
+
+- **Width-based thumbnail filter (< 400 px) and comment-path filter are generic and
+  heuristic.** They run in `_extract_images` for all sites (both static scraper and
+  FlareSolverr paths) when NEXT_DATA does not provide a gallery. These are best-effort:
+  a width hint must be present in recognized params (`x-oss-process=image/resize,w_N`,
+  `?w=N`, `?width=N`, including URL-encoded forms); URLs with no hint are always kept.
+  Comment-path matching uses `/comment/` and `/comments/` as path segments (with
+  surrounding slashes) so a model slug like `/models/comment-holder/` is unaffected.
+
+- **Query-string dedupe by base URL ignores resize params.** The previous exact-URL
+  dedupe let `?w_1200` and `?w_1000` variants of the same image both survive. The new
+  dedupe key is `scheme://netloc/path` (no query string); the first occurrence in bucket
+  priority order wins (srcset > lazy > og:image > plain src).
+
+- **NEXT_DATA gallery fires shape-gated, same as other NEXT_DATA enrichment.** No
+  domain check — the `designExtension.design_pictures` path is MakerWorld-specific in
+  practice but free to benefit any future Next.js site that uses the same shape.
+
+## 2026-07-05 — URL-import attach modal: "Create without objects" + once-per-visit
+
+**Context:** Owner found the inline "Attach Model Files" section on the Review & Commit
+step (shipped as #27) not obvious enough for zero-file URL imports. Requested an explicit
+modal prompt on step mount.
+
+**Key decisions:**
+
+- **"Create without objects" commits directly via the same mutation.** The modal's
+  secondary action reuses `handleCommit()` (which calls `commitMutation.mutate()`) — no
+  duplicate logic. Disabled / pending state is computed from the same `commitDisabled`
+  flag as the main "Commit to Library" button.
+
+- **Once-per-wizard-visit via sessionStorage, not lifted prop.** sessionStorage keyed by
+  `pf3d-attach-modal-dismissed-${session.id}` survives step-back → step-forward
+  navigation without prop drilling to `ImportWizardPage`. The key is session-scoped so
+  revisiting a different import later still shows the modal if applicable.
+
+- **Portal to `<body>`.** The Aurora card for the wizard step uses
+  `backdropFilter: 'blur(16px)'`, which creates a stacking context that traps
+  `position:fixed` children inline. Per the existing architecture constraint, the modal
+  is rendered via `createPortal(…, document.body)`.
+
+- **Modal is an extra nudge, not a replacement.** The inline "Attach Model Files"
+  section remains in place; the modal supplements it.
+
+## 2026-07-05 — MakerWorld `__NEXT_DATA__` enrichment in `extract_metadata_from_html`
+
+**Context:** Live FlareSolverr testing showed MakerWorld URL imports left the Designer
+blank and kept the SEO-suffixed og:title. MakerWorld is a Next.js SPA with no author
+meta, no JSON-LD, and no "by Creator" title pattern — all data is in the embedded
+`<script id="__NEXT_DATA__">` JSON blob.
+
+**Key decisions:**
+
+- **Shape-gated, not domain-gated.** The `props.pageProps.design` path lookup simply
+  returns nothing on sites whose NEXT_DATA has a different structure — no domain check
+  needed.  This means regional/mirror MakerWorld domains and any future Next.js site
+  using the same shape benefit automatically.
+
+- **Existing meta signals win for creator fields.** `_enrich_from_next_data` fills
+  `creator_name` and `creator_profile_url` only when they are still empty after the
+  normal meta/title heuristic pass.  OG/meta author takes priority; NEXT_DATA is a
+  last-resort fallback.
+
+- **NEXT_DATA title overrides og:title.** The `design.title` field from NEXT_DATA is
+  the clean, unsuffixed title (MakerWorld's og:title appends " - Free 3D Print Model -
+  MakerWorld").  We prefer it over the og:title-derived value and still run it through
+  `_clean_title` for consistency.
+
+- **Guard order: size cap → JSON parse → shape walk.** The blob is capped at 5 MB
+  before parsing; any exception (malformed JSON, missing keys, wrong types) is caught
+  and logged at DEBUG.  A bad NEXT_DATA blob never breaks the scrape.
+
+- **Implemented as a separate helper (`_enrich_from_next_data`), not inline.**  Keeps
+  `extract_metadata_from_html` readable and leaves a clear extension point for other
+  Next.js-based sites later.
+
+## 2026-07-05 — Scrapers UI: collapsible sections + drag-to-reorder (ScraperSection)
+
+**Context:** The two scraper cards (FlareSolverr, AgentQL) on the Site Capabilities
+admin page were always-open with numeric priority inputs. Owner requested collapsible
+sections with drag-to-reorder priority.
+
+**Key decisions:**
+
+- **Drag zone is the header div, not the outer section or just the grip span.**
+  Setting `draggable` on the full outer section would allow drag initiation from
+  inputs/text in the expanded body (breaking text selection). Setting it only on the
+  grip `<span>` would show a tiny ghost image. Setting it on the header div (which
+  contains the grip + label + badge) is a middle ground: visible ghost, drag doesn't
+  interfere with body inputs, and the expand/collapse toggle button still works as a
+  click (click ≠ drag in browser event handling).
+
+- **Touch/pointer events: desktop-only.** Native HTML5 DnD has no touch support.
+  Adding `pointermove`/`pointerup` based reorder is non-trivial and out of scope.
+  The feature is fully functional on desktop; mobile users see the sections but
+  cannot reorder them by touch. Noted in the prompt report.
+
+- **Priority state in `ScrapersList`, not in card bodies.** The card bodies
+  (`FlareSolverrBody`, `AgentQLBody`) no longer own or display priority. The
+  `ScrapersList` component owns the display order (via `orderedNames` state,
+  initialized once from query data). On drop, it PUTs both settings with new
+  sequential priorities and invalidates the queries. Rollback on failure.
+
+- **sessionStorage (not localStorage) for expand state.** The spec requires
+  per-session memory. Each section's expanded state is stored under
+  `pf3d.scrapers.expanded.<name>`. Reads are guarded with try/catch for
+  private-browsing environments.
+
+- **`reorderScrapers` exported for testability.** Native DnD events are unreliable
+  in jsdom/vitest, so the reorder+reprioritize logic is a pure exported function
+  tested independently. Component tests cover the collapse/expand/sessionStorage
+  paths; drop handler logic is exercised by calling the API stubs directly.
+
+## 2026-07-05 — #23 pluggable fallback-scraper framework (FlareSolverr + AgentQL seam)
+
+**Context:** The Cloudflare-fallback path in `import_session.py` was hardcoded to AgentQL.
+Issue #23 introduced FlareSolverr as a free alternative and required a generic dispatch seam.
+
+**Key decisions:**
+
+- **Backend-seam abstraction.** Rather than bolting FlareSolverr alongside AgentQL as a
+  parallel hardcoded path, a `_try_fallback_scrapers` dispatcher reads each backend's
+  `scraper.<name>.priority` setting row and calls them in ascending order.  Adding a third
+  backend later requires only a client module + one entry in `_backends` + its settings rows.
+
+- **Settings-table approach (no migration).** All per-scraper config (`enabled`, `priority`,
+  `timeout_s`, `base_url`) is stored as JSON rows in the existing `settings` table under the
+  `scraper.<name>.*` namespace.  The existing `agentql.*` billing keys are kept as-is for
+  backward compatibility; the generic keys supplement them.
+
+- **SSRF posture: target URL guarded, service host exempt.**  The *target* URL (the page to
+  scrape) is always passed through `assert_safe_url` so FlareSolverr cannot be abused as an
+  SSRF proxy.  The FlareSolverr `base_url` (an admin-configured internal Docker host) is
+  intentionally NOT guarded — it's operator-configured, not user-supplied.
+
+- **Default priority order: FlareSolverr (1) before AgentQL (2).** FlareSolverr is free, so
+  it's tried first.  Both defaults are overridable via the admin UI priority inputs.
+
+- **Usage tracking for every backend.** Every fallback call (including FlareSolverr, at
+  `est_cost_usd=0.0`) writes a `scraper_usage` row so the admin dashboard is always
+  accurate.  A new daily cron (`scraper_usage_retention`) hard-deletes rows older than
+  `scraper.usage_retention_days` (default 30); a manual clear action per-provider is also
+  available from the UI.
+
+- **FlareSolverr in dev compose only.**  The `flaresolverr` service was added to
+  `docker-compose.dev.yml` (no published ports; worker reaches it at
+  `http://flaresolverr:8191`).  The production `docker-compose.yml` is unchanged — the
+  owner can add FlareSolverr there when ready for production use.
+
+- **`extract_metadata_from_html` refactor.**  The HTML → ScrapeResult logic was extracted
+  from the inline block in `scrape_url` into a module-level helper so FlareSolverr (which
+  returns raw resolved HTML, not structured data) can reuse the same extraction pipeline.
+  The scrape_url call path is behaviorally identical — it now simply calls the helper.
+
+- **AgentQL test-connection makes a real API call.**  A dedicated no-cost validation
+  endpoint would require AgentQL to expose one (they don't).  The test-connection endpoint
+  makes a real request to `example.com` and checks for a 401/auth-failure; any other
+  result is treated as "key accepted."  This costs one call (~$0.02) and is noted in
+  the UI.  FlareSolverr test-connection hits only the free `GET /` health endpoint.
+
+## 2026-07-05 — #27 resolution: manual mid-wizard file attach (option b; auto-fetch deferred to #23)
+
+Owner chose **option b**: let the user download the model file themselves from the source site and
+drop it into the wizard before committing.  Auto-fetch of model files (directly from the source URL)
+is deferred to the #23 pluggable-scraper work.
+
+Non-obvious choices:
+- **Guard relaxation contract.** `POST /api/import-sessions/{id}/files` now accepts:
+  - `source_type` in `{upload, url}` — `inbox` and anything else still return 422.
+  - `status` in `{draft, pending_wizard}` — `processing`, `committed`, `failed`, `cancelled` still
+    return 409.
+  Any other combination is still rejected at the old boundary.
+- **Lazy staging dir for URL sessions.** URL sessions are created with `staging_dir=None` (the scrape
+  job doesn't need one).  The upload endpoint creates it on first use (`_get_staging_dir() / uuid4()`)
+  and persists it to the session row.  No migration needed — the column already exists and allows NULL.
+- **No re-processing after attach.** Uploading a file to a `pending_wizard` session does NOT trigger
+  a new `/process` call — the file sits staged and commit ingests it through the existing generic
+  `session.files` loop in `_commit_session_inner`.
+- **New DELETE endpoint.** `DELETE /api/import-sessions/{id}/files/{file_id}` mirrors the shape of
+  `delete_import_session_image`: CSRF-protected, allowed in `draft`/`pending_wizard`, best-effort FS
+  unlink, 404 on foreign file_id.
+
 ## 2026-07-04 — #26 wizard viewport capture: a real session-image save path (not `uploadSessionFiles`)
 
 The #26 handoff assumed a capture could be saved by reusing `uploadSessionFiles`

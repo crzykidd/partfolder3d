@@ -1,10 +1,10 @@
 ---
 name: 2026-07-03-23-flaresolverr
-status: pending          # pending | completed | failed
+status: completed
 created: 2026-07-03
 model: sonnet            # coding task
-completed:               # filled when the work is done
-result:                  # one-line summary of the outcome
+completed: 2026-07-05
+result: Pluggable fallback-scraper framework implemented — FlareSolverr client, generic priority-based dispatcher, per-backend enable/priority/timeout/test-connection settings, usage tracking + retention cron + manual clear, admin UI cards, 20 new tests, all 799 backend + 366 frontend tests green.
 ---
 
 # Task: Add FlareSolverr as a fallback-scraper backend (issue #23)
@@ -202,6 +202,33 @@ Add `backend/tests/test_flaresolverr.py` mirroring `test_agentql.py`:
   abstraction, why base_url is SSRF-exempt but the target URL is guarded, the default
   order, and the Q2 usage-tracking decision.
 
+### 9. FlareSolverr service in the dev compose file
+
+Add a `flaresolverr` service to `docker-compose.dev.yml` (owner decision — dev compose
+only for now; leave the prod `docker-compose.yml` alone and note that in `decisions.md`):
+
+```yaml
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=info
+```
+
+No published ports — the worker reaches it internally at `http://flaresolverr:8191`.
+Mention that URL in the admin card's helper copy / placeholder so setup is copy-paste.
+
+### 10. Live end-to-end validation (best effort — don't block the task on it)
+
+FlareSolverr is self-hosted, so validate for real: `docker run -d --name pf3d-flaresolverr-test
+-p 8191:8191 ghcr.io/flaresolverr/flaresolverr:latest`, then exercise the client/test-connection
+path against `http://localhost:8191` (a plain `request.get` of a benign page is enough; a real
+Cloudflare-protected page is a bonus, but external-site behavior must not fail the task).
+**Remove the container when done** (`docker rm -f pf3d-flaresolverr-test`). Record the outcome
+in your report. Note for the live stack: this task edits worker files — the owner's running
+worker needs `make worker-restart` after the commit lands (mention it in the report; don't
+restart the owner's stack yourself).
+
 ## Conventions to honor
 
 - Backend: pinned `ruff 0.8.4` + `backend/pyproject.toml` config must pass. Match existing
@@ -232,6 +259,26 @@ Add `backend/tests/test_flaresolverr.py` mirroring `test_agentql.py`:
    FlareSolverr's health) to validate base_url in the UI? Nice-to-have; in scope?
 7. **Endpoint layout** — extend `routers/agentql.py` (rename to `scraper_settings`?) or
    add a separate `flaresolverr` router? Plan leans toward extending for cohesion.
+
+## Owner decisions (2026-07-05) — all open questions RESOLVED, do not re-ask
+
+1. **Q1 order:** default `flaresolverr` first, `agentql` second (free before paid). Confirmed.
+2. **Q2 usage:** record `scraper_usage` rows for every backend (`provider="flaresolverr"`,
+   `est_cost_usd=0.0`). Confirmed — plus the spec's retention cron + manual clear.
+3. **Q3 timeouts:** 60s default solve timeout, per-scraper `timeout_s` configurable
+   (AgentQL gets one too, per the spec). Confirmed.
+4. **Q4 SSRF:** target URL guarded; each scraper's own configured host exempt. Confirmed.
+5. **Q5 UI shape:** **build it generic for N future backends** — a "Scrapers" admin section
+   rendering one card per registry entry (enable toggle, priority, timeout, backend-specific
+   fields, Test connection, usage stats + clear), exactly as `docs/scrapers-spec.md` §6
+   describes. Priority = an explicit, editable order control (numeric input or up/down
+   arrows — no drag-and-drop lib; keep to existing Aurora primitives). The two-button
+   toggle idea is REJECTED in favor of the generic control.
+6. **Q6 test connection:** yes, in scope for every backend.
+7. **Q7 layout:** implementer's choice, but prefer generalizing the existing router/card
+   into the scrapers framework (spec §6) over bolting on a parallel one; keep the admin
+   page cohesive. `docs/scrapers-spec.md` is authoritative wherever it and the older
+   steps above disagree.
 
 ## When done
 

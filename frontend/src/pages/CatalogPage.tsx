@@ -37,6 +37,7 @@ import { VirtualGrid } from './catalog/VirtualGrid'
 import { TableView } from './catalog/TableView'
 import { Pagination } from './catalog/Pagination'
 import { LibraryFilter } from './catalog/LibraryFilter'
+import { AssetFilter } from './catalog/AssetFilter'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -130,6 +131,11 @@ export function CatalogPage() {
     .split(',')
     .map((s) => Number(s))
     .filter((n) => Number.isInteger(n) && n > 0)
+
+  // Asset filter — `asset=true|false`, absent = All.
+  const _urlAssetRaw = searchParams.get('asset')
+  const urlAsset: boolean | null =
+    _urlAssetRaw === 'true' ? true : _urlAssetRaw === 'false' ? false : null
 
   // Local search input (debounced sync to URL)
   const [inputValue, setInputValue] = useState(urlQ)
@@ -273,9 +279,24 @@ export function CatalogPage() {
 
   const clearLibs = useCallback(() => setLibs([]), [setLibs])
 
+  const setAsset = useCallback(
+    (value: boolean | null) =>
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        if (value === null) {
+          next.delete('asset')
+        } else {
+          next.set('asset', String(value))
+        }
+        next.delete('page')
+        return next
+      }),
+    [setSearchParams],
+  )
+
   // --- Data fetching ---
   const { data: itemsData, isLoading: itemsLoading } = useQuery({
-    queryKey: ['items', urlQ, urlTags, urlCreatorId, urlFavorited, urlSort, urlPage, perPage, urlLibs],
+    queryKey: ['items', urlQ, urlTags, urlCreatorId, urlFavorited, urlSort, urlPage, perPage, urlLibs, urlAsset],
     queryFn: () =>
       api.listItems({
         q: urlQ || undefined,
@@ -286,6 +307,7 @@ export function CatalogPage() {
         page: urlPage,
         per_page: perPage,
         library_ids: urlLibs.length ? urlLibs : undefined,
+        has_asset: urlAsset ?? undefined,
       }),
   })
 
@@ -559,6 +581,9 @@ export function CatalogPage() {
                   isDark={isDark}
                 />
               )}
+
+              {/* Asset filter — three-state: All / With files / Without files */}
+              <AssetFilter value={urlAsset} onChange={setAsset} />
             </div>
 
             {/* Right cluster: compact/full toggle (grid only) + view toggle */}

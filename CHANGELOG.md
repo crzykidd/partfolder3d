@@ -20,6 +20,104 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-07-05
+
+### Changed
+
+- **Zero-file URL imports now show an explicit attach-or-create-without-objects modal**
+  at Review & Commit. When a URL import reaches the Summary step with no staged files,
+  a modal prompts: _Site "«domain»" needs auth to download print assets. Please attach._
+  (generic copy when no source URL). Primary action **Attach files** closes the modal
+  and opens the inline file picker. Secondary action **Create without objects** commits
+  directly using the same handler and disabled state as the main commit button. Modal
+  appears at most once per wizard visit (sessionStorage keyed by session id); the
+  existing inline "Attach Model Files" section is retained.
+
+- **Scrapers admin UI: collapsible sections + drag-to-reorder priority + up/down arrows.**
+  Each fallback scraper on the Site Capabilities admin page is now a collapsible section
+  (expanded by default; state persisted per browser session via `sessionStorage`).
+  The collapsed header shows the scraper name and its current Enabled/Disabled state.
+  Priority is now set by dragging sections up or down — the list position is the
+  priority (top = tried first). Each section header also provides **up/down arrow buttons**
+  as a touch- and keyboard-accessible alternative to drag-and-drop (up disabled on
+  the first section; down disabled on the last; both use the same persist + rollback
+  path as drag). Numeric priority inputs have been removed from both cards. A new generic
+  `ScraperSection` wrapper means adding a third scraper requires only one entry in
+  `ScrapersList` with no bespoke chrome.
+
+### Added
+
+- **Catalog "has print asset" filter + card icon** (closes #28). A three-state toolbar
+  filter (All / With files / Without files) lets users find items that have model or
+  gcode files attached vs. metadata-only URL imports. Each catalog card and table row
+  also shows a small `Box` icon ("Print files attached") when the item has print assets;
+  the icon's absence signals a metadata-only entry without any warning styling. The flag
+  is computed server-side with a batch EXISTS query (no N+1). "Print asset" means
+  `FileRole.model` or `FileRole.gcode`; see `docs/decisions.md` for the rationale.
+
+- **Pluggable fallback-scraper framework with FlareSolverr backend** (closes #23).
+  The Cloudflare-fallback scrape path is now a generic dispatcher that tries each
+  enabled backend in configurable priority order, so adding a third backend later
+  requires only one module + one registry entry. First two backends:
+  - **FlareSolverr** (priority 1, free/self-hosted): POSTs a `request.get` command
+    to a local FlareSolverr container; parses the resolved HTML with the shared
+    `extract_metadata_from_html` helper; records `scraper_usage` rows at $0.00.
+  - **AgentQL** (priority 2, paid BYO key): unchanged internals; gains configurable
+    `priority` and `timeout_s` settings alongside its existing billing controls.
+  - Per-scraper settings (`scraper.<name>.enabled/priority/timeout_s/base_url`) are
+    stored as settings-table rows — no Alembic migration needed.
+  - **Test Connection** button in the admin UI for each backend (FlareSolverr: pings
+    `/` health endpoint; AgentQL: makes one live API call to validate the key).
+  - **Usage tracking** for all backends: every scraper call writes a `scraper_usage`
+    row; a new daily cron (`scraper_usage_retention`) hard-deletes rows older than
+    `scraper.usage_retention_days` (default 30); a "Clear usage" action per backend.
+  - New API endpoints: `GET/PUT /api/admin/scrapers/flaresolverr`,
+    `POST /api/admin/scrapers/{agentql,flaresolverr}/test-connection`,
+    `GET /api/admin/scrapers/usage` (all-provider), `DELETE /api/admin/scrapers/usage`.
+  - New `flaresolverr` service in `docker-compose.dev.yml`
+    (`ghcr.io/flaresolverr/flaresolverr:latest`; no published ports — worker reaches
+    it at `http://flaresolverr:8191`). The production `docker-compose.yml` ships a
+    **commented-out example block** — uncomment it (or run your own instance) and set
+    the base URL in Admin → Site Capabilities to enable.
+
+### Fixed
+
+- **MakerWorld scraped images now use the authoritative gallery.** When the
+  `__NEXT_DATA__` blob contains `designExtension.design_pictures`, those clean
+  full-res URLs replace any DOM-scraped images (og:image social card, thumbnails,
+  comment photos). Generic hygiene applied to all sites when the gallery is absent:
+  same-path URLs with different resize query strings are de-duplicated (first
+  highest-priority occurrence wins); candidates with a detectable width hint
+  < 400 px (`x-oss-process=image/resize,w_N`, `?w=N`, `?width=N`) are dropped as
+  thumbnails; images whose URL path contains `/comment/` or `/comments/` segments
+  are dropped.
+
+- **MakerWorld imports now pre-fill Designer, clean title, and category tags** via
+  `__NEXT_DATA__`. Live testing found that MakerWorld (a Next.js SPA) has no author
+  meta tags, no JSON-LD, and no "by Creator" title pattern — all metadata lives only in
+  the embedded `<script id="__NEXT_DATA__">` blob. The scraper now parses that blob
+  (shape-gated, not domain-gated; capped at 5 MB; any parse error silently ignored) and
+  enriches the result: `designCreator.name`/`.handle` → Designer + profile URL (fallback
+  only — existing meta signals still win); `design.title` → clean, unsuffixed title
+  (overrides the og:title boilerplate); `categories[].name` → appended to raw tags.
+- **CSRF cookie now persists across browser restarts.** The `pf3d_csrf` cookie was
+  set without `max_age`, making it a browser-session cookie while the auth session
+  cookie persists for `SESSION_LIFETIME_DAYS` — after a browser restart users stayed
+  logged in but every write failed with "Missing X-CSRF-Token header" until they
+  logged out and back in. The CSRF cookie now carries the same `max_age` as the
+  session cookie.
+  **Upgrade note:** sessions created before this release still carry the old
+  browser-session CSRF cookie — if a save fails with "Missing X-CSRF-Token header"
+  after upgrading, log out and back in once to get the persistent cookie.
+- **URL-import wizard can now attach model files before commit** (closes #27). The
+  Review & Commit step now shows a mid-wizard "Attach Model Files" section for `url`
+  and `upload` sessions: staged files are listed with name, role, and a per-file
+  remove button; an "Attach files" button opens a file picker that uploads to the
+  new `POST /api/import-sessions/{id}/files` (relaxed to allow `url` source type and
+  `pending_wizard` status; staging dir is created on-demand for URL sessions). A new
+  `DELETE /api/import-sessions/{id}/files/{file_id}` endpoint removes a staged file.
+  The zero-file warning for URL sessions is reworded to point at this affordance.
+
 ## [0.4.0] — 2026-07-05
 
 > ⚠️ **nginx config changed** — if you are running a custom nginx config
@@ -1017,7 +1115,8 @@ detail in this one file. (An earlier plan to archive closed minor series into
 <!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
      earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
 
-[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/crzykidd/partfolder3d/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/crzykidd/partfolder3d/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/crzykidd/partfolder3d/compare/v0.2.5...v0.3.0
 [0.2.5]: https://github.com/crzykidd/partfolder3d/compare/v0.2.4...v0.2.5

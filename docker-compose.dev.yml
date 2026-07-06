@@ -165,6 +165,16 @@ services:
       - /app/node_modules                # keep image's node_modules (anonymous volume)
     restart: unless-stopped
 
+  # ── FlareSolverr: free, self-hosted Cloudflare-bypass solver ──
+  # The worker reaches it at http://flaresolverr:8191 (no published port needed).
+  # Enable in Admin → Site Capabilities → Scrapers → FlareSolverr.
+  # Set the base URL to http://flaresolverr:8191 in the admin card.
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=info
+
   # ── nginx reverse proxy: proxies / → Vite dev server, /api/ → backend ──
   nginx:
     image: nginx:1.27-alpine
