@@ -11,7 +11,7 @@
 </div>
 
 > [!WARNING]
-> **Early alpha (v0.5.0) — under active development.** This is an early release: expect rough
+> **Early alpha (v0.5.1) — under active development.** This is an early release: expect rough
 > edges, and **breaking changes can land between releases** (database schema, config, or API).
 > It's usable and published — pull the images and follow [Getting started](#getting-started) — but
 > **pin a specific version, back up your data, and read the release notes before upgrading.**
@@ -19,7 +19,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.0-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.5.1-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 
@@ -28,6 +28,16 @@
 ---
 
 ## What's New
+
+### v0.5.1 (2026-07-05)
+
+Hotfix release. **Scraped-image previews now display in production** — the production nginx
+Content-Security-Policy only allowed same-origin images, so the import wizard's previews of
+scraped images (hotlinked from the source site until commit downloads them) were silently
+blocked by the browser and imports looked like the scrape found no images; `img-src` now
+permits `https:`. If you bind-mount a **custom nginx config**, reconcile it against the
+updated `nginx/nginx.conf` before upgrading. Also fixed: in the side-nav layout the
+**user-profile menu** no longer opens underneath the stat strip and right widget rail.
 
 ### v0.5.0 (2026-07-05)
 
@@ -171,7 +181,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.5.0 alpha) — see the
+> The full feature set below is **built and released** (v0.5.1 alpha) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -435,7 +445,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is at the **alpha** stage (v0.5.0).
+Honest snapshot — this project is at the **alpha** stage (v0.5.1).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -581,7 +591,7 @@ This is alpha software — **breaking changes can land between releases** (schem
 or API), so upgrade deliberately:
 
 1. **Pin a specific version.** Set explicit image tags in `docker-compose.yml` (e.g.
-   `:0.5.0` instead of `:latest`) so a `pull` never surprises you.
+   `:0.5.1` instead of `:latest`) so a `pull` never surprises you.
 2. **Read the release notes first.** Check the [CHANGELOG](CHANGELOG.md) / the GitHub
    release for the version you're moving to — watch for **⚠️ nginx config changed** and
    other migration callouts.
@@ -648,6 +658,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — alpha (v0.5.0) · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — alpha (v0.5.1) · built by <code>crzykidd</code></sub>
 
 </div>
