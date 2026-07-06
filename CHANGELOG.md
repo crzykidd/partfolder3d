@@ -22,6 +22,13 @@ prefix appears only on git tags and GitHub releases.
 
 ### Fixed
 
+- **Prod nginx CSP blanked all scraped-image previews in the import wizard.** The
+  production Content-Security-Policy allowed only `img-src 'self' data: blob:`, so the
+  wizard's hotlinked source-site image URLs (scraped `is_url` session images, shown
+  until commit downloads them server-side) were blocked by the browser and hidden by
+  the tile's `onError` handler — imports looked like the scrape found no images. The
+  dev nginx config has no CSP, which is why dev looked fine. `img-src` now also allows
+  `https:`.
 - **Side-nav layout: the user-profile dropdown no longer renders behind the stat strip
   and the right widget rail.** The top bar's `backdrop-filter` traps the dropdown in the
   header's stacking context; the header now carries its own `z-index` so the menu paints
