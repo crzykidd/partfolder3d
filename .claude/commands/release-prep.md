@@ -17,7 +17,7 @@ release.
 | Version source-of-truth | `backend/app/version.py` — literal `__version__ = "<current>"`. Also sync `frontend/package.json` `"version": "<current>"` (same bare semver). |
 | README badge pattern | `version-<current>-0FA4AB` (teal badge) |
 | README What's New heading | `## What's New` |
-| Docs to sync | `CLAUDE.md` — refresh the **whole** top `> **Status:**` line (version number **and** any surrounding prose, e.g. "first tagged release pending") so no stale phrase survives. |
+| Docs to sync | `CLAUDE.md` — refresh the **whole** top `> **Status:**` line (version number **and** any surrounding prose, e.g. "first tagged release pending") so no stale phrase survives. Also `frontend/src/lib/releaseNotes.ts` — add the curated `RELEASE_NOTES['$ARGUMENTS']` entry for the in-app "What's New" modal (Step 4b). |
 | Changelog archiving | **None** — single living `CHANGELOG.md`; never split to `docs/CHANGELOG-<minor>.x.md` (see Step 3). |
 
 ## Local validation checks (same commands CI runs)
@@ -178,6 +178,23 @@ In `README.md`:
    existing entries.
 3. Update any top-of-file new-in banner / one-line status blurb to reference
    `$ARGUMENTS` if it currently names a specific version.
+
+## Step 4b — Add the in-app "What's New" entry
+
+The post-upgrade "What's New" modal reads a **curated map** in
+`frontend/src/lib/releaseNotes.ts` (`RELEASE_NOTES`) — it does NOT parse the
+changelog or fetch GitHub. A release without an entry here shows an empty
+modal ("See the release notes for details"), which is exactly what happened
+for v0.5.0/v0.5.1 — do not let it recur.
+
+Add a `'$ARGUMENTS'` entry at the TOP of the `RELEASE_NOTES` map:
+
+- `title`: `"What's New in v$ARGUMENTS"`.
+- `bullets`: 3–7 short user-facing strings distilled from the changelog
+  section you just rolled — same voice as the existing entries. Lead with the
+  most user-visible change; include upgrade warnings (e.g. the nginx-config
+  callout) as a bullet when present.
+- `githubReleaseUrl`: `https://github.com/crzykidd/partfolder3d/releases/tag/v$ARGUMENTS`.
 
 ## Step 5 — Sync long-form docs
 

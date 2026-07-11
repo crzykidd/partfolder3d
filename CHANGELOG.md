@@ -20,6 +20,14 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The post-upgrade "What's New" popup was empty for v0.5.0 and v0.5.1.** The modal
+  reads a curated per-version map in `frontend/src/lib/releaseNotes.ts` (it does not
+  parse the changelog), and no entries were added for those releases. Entries for
+  0.5.0 and 0.5.1 are now present, and the release-prep checklist gained an explicit
+  step so future releases can't skip it.
+
 ## [0.5.1] — 2026-07-05
 
 > ⚠️ **nginx config changed** — if you are running a custom nginx config
