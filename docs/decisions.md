@@ -2,6 +2,30 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-17 — Manyfold connector: two live-test fixes (internal-URL rewrite, host-scoped SSRF trust)
+
+**Context:** End-to-end validation of the connector against a real instance
+(`manyfold.crzynet.com`, pulling `.../models/4jlf2g117t4p`) surfaced two bugs that unit
+tests with a canned public host could not — both would have made real imports fail.
+
+- **Rewrite response-serialized URLs onto the configured `base_url` origin.** A Manyfold
+  behind a reverse proxy serializes `@id` / `contentUrl` / `preview_file` / `creator`
+  with its *internal* host (here `http://localhost:3214`), not the public origin we call.
+  `fetch_model` fetched those internal URLs → connection-refused (and the SSRF guard would
+  block localhost anyway) → **every file silently dropped** (`files: 0`). Fix: a
+  `_rewrite_to_base()` helper swaps scheme+host+port for `base_url`'s on every
+  response-provided URL, since all those resources are served by the same instance. The
+  only legitimately cross-host hop is the download-time 302 to object storage, handled by
+  `download_file`.
+- **SSRF trust is host-scoped to the configured instance, not blanket, and not applied to
+  the instance's own host.** A self-hosted Manyfold legitimately resolves to a private/LAN
+  IP (here `192.168.51.1`). `download_file` was SSRF-guarding *every* hop including the
+  first (the trusted instance) → all downloads refused. Fix: exempt hops whose host equals
+  the configured instance host (matching how the token/model JSON fetches already trust
+  `base_url`, and the FlareSolverr `base_url` precedent); still guard any redirect that
+  *leaves* the instance. Caveat unchanged: a redirect to internal/private object storage
+  on a *different* host is still refused (documented private-object-storage limitation).
+
 ## 2026-07-17 — Manyfold connector Part 3: admin page placement, conditional Assets step
 
 **Context:** Wiring up the frontend for the Manyfold connector — an admin screen to

@@ -568,3 +568,136 @@ async def test_manyfold_import_skips_one_ssrf_blocked_file_not_whole_import(
     # Only the file whose download didn't redirect to a blocked host was staged.
     assert len(files) == 1
     assert files[0].original_name == "model.stl"
+
+
+# ---------------------------------------------------------------------------
+# 6. Internal-URL rewrite + trusted-instance SSRF exemption
+#    (both regressions were found by live-testing against a real instance:
+#     a reverse-proxied Manyfold serializes internal @id/contentUrl hosts, and
+#     a self-hosted instance resolves to a private/LAN IP.)
+# ---------------------------------------------------------------------------
+
+
+def test_rewrite_to_base_swaps_internal_origin() -> None:
+    import app.storage.manyfold_client as mc
+
+    # Manyfold behind a reverse proxy emits @id/contentUrl with its INTERNAL host.
+    assert (
+        mc._rewrite_to_base(BASE_URL, "http://localhost:3214/models/x/model_files/y")
+        == f"{BASE_URL}/models/x/model_files/y"
+    )
+    # Query preserved; None passes through; a relative URL is joined onto base.
+    assert (
+        mc._rewrite_to_base(BASE_URL, "http://localhost:3214/f?derivative=thumb")
+        == f"{BASE_URL}/f?derivative=thumb"
+    )
+    assert mc._rewrite_to_base(BASE_URL, None) is None
+    assert mc._rewrite_to_base(BASE_URL, "/rel/path") == f"{BASE_URL}/rel/path"
+
+
+def test_fetch_model_rewrites_internal_file_and_creator_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reverse-proxied instance emits @id/contentUrl/preview_file/creator with
+    an internal host (localhost:3214). fetch_model must fetch file/creator
+    details from — and return content_urls on — the configured public base_url,
+    never the internal host (else every file is silently dropped)."""
+    import app.storage.manyfold_client as mc
+
+    internal = "http://localhost:3214"
+    model_json = {
+        "name": "Proxy Model",
+        "keywords": ["x"],
+        "creator": {"@id": f"{internal}/creators/9"},
+        "preview_file": {"@id": f"{internal}/files/imgA"},
+        "hasPart": [
+            {"@id": f"{internal}/files/imgA", "name": "a.png", "@type": "3DModel"},
+        ],
+    }
+    file_detail = {
+        "filename": "a.png",
+        "encodingFormat": "image/png",
+        "contentUrl": f"{internal}/downloads/a.png",
+        "contentSize": 10,
+    }
+    creator_detail = {"name": "Proxied Creator", "slug": "pc"}
+
+    seen: list[str] = []
+
+    def fake_json_caller(url: str, headers: dict, timeout_s: float) -> tuple:
+        seen.append(url)
+        if url == MODEL_URL:
+            return 200, model_json
+        if url == f"{BASE_URL}/files/imgA":
+            return 200, file_detail
+        if url == f"{BASE_URL}/creators/9":
+            return 200, creator_detail
+        return 404, {}
+
+    monkeypatch.setattr(mc, "_manyfold_json_caller", fake_json_caller)
+
+    model = mc.fetch_model(BASE_URL, "abc123", "tok")
+
+    # File detail + creator were fetched from the PUBLIC base, never localhost.
+    assert f"{BASE_URL}/files/imgA" in seen
+    assert f"{BASE_URL}/creators/9" in seen
+    assert not any("localhost:3214" in u for u in seen)
+    assert len(model.files) == 1
+    assert model.files[0].content_url == f"{BASE_URL}/downloads/a.png"
+    assert model.preview_file_id == f"{BASE_URL}/files/imgA"
+    assert model.creator_name == "Proxied Creator"
+
+
+def _private_getaddrinfo(host: str, port: object, *args: Any, **kwargs: Any) -> list:
+    """Like _fake_getaddrinfo, but a real hostname resolves to a private LAN IP
+    (a self-hosted Manyfold instance)."""
+    try:
+        ipaddress.ip_address(host)
+        resolved = host
+    except ValueError:
+        resolved = "192.168.51.1"
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (resolved, port or 0))]
+
+
+def test_download_file_trusts_instance_host_on_private_ip(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The configured instance host is admin-trusted: a direct download from it
+    must NOT be SSRF-blocked even when it resolves to a private/LAN IP (a
+    self-hosted instance). Regression for a 192.168.x instance refusing all
+    downloads."""
+    import app.storage.manyfold_client as mc
+
+    download_url = f"{BASE_URL}/downloads/file1.stl"
+
+    def fake_download_caller(url: str, headers: dict, timeout_s: float) -> tuple:
+        assert url == download_url
+        return 200, {"content-type": "application/octet-stream"}, b"stlbytes"
+
+    monkeypatch.setattr(mc, "_manyfold_download_caller", fake_download_caller)
+    dest = tmp_path / "out.stl"
+    with patch("socket.getaddrinfo", _private_getaddrinfo):
+        n = mc.download_file(download_url, "tok", dest, max_bytes=1024)
+    assert n == len(b"stlbytes")
+    assert dest.read_bytes() == b"stlbytes"
+
+
+def test_download_file_blocks_cross_host_redirect_from_private_instance(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The trust is host-scoped, not blanket: a redirect that LEAVES the trusted
+    instance to another private host is still refused."""
+    import app.storage.manyfold_client as mc
+
+    download_url = f"{BASE_URL}/downloads/file1.stl"
+
+    def fake_download_caller(url: str, headers: dict, timeout_s: float) -> tuple:
+        if url == download_url:
+            return 302, {"location": "http://169.254.169.254/secret"}, b""
+        raise AssertionError(f"unexpected download URL {url}")
+
+    monkeypatch.setattr(mc, "_manyfold_download_caller", fake_download_caller)
+    dest = tmp_path / "out.stl"
+    with patch("socket.getaddrinfo", _private_getaddrinfo), pytest.raises(SSRFBlockedError):
+        mc.download_file(download_url, "tok", dest, max_bytes=1024)
+    assert not dest.exists()

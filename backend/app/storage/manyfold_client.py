@@ -57,7 +57,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import httpx
 
@@ -407,6 +407,29 @@ def resolve_creator(
     return {"name": str(name).strip(), "profile_url": profile_url}
 
 
+def _rewrite_to_base(base_url: str, url: str | None) -> str | None:
+    """Rewrite a Manyfold-serialized absolute URL onto the configured base_url origin.
+
+    Manyfold emits ``@id`` / ``contentUrl`` / ``preview_file`` using the
+    instance's *internal* base URL (e.g. ``http://localhost:3214`` when it runs
+    behind a reverse proxy), not the public origin we actually call. Every such
+    resource is served by the same instance, so we swap the scheme+host+port for
+    ``base_url``'s while keeping the path/query. Without this, file-detail and
+    download GETs hit the internal host and fail (and would be blocked by the
+    SSRF guard as localhost/private). The only legitimately cross-host hop is the
+    download-time 302 to object storage, which ``download_file`` handles.
+
+    Relative URLs are joined onto ``base_url``. ``None`` passes through.
+    """
+    if not url:
+        return url
+    b = urlparse(base_url)
+    u = urlparse(url)
+    if not u.netloc:  # relative — join onto base
+        return urljoin(base_url.rstrip("/") + "/", url.lstrip("/"))
+    return urlunparse((b.scheme, b.netloc, u.path, u.params, u.query, u.fragment))
+
+
 def fetch_model(
     base_url: str,
     model_id: str,
@@ -452,7 +475,7 @@ def fetch_model(
     creator_id: str | None = None
     creator_ref = data.get("creator")
     if isinstance(creator_ref, dict) and creator_ref.get("@id"):
-        creator_id = str(creator_ref["@id"])
+        creator_id = _rewrite_to_base(base_url, str(creator_ref["@id"]))
 
     links_raw = data.get("links")
     links: list[dict] = (  # type: ignore[type-arg]
@@ -464,7 +487,7 @@ def fetch_model(
     preview_ref = data.get("preview_file")
     preview_file_id: str | None = None
     if isinstance(preview_ref, dict) and preview_ref.get("@id"):
-        preview_file_id = str(preview_ref["@id"])
+        preview_file_id = _rewrite_to_base(base_url, str(preview_ref["@id"]))
 
     files: list[ManyfoldFile] = []
     has_part = data.get("hasPart")
@@ -472,7 +495,7 @@ def fetch_model(
         for part in has_part:
             if not isinstance(part, dict) or not part.get("@id"):
                 continue
-            file_id = str(part["@id"])
+            file_id = _rewrite_to_base(base_url, str(part["@id"]))
             part_name = str(part.get("name") or "")
             try:
                 detail = _json_get(file_id, token, timeout_s=timeout_s)
@@ -492,8 +515,9 @@ def fetch_model(
                     name=part_name,
                     filename=str(detail.get("filename") or part_name or file_id),
                     encoding_format=encoding_format,
-                    content_url=(
-                        str(detail["contentUrl"]) if detail.get("contentUrl") else None
+                    content_url=_rewrite_to_base(
+                        base_url,
+                        str(detail["contentUrl"]) if detail.get("contentUrl") else None,
                     ),
                     content_size=(
                         int(content_size) if isinstance(content_size, int | float) else None
@@ -536,13 +560,16 @@ def download_file(
 ) -> int:
     """Download a Manyfold file (image or 3D asset) to *dest_path*.
 
-    Follows redirects manually (never httpx's auto-follow) so every hop can be
-    re-validated with ``assert_safe_url`` — a ``contentUrl`` may 302 to an
-    object-storage host outside the admin-trusted instance, which is exactly
-    the SSRF surface ``guarded_fetch`` closes for the scrape path. The Bearer
-    token is sent on the initial request and on any redirect that stays on the
-    same host; it is dropped the moment a redirect crosses to a different
-    host, so it is never leaked to a third-party object-storage endpoint.
+    Follows redirects manually (never httpx's auto-follow) so any hop that
+    LEAVES the instance can be re-validated with ``assert_safe_url`` — a
+    ``contentUrl`` may 302 to an object-storage host outside the admin-trusted
+    instance, which is exactly the SSRF surface ``guarded_fetch`` closes for the
+    scrape path. The instance's own host is exempt (a self-hosted Manyfold may
+    resolve to a private/LAN IP), matching how the token/model JSON fetches
+    trust the configured ``base_url``. The Bearer token is sent on the initial
+    request and on any redirect that stays on the same host; it is dropped the
+    moment a redirect crosses to a different host, so it is never leaked to a
+    third-party object-storage endpoint.
 
     Enforces *max_bytes*, aborting before the full body is buffered.
 
@@ -560,8 +587,13 @@ def download_file(
     caller = _manyfold_download_caller
 
     for _hop in range(max_redirects + 1):
-        # SSRF re-guard on every hop, including the first.
-        assert_safe_url(current_url)
+        # The configured instance host is admin-trusted (exempt, exactly like the
+        # token/model JSON fetches and the FlareSolverr base_url) — a self-hosted
+        # Manyfold legitimately resolves to a private/LAN IP. Only SSRF-guard hops
+        # that LEAVE the instance (e.g. a 302 to object storage), whose target is
+        # attacker-influenceable.
+        if urlparse(current_url).netloc != original_host:
+            assert_safe_url(current_url)
 
         headers: dict[str, str] = {}
         if send_auth:
@@ -618,9 +650,11 @@ def download_file(
                     f"{sanitize_for_log(current_url)}"
                 )
             next_url = urljoin(current_url, location)
-            # Validate the hop target BEFORE following (belt-and-braces: the
-            # top of the next loop iteration re-checks it too).
-            assert_safe_url(next_url)
+            # Validate a cross-host hop target BEFORE following (belt-and-braces:
+            # the top of the next loop iteration re-checks it too). Same-host
+            # (trusted-instance) redirects are exempt, matching the loop top.
+            if urlparse(next_url).netloc != original_host:
+                assert_safe_url(next_url)
             send_auth = urlparse(next_url).netloc == original_host
             current_url = next_url
             continue
