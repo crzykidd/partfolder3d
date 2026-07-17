@@ -20,6 +20,15 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Added
+
+- **Manyfold instance configuration (admin) — Part 1 of 3.** Admins can register one or
+  more self-hosted Manyfold instances by URL and OAuth client credentials
+  (`client_id`/`client_secret`, Fernet-encrypted), and verify them with a
+  test-connection call that fetches a real OAuth token. This lays the groundwork for
+  importing a model straight from a Manyfold URL (connector + frontend land in Parts 2
+  and 3). No user-facing UI yet — admin API only (`/api/admin/manyfold`).
+
 ### Fixed
 
 - **The post-upgrade "What's New" popup was empty for v0.5.0 and v0.5.1.** The modal

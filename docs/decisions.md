@@ -2,6 +2,48 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-17 — Manyfold connector Part 1: base_url/domain split, secret masking, id-keyed CRUD
+
+**Context:** Building admin config for Manyfold instances (self-hosted, OAuth2
+`client_credentials` API) — Part 1 of 3 (config + admin API only; connector/worker in
+Part 2, frontend in Part 3). Two existing admin-CRUD patterns were candidates to mirror:
+`site_capabilities.py` (domain-keyed, single row per domain, PK = domain) and
+`ai_providers.py` (id-keyed, multiple rows, `has_key: bool` secret masking).
+
+**Decisions:**
+
+- **Id-keyed CRUD (mirrors `ai_providers.py`), not domain-keyed.** An admin registers
+  potentially several Manyfold instances; `id` is the primary key and `domain` is a
+  separate unique-indexed column, not the PK. This matches the prompt's explicit route
+  shape (`GET/PATCH/DELETE /{id}`) and leaves room for a future instance rename/base_url
+  change without an awkward PK rewrite (`site_capabilities.py`'s domain-as-PK would force
+  exactly that on a base_url change).
+- **`base_url` (full origin, used for API calls) vs. `domain` (host-only, unique, used to
+  match an import URL → instance in Part 2) are separate columns, `domain` derived from
+  `base_url` on every write.** Normalization: lowercase host, require `http`/`https`
+  scheme, strip a trailing path slash. `domain` intentionally excludes the port so two
+  instances can't silently collide on `example.com` vs `example.com:8080` without an
+  explicit decision — deferred; not needed for Part 1's single-current-deployment case,
+  revisit if a port-differentiated setup is requested.
+- **Secret masking follows the `ai_providers.py` `has_key` convention** (`has_secret:
+  bool` here) rather than `site_capabilities.py`'s separate-token-table shape — a single
+  `client_secret_enc` column on the same row is simpler and there's exactly one secret
+  per instance (no multi-token-per-domain need).
+- **`client_id` is stored plaintext** (it's a public OAuth identifier, not a secret,
+  matching Manyfold's own `/oauth/applications` UI which treats it as non-sensitive);
+  only `client_secret` is Fernet-encrypted via `app.crypto`.
+- **`manyfold_client.py`'s HTTP call is behind a `_manyfold_token_caller` seam that
+  returns `(status_code, json_body)`** rather than a `ScrapeResult`-shaped return (the
+  `flaresolverr_client.py`/`agentql_client.py` convention) — this module does a single
+  OAuth token request/response, not a best-effort scrape, so callers (the test-connection
+  endpoint) want a typed exception (`ManyfoldAuthError`/`ManyfoldScopeError`/
+  `ManyfoldConnectionError`) they can branch on, not a result object with a `blocked`
+  flag.
+- **`base_url` is NOT SSRF-guarded** — it's admin-trusted config (entered via the admin
+  API, not derived from a scraped/user-supplied import URL), mirroring FlareSolverr's
+  configured `base_url` exemption. Part 2 will need to SSRF-guard the file-download path
+  separately, since a Manyfold response could contain a redirect to an internal host.
+
 ## 2026-07-05 — "Print asset" role-set for has_asset flag and catalog filter
 
 **Context:** The catalog "has print asset" filter (#28) needs a precise definition of which
