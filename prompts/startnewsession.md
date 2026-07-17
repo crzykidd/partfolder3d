@@ -6,10 +6,9 @@ It is NOT a full reference: durable rules live in `CLAUDE.md`, the module map + 
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
 "Current state" + "Next phases" before every `/clear`.
 
-**Last updated:** 2026-07-17 (v0.5.1 released 2026-07-05; owner rebooting host) — `dev` is
-**one commit ahead of `main`** (What's-New-modal fix, queued for next release). **Open thread:
-prod MakerWorld imports missing creator info** — diagnosis points at the AgentQL fallback;
-awaiting prod-side evidence from owner (see below).
+**Last updated:** 2026-07-17 (v0.5.1 released 2026-07-05) — `dev` is
+**one commit ahead of `main`** (What's-New-modal fix, queued for next release). **MakerWorld
+creator thread RESOLVED** — root cause was a prod-side AgentQL misconfiguration; fixed by owner.
 
 ## Current state
 
@@ -24,15 +23,11 @@ awaiting prod-side evidence from owner (see below).
   (does NOT parse the changelog); entries added + `/release-prep` gained **Step 4b** so every
   release adds one. (One cosmetic edit to the command's commit template was permission-blocked;
   substantive fix landed.)
-- **OPEN DIAGNOSIS — prod MakerWorld imports missing creator/tags:** verified from this host
-  that the FlareSolverr path (shared `https://flaresolverr.crzynet.com/`) extracts creator +
-  profile + tags + gallery correctly (repro script hit a live model page through the repo
-  pipeline). The **AgentQL fallback returns NO creator by design** (query is only
-  `{ title description images[] }`). Suspicion: prod scrapes are landing on AgentQL. Waiting on
-  owner to check prod: Admin → Site Capabilities usage rows (provider per URL), FlareSolverr
-  card enabled/priority/Test-connection, and `docker logs partfolder3d-worker | grep
-  flaresolverr` for the failure reason. **Candidate issue to file:** extend the AgentQL query
-  with creator fields so the fallback isn't creator-blind.
+- **RESOLVED — prod MakerWorld imports missing creator/tags:** root cause was a prod-side
+  AgentQL misconfiguration (not a code bug); owner corrected the config and imports now pull
+  creator info. No code change needed. (Latent candidate, low priority: the AgentQL fallback
+  query is still creator-blind by design — `{ title description images[] }` — so extending it
+  with creator fields would harden the fallback, but it's no longer the active problem.)
 - **Prod deploy facts** (compose in `~/projects/docker-compose/apps/partfolder3d/` on this
   host, deployed elsewhere via Komodo): `:latest` images, Traefik ingress
   (`partfolder3d.crzynet.com`), NFS library, `user: 2000:66000`, worker capped
@@ -44,13 +39,13 @@ awaiting prod-side evidence from owner (see below).
 
 ## Next phases (roadmap)
 
-- **Resolve the MakerWorld-creator thread** (above) once owner reports prod evidence.
 - **Bulk move-assets UI** (#25 follow-up) — last Phase 2 item. Backend bulk endpoint live +
   tested; catalog needs a **multi-select** affordance (real UX decision — discuss with owner
   before building).
-- **Issue tracker is EMPTY** (everything through #31 closed). Unfiled candidates: AgentQL
-  creator-fields query (above); opportunistic auto-fetch of model files on the scraper
-  framework (login-gated on Printables/MakerWorld — deferred from #27).
+- **Issue tracker is EMPTY** (everything through #31 closed). Unfiled candidates: harden the
+  creator-blind AgentQL fallback query (low priority — see RESOLVED note above); opportunistic
+  auto-fetch of model files on the scraper framework (login-gated on Printables/MakerWorld —
+  deferred from #27).
 - Next release = `/release-prep <next>` when a batch is ready (What's-New fix already queued).
   Standing gotchas: CodeQL on big diffs surfaces pre-existing alerts (`sanitize_for_log` real
   ones; dismiss path-injection FPs with existing `resolve()`+`is_relative_to()` barriers);
@@ -74,7 +69,8 @@ awaiting prod-side evidence from owner (see below).
 
 ## Backlog (themes — `gh issue list` is the source of truth for what we build **now**, not the PRD)
 
-- **Tracker is empty.** Candidates to file: AgentQL creator fields; auto-fetch model files.
+- **Tracker is empty.** Candidates to file: harden creator-blind AgentQL fallback (low pri);
+  auto-fetch model files.
 - **Needs owner decision:** bulk-move multi-select UX.
 - Older PRD §18 notes: real slicing for filament estimates, trash-purge UI, `.bgcode`/multi-filament gcode.
 
