@@ -5,21 +5,24 @@
 import { Fragment } from 'react'
 import { Check } from 'lucide-react'
 import {
-  WIZARD_STEPS,
   STEP_LABELS,
   type WizardStep,
   stepIndex,
+  visibleSteps,
 } from '@/lib/import-utils'
 
 interface StepProgressProps {
   current: WizardStep
+  /** Whether the session has staged files — shows the 'assets' step when true. */
+  hasFiles?: boolean
 }
 
-export function StepProgress({ current }: StepProgressProps) {
-  const idx = stepIndex(current)
+export function StepProgress({ current, hasFiles = false }: StepProgressProps) {
+  const steps = visibleSteps(hasFiles)
+  const idx = stepIndex(current, hasFiles)
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', width: '100%' }}>
-      {WIZARD_STEPS.map((step, i) => (
+      {steps.map((step, i) => (
         <Fragment key={step}>
           {/* Step column */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
@@ -65,7 +68,7 @@ export function StepProgress({ current }: StepProgressProps) {
           </div>
 
           {/* Connector */}
-          {i < WIZARD_STEPS.length - 1 && (
+          {i < steps.length - 1 && (
             <div
               style={{
                 flex: 1,

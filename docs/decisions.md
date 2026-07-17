@@ -2,6 +2,45 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-17 — Manyfold connector Part 3: admin page placement, conditional Assets step
+
+**Context:** Wiring up the frontend for the Manyfold connector — an admin screen to
+register/enable instances (Part 1 backend) and an import-wizard affordance to review
+pulled 3D files (Part 2 backend). Final part of 3.
+
+- **Manyfold instances got their own sibling admin page (`ManyfoldPage.tsx` at
+  `/admin/ai/manyfold`), not a section bolted onto `SiteCapabilitiesPage.tsx`.**
+  `SiteCapabilitiesPage`'s "Scrapers" section is a fixed pair of named backends
+  (FlareSolverr, AgentQL) rendered as collapsible cards with drag-to-reorder — that
+  shape doesn't fit a variable-length list of admin-created instances with their own
+  id-keyed CRUD (add/edit/rotate-secret/delete). `AiProvidersPage.tsx` (multiple named
+  AI provider configs, each with a write-only credential) is the closer structural
+  analog, so `ManyfoldPage` mirrors its table-row + inline-add-form + inline-edit-panel
+  pattern instead. It was added as a 4th tab in the existing "AI & Scraping" section
+  (`AI_TABS` in `App.tsx`) rather than a new top-level admin section, matching where an
+  admin would already look for AI-adjacent scraping config.
+- **The wizard's Assets step is conditional on `session.files.length > 0`, not always
+  shown.** The prior wizard step sequence (`WIZARD_STEPS` in `import-utils.ts`) was a
+  fixed 5-step array driving `nextStep`/`prevStep`/`stepIndex`/`isFirstStep`/
+  `isLastStep`/`StepProgress` by array position. Rather than special-casing "skip if
+  session has no files" inline at each call site, `WIZARD_STEPS` grew a 6th step
+  (`'assets'`, placed before `'summary'`) and every navigation helper took an optional
+  `hasFiles` param (default `false`) that filters it out via a new `visibleSteps()`
+  helper. Defaulting to `false` means every pre-existing single-argument call site
+  (and test) keeps the old 5-step behavior unchanged — only `ImportWizardPage.tsx`
+  (which now computes `hasFiles = session.files.length > 0` and threads it through)
+  and `StepProgress` (new optional `hasFiles` prop) opt into showing the step. This
+  keeps the step visible for *any* session with staged files, not just Manyfold
+  pulls — a plain multi-file upload benefits too, per the handoff prompt's "so it also
+  benefits plain uploads" requirement.
+- **`SummaryStep`'s Files row shows the plain `"N file(s)"` text when every staged file
+  is still selected (the default), and only switches to `"N of M file(s) selected"`
+  once something has been deselected.** This keeps every pre-existing test assertion
+  on that literal text passing unchanged (backward compatible) while still surfacing
+  the selection state once it diverges from "everything selected." A file with zero
+  selected files (all deselected) gets an additional warn note that the commit will be
+  metadata-only, mirroring the existing zero-files note.
+
 ## 2026-07-17 — Manyfold connector Part 2: primary-path bypass, redirect-auth posture, error/edge behavior
 
 **Context:** Building the connector (API client + worker import path + asset download) —

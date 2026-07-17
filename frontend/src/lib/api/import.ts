@@ -10,6 +10,8 @@ export interface ImportSessionFile {
   original_name: string
   role: string
   size: number
+  /** Whether this staged file is moved into the item on commit (defaults true server-side). */
+  selected: boolean
 }
 
 export interface ImportSessionImage {
@@ -235,6 +237,21 @@ export const deleteSessionFile = (
 ): Promise<ImportSession> =>
   apiFetch<ImportSession>(`/api/import-sessions/${sessionId}/files/${fileId}`, {
     method: 'DELETE',
+  })
+
+/**
+ * Toggle whether a staged file is moved into the item on commit (Manyfold
+ * Part 3 — wizard Assets step). Deselecting keeps the staged bytes but skips
+ * them at commit time; contrast with deleteSessionFile, which removes them.
+ */
+export const patchSessionFileSelection = (
+  sessionId: string,
+  fileId: number,
+  selected: boolean,
+): Promise<ImportSession> =>
+  apiFetch<ImportSession>(`/api/import-sessions/${sessionId}/files/${fileId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ selected }),
   })
 
 export const listSiteCapabilities = (): Promise<SiteCapability[]> =>

@@ -34,6 +34,7 @@ import { TitleStep } from './import-wizard/TitleStep'
 import { ImagesStep } from './import-wizard/ImagesStep'
 import { TagsStep } from './import-wizard/TagsStep'
 import { CreatorStep } from './import-wizard/CreatorStep'
+import { AssetsStep } from './import-wizard/AssetsStep'
 import { SummaryStep } from './import-wizard/SummaryStep'
 
 export function ImportWizardPage() {
@@ -156,6 +157,9 @@ export function ImportWizardPage() {
 
   const editable = isEditable(session.status)
   const processing = isProcessing(session.status)
+  // The Assets (file-selection) step only appears when there are staged files
+  // to choose from — benefits any session with files, not just Manyfold imports.
+  const hasFiles = session.files.length > 0
 
   return (
     <div
@@ -284,41 +288,48 @@ export function ImportWizardPage() {
         <div style={{ ...AURORA_CARD, padding: '28px 24px' }}>
           {/* Stepper */}
           <div style={{ marginBottom: 28 }}>
-            <StepProgress current={step} />
+            <StepProgress current={step} hasFiles={hasFiles} />
           </div>
 
           {/* Step content */}
           {step === 'title' && (
             <TitleStep
               session={session}
-              onNext={() => setStep(nextStep(step))}
+              onNext={() => setStep(nextStep(step, hasFiles))}
             />
           )}
           {step === 'images' && (
             <ImagesStep
               session={session}
-              onNext={() => setStep(nextStep(step))}
-              onPrev={() => setStep(prevStep(step))}
+              onNext={() => setStep(nextStep(step, hasFiles))}
+              onPrev={() => setStep(prevStep(step, hasFiles))}
             />
           )}
           {step === 'tags' && (
             <TagsStep
               session={session}
-              onNext={() => setStep(nextStep(step))}
-              onPrev={() => setStep(prevStep(step))}
+              onNext={() => setStep(nextStep(step, hasFiles))}
+              onPrev={() => setStep(prevStep(step, hasFiles))}
             />
           )}
           {step === 'creator' && (
             <CreatorStep
               session={session}
-              onNext={() => setStep(nextStep(step))}
-              onPrev={() => setStep(prevStep(step))}
+              onNext={() => setStep(nextStep(step, hasFiles))}
+              onPrev={() => setStep(prevStep(step, hasFiles))}
+            />
+          )}
+          {step === 'assets' && (
+            <AssetsStep
+              session={session}
+              onNext={() => setStep(nextStep(step, hasFiles))}
+              onPrev={() => setStep(prevStep(step, hasFiles))}
             />
           )}
           {step === 'summary' && (
             <SummaryStep
               session={session}
-              onPrev={() => setStep(prevStep(step))}
+              onPrev={() => setStep(prevStep(step, hasFiles))}
               onCancelled={() => {}}
             />
           )}

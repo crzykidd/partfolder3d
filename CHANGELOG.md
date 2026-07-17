@@ -37,6 +37,15 @@ prefix appears only on git tags and GitHub releases.
   deselected in the wizard (`PATCH /api/import-sessions/{id}/files/{file_id}`) before
   committing, so a model with several file variants doesn't force all of them into the
   item. Frontend UI lands in Part 3.
+- **Admin UI to configure Manyfold instances; import wizard lets you review/deselect
+  pulled 3D files.** Part 3 of 3 (final): a new **Manyfold** admin screen
+  (Admin → AI & Scraping → Manyfold) lists configured instances and lets you add one
+  (base URL, display name, OAuth client ID/secret, scopes), rotate the secret, toggle
+  enabled, test the connection, and delete — the secret is write-only and never
+  rendered back. The import wizard gains an **Assets** step, shown whenever a session
+  has staged files (Manyfold pulls or plain multi-file uploads alike): each file is
+  listed with its role and size, checked by default, and can be deselected without
+  deleting it; the Summary step's file count reflects the selection.
 
 ### Fixed
 
