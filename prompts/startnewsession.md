@@ -6,9 +6,11 @@ It is NOT a full reference: durable rules live in `CLAUDE.md`, the module map + 
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
 "Current state" + "Next phases" before every `/clear`.
 
-**Last updated:** 2026-07-17 (v0.5.1 released 2026-07-05) — `dev` is
-**one commit ahead of `main`** (What's-New-modal fix, queued for next release). **MakerWorld
-creator thread RESOLVED** — root cause was a prod-side AgentQL misconfiguration; fixed by owner.
+**Last updated:** 2026-07-17 (v0.5.1 released 2026-07-05) — `dev` is **several commits ahead of
+`main`** (What's-New-modal fix + the whole **Manyfold connector** feature, all queued for the next
+release). **MakerWorld creator thread RESOLVED** (prod-side AgentQL misconfig, fixed by owner).
+**Manyfold connector shipped to `dev`** (Parts 1–3 + a live-test fix) and validated end-to-end
+against the real `manyfold.crzynet.com` instance — see Current state.
 
 ## Current state
 
@@ -18,11 +20,30 @@ creator thread RESOLVED** — root cause was a prod-side AgentQL misconfiguratio
     CSP → looked fine). This was the "prod doesn't show images" bug.
   - **Side-nav user-menu z-order fix** (dropdown rendered behind stat strip / widget rail —
     backdrop-filter stacking-context trap; header got explicit `position:relative; z-index`).
+- **Manyfold connector — SHIPPED to `dev` (unreleased), full feature, live-validated.** Import a
+  model straight from a self-hosted **Manyfold** URL via its OAuth2 (`client_credentials`) JSON-LD
+  API — a *primary authenticated* source, NOT a scraper (it bypasses the scrape/fallback chain and
+  downloads real 3D files). Four commits: **Part 1** admin config (`ManyfoldInstance`, migration
+  `0023`, `/api/admin/manyfold` CRUD + test-connection, secret Fernet-encrypted & write-only);
+  **Part 2** connector (`storage/manyfold_client.py`) + worker branch `_maybe_manyfold_import`
+  (domain match → OAuth → fetch model → download all images + 3D files into staging → reconcile all
+  tags), migration `0024` adds `import_session_files.selected` (commit skips deselected);
+  **Part 3** admin UI (`/admin/ai/manyfold` tab, mirrors `AiProvidersPage`) + wizard **Assets step**
+  (files checked by default, deselectable); **a fix** from live-testing — rewrite Manyfold's
+  internal-host `@id`/`contentUrl` onto the configured `base_url`, and scope the download SSRF guard
+  so the trusted instance host (may be a private/LAN IP) is exempt while cross-host redirects are
+  still guarded. `make verify` green (849 backend / 425 frontend). **Live full-stack import
+  succeeded** (`.../models/4jlf2g117t4p` → pending_wizard with 2 images + the 37.9 MB `.3mf`). NOTE:
+  the dev DB has a **pre-registered instance** (`manyfold.crzynet.com`, display "Live test",
+  enabled, real creds encrypted) + a demo `pending_wizard` session `a017b561-…` left in place so the
+  owner can view it in the UI; delete either if starting a clean UI add-flow. Classification nuance:
+  a `video/mp4` model asset stages as a `role="model"` file (deselectable) — fine, not a bug.
 - **Queued on `dev` (unreleased, commit 63c55a4):** the post-upgrade **"What's New" modal was
   empty for 0.5.0/0.5.1** — it reads a curated map in `frontend/src/lib/releaseNotes.ts`
   (does NOT parse the changelog); entries added + `/release-prep` gained **Step 4b** so every
   release adds one. (One cosmetic edit to the command's commit template was permission-blocked;
-  substantive fix landed.)
+  substantive fix landed.) **Reminder: the Manyfold What's-New entry still needs adding at release
+  time** (Step 4b).
 - **RESOLVED — prod MakerWorld imports missing creator/tags:** root cause was a prod-side
   AgentQL misconfiguration (not a code bug); owner corrected the config and imports now pull
   creator info. No code change needed. (Latent candidate, low priority: the AgentQL fallback
