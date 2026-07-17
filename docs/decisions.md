@@ -2,6 +2,90 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-17 — Manyfold connector Part 2: primary-path bypass, redirect-auth posture, error/edge behavior
+
+**Context:** Building the connector (API client + worker import path + asset download) —
+Part 2 of 3 (config/admin API landed in Part 1; frontend is Part 3). When an import URL's
+domain matches an admin-registered `ManyfoldInstance`, the worker should pull the model
+straight from Manyfold's OAuth API instead of running the generic HTML scraper.
+
+**Decisions:**
+
+- **Manyfold is a *primary* path that fully bypasses `scrape_url` and the fallback chain
+  (FlareSolverr/AgentQL), not an additional fallback tried after them.** Manyfold's model
+  pages are an authenticated SPA (no public OG tags), so a scrape attempt there would
+  never yield anything — trying it first (or as a fallback) would just burn a scrape/
+  fallback-backend budget call for a guaranteed-empty result. `_maybe_manyfold_import` is
+  called at the very top of `process_import_session`'s `if session.source_url:` block; a
+  `True` return short-circuits with an immediate `db.commit()` + `return`, before
+  `extract_domain`/`SiteCapability`/`scrape_url` ever run.
+- **Not-a-model-URL (domain matches an instance, but the path isn't `/models/{id}`) lands
+  in `pending_wizard` with a clear note, not `failed`.** Nothing actually went wrong here
+  — the user just pasted a collection/profile link — so it's treated like a "blocked"
+  static-scrape result (manual entry available), not an error state.
+- **Any real Manyfold API failure (missing/undecryptable secret, auth/network/parse error
+  from `fetch_model`) sets the session to `failed`, not `pending_wizard`, and does NOT
+  fall through to a generic scrape.** A scrape would be doomed for the same SPA reason as
+  above, so falling through would just trade one empty result for a slower one; `failed`
+  with a clear `scrape_note`/`error` is more honest about what happened.
+- **A single file/image whose download fails (broken link, or an SSRF-blocked redirect)
+  is skipped, not treated as a whole-import failure** — mirrors how the commit-time
+  scraped-image downloader already treats a bad image URL as best-effort. The two
+  per-file `download_file` calls in `_maybe_manyfold_import` catch both
+  `ManyfoldError` and `SSRFBlockedError` and `continue`; only a failure in the model
+  metadata fetch itself (`fetch_model`) is a whole-import failure.
+- **`download_file` drops the `Authorization: Bearer` token the moment a redirect
+  crosses to a different host.** Manyfold's `contentUrl` can 302 to an object-storage
+  host (e.g. S3/MinIO) that authenticates via its own presigned-URL query params, not a
+  Bearer token — sending Manyfold's OAuth token to that third party would leak it
+  needlessly. Every hop (including the first) is re-validated with `assert_safe_url`
+  before it's followed, exactly mirroring `guarded_fetch`'s SSRF posture for the scrape
+  path; the residual DNS-rebinding TOCTOU caveat already recorded for `guarded_fetch`
+  applies here identically (not re-litigated).
+- **No existing generic "max file size to download" setting existed to reuse** —
+  `SCRAPE_IMAGE_MAX_MB` is image-only. Added `MANYFOLD_FILE_MAX_MB` (default 2048,
+  matching `ZIP_MAX_UNCOMPRESSED_MB`'s scale since model archives can be large) rather
+  than inventing a smaller/unrelated cap or leaving 3D-file downloads unbounded.
+- **Session fields are populated the same way the static-scrape path does: plain
+  `creator_name`/`creator_profile_url`/`creator_source_site` strings, not an eager
+  `_ensure_creator(...)` call that materializes a `Creator` row during processing.**
+  Creator FK resolution stays a commit-time-only concern (`_commit_session_inner` step
+  1) across every import source, so the wizard can still let the user edit or override
+  the creator before any `Creator` row exists. (The prompt's "creator (via
+  `_ensure_creator`...)" phrasing was read as "reuse the codebase's creator-resolution
+  building blocks," not as a literal instruction to duplicate commit-time creator
+  creation into the worker — the overriding instruction was "populate the session the
+  SAME way the static-scrape path does," which never calls `_ensure_creator` either.)
+- **`default_image_path` honors Manyfold's own `preview_file` designation** (the
+  downloaded image whose file `@id` matches `model.preview_file_id` is marked
+  `is_default=True` and its staged path is written to `session.default_image_path`)
+  rather than defaulting to image order 0 like the static-scrape path (which has no
+  equivalent "this is the cover image" signal from the source site). Falls back to the
+  first successfully staged image if the designated preview image failed to download.
+- **`hasPart[].encodingFormat` starting with `image/` classifies a file as an image;
+  everything else (`model/stl`, `model/3mf`, `application/*`, ...) is staged as an
+  `ImportSessionFile` with `role="model"`.** No allowlist of 3D formats is maintained —
+  Manyfold's own MIME classification is trusted as-is, consistent with the API doc's
+  "build defensively, tolerate missing keys" guidance (an unrecognized non-image MIME
+  type still lands as a downloadable model file rather than being silently dropped).
+- **`ImportSessionFile.selected` (migration 0024) is a session-wide per-file commit
+  toggle, not Manyfold-specific**, even though Manyfold multi-file staging is what
+  motivated it — a model import can stage several file variants (e.g. a presupported
+  and a non-presupported STL) and the user picks which land in the item. Defaults `True`
+  so every pre-existing staged-file flow (plain upload, inbox) is unaffected until a
+  user explicitly deselects something via the new
+  `PATCH /api/import-sessions/{id}/files/{file_id}` endpoint. `_commit_session_inner`
+  skips `selected=False` rows when moving files into the item dir but leaves their
+  bytes in staging untouched (the staging dir is still fully removed at the end of
+  commit regardless, as it already was for every import type — deselecting a file
+  means "don't put this in the item," not "keep it around after commit").
+- **Fixed a latent bug found while wiring up local Manyfold-staged images**: the
+  commit-time image loop's `is_url=False` branch only ever mapped `source == "capture"`
+  to `ImageSource.captured`, with every other local-image `source` value (including the
+  pre-existing `"scrape"` value used by nothing until now) falling through to
+  `ImageSource.uploaded`. A Manyfold-downloaded image is `source="scrape"`, so it now
+  correctly maps to `ImageSource.scraped`.
+
 ## 2026-07-17 — Manyfold connector Part 1: base_url/domain split, secret masking, id-keyed CRUD
 
 **Context:** Building admin config for Manyfold instances (self-hosted, OAuth2

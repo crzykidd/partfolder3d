@@ -54,6 +54,7 @@ from .schemas import (
     CreateSessionRequest,
     ImportSessionOut,
     PaginatedSessions,
+    PatchFileSelectionRequest,
     PatchSessionRequest,
 )
 
@@ -362,6 +363,74 @@ async def delete_session_file(
                 "delete_session_file: could not remove staged file %s", staged_path
             )
 
+    session.updated_at = datetime.now(UTC)
+    await db.flush()
+
+    session_id_pk = session.id
+    db.expire(session, ["files", "images"])
+
+    from sqlalchemy.orm import selectinload  # noqa: PLC0415
+
+    result = await db.execute(
+        select(ImportSession)
+        .options(
+            selectinload(ImportSession.files),
+            selectinload(ImportSession.images),
+        )
+        .where(ImportSession.id == session_id_pk)
+    )
+    return _session_out(result.scalar_one())
+
+
+@router.patch(
+    "/api/import-sessions/{session_id}/files/{file_id}",
+    response_model=ImportSessionOut,
+    status_code=status.HTTP_200_OK,
+)
+async def patch_session_file_selection(
+    session_id: str,
+    file_id: int,
+    body: PatchFileSelectionRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ImportSessionOut:
+    """Toggle whether a staged file is moved into the item on commit.
+
+    A Manyfold model import (Part 2) can stage several 3D files at once (e.g.
+    multiple print-ready variants); this lets the user deselect ones they
+    don't want without deleting the staged bytes (contrast with DELETE, which
+    removes the row and the file). Deselected files (``selected=False``) are
+    skipped by ``_commit_session_inner`` and their bytes are left behind when
+    the staging dir is cleaned up at commit.
+
+    Allowed in 'draft' or 'pending_wizard' status only.
+    Returns 404 if the file_id doesn't belong to this session.
+    """
+    session = await _load_session(session_id, db, user)
+
+    if session.status not in (ImportSessionStatus.draft, ImportSessionStatus.pending_wizard):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Cannot change file selection on a session in status '{session.status}'."
+            ),
+        )
+
+    sf_result = await db.execute(
+        select(ImportSessionFile).where(
+            ImportSessionFile.id == file_id,
+            ImportSessionFile.session_id == session.id,
+        )
+    )
+    sf = sf_result.scalar_one_or_none()
+    if sf is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found in this session.",
+        )
+
+    sf.selected = body.selected
     session.updated_at = datetime.now(UTC)
     await db.flush()
 

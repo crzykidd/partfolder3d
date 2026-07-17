@@ -182,6 +182,11 @@ class ImportSessionFile(Base):
     original_name: Mapped[str] = mapped_column(String(512), nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False, default="model")
     size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Whether this staged file should be moved into the item on commit.
+    # Defaults True so pre-existing behavior (every staged file lands in the
+    # item) is unchanged; a Manyfold model import can stage several files at
+    # once and the wizard lets the user deselect ones they don't want.
+    selected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     session: Mapped["ImportSession"] = relationship(
         "ImportSession", back_populates="files"

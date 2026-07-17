@@ -28,6 +28,15 @@ prefix appears only on git tags and GitHub releases.
   test-connection call that fetches a real OAuth token. This lays the groundwork for
   importing a model straight from a Manyfold URL (connector + frontend land in Parts 2
   and 3). No user-facing UI yet — admin API only (`/api/admin/manyfold`).
+- **Import a model directly from a configured Manyfold instance — pulls metadata, tags,
+  images, and 3D files into the wizard.** Part 2 of 3: when an import URL's domain
+  matches an enabled Manyfold instance, the import worker fetches the model straight from
+  Manyfold's OAuth API instead of scraping the page — title, description, license,
+  creator, and every keyword tag are pre-filled, and every image and 3D file is
+  downloaded into the session for review. Staged files can now be individually
+  deselected in the wizard (`PATCH /api/import-sessions/{id}/files/{file_id}`) before
+  committing, so a model with several file variants doesn't force all of them into the
+  item. Frontend UI lands in Part 3.
 
 ### Fixed
 

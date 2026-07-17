@@ -65,6 +65,7 @@ def _session_out(
                 original_name=f.original_name,
                 role=f.role,
                 size=f.size,
+                selected=f.selected,
             )
             for f in (session.files or [])
         ],

@@ -327,6 +327,241 @@ async def _try_fallback_scrapers(
     return last_result, ""
 
 
+async def _maybe_manyfold_import(session: object, url: str, db: object) -> bool:
+    """Import a model straight from a configured Manyfold instance (Part 2 of 3).
+
+    Checks whether *url*'s domain matches an enabled ``ManyfoldInstance``. If
+    not, returns False and the caller falls through to the normal scrape path
+    unchanged. If it matches, this function fully handles the session — sets
+    title/description/creator/tags/images/files, a ``scrape_note``, and a
+    terminal ``session.status`` — and returns True. The caller MUST skip
+    ``scrape_url`` and the fallback chain whenever this returns True; a
+    Manyfold model page is an authenticated SPA, not public OG-tagged HTML, so
+    a scrape attempt there would never succeed.
+
+    Never raises: every Manyfold-specific failure (no matching instance is not
+    a failure at all; missing/undecryptable secret; auth/network/parse error
+    from the API) is caught and turned into a session.scrape_note + a
+    ScraperUsage(provider="manyfold", success=False) row.
+    """
+    from pathlib import Path  # noqa: PLC0415
+
+    import sqlalchemy as sa  # noqa: PLC0415
+
+    from app.config import settings as _settings  # noqa: PLC0415
+    from app.crypto import InvalidToken, decrypt  # noqa: PLC0415
+    from app.models.import_session import (  # noqa: PLC0415
+        ImportSessionFile,
+        ImportSessionImage,
+        ImportSessionStatus,
+    )
+    from app.models.manyfold import ManyfoldInstance  # noqa: PLC0415
+    from app.models.scraper_usage import ScraperUsage  # noqa: PLC0415
+    from app.storage import manyfold_client as mc  # noqa: PLC0415
+    from app.storage.scraper import extract_domain  # noqa: PLC0415
+    from app.storage.ssrf_guard import SSRFBlockedError, sanitize_for_log  # noqa: PLC0415
+
+    _su = sanitize_for_log(url)
+    domain = extract_domain(url)
+
+    inst_result = await db.execute(  # type: ignore[union-attr]
+        sa.select(ManyfoldInstance).where(
+            ManyfoldInstance.domain == domain,
+            ManyfoldInstance.enabled.is_(True),
+        )
+    )
+    instance = inst_result.scalar_one_or_none()
+    if instance is None:
+        return False
+
+    model_id = mc.parse_model_id(url)
+    if model_id is None:
+        # Domain matches a configured instance but this isn't a model URL
+        # (e.g. a collection/profile page). Decision (docs/decisions.md): treat
+        # this like a "blocked" static-scrape result — land the session in
+        # pending_wizard for manual entry rather than 'failed', since nothing
+        # actually went wrong; the user just pasted the wrong kind of link.
+        session.scrape_note = (
+            "Manyfold instance recognized but this isn't a model URL "
+            "(expected .../models/<id>) — enter details manually."
+        )
+        session.status = ImportSessionStatus.pending_wizard
+        log.info(
+            "_maybe_manyfold_import: %s matched instance %s but is not a model URL",
+            _su, domain,
+        )
+        return True
+
+    if not instance.client_secret_enc:
+        session.error = "Manyfold instance has no client secret configured."
+        session.scrape_note = session.error
+        session.status = ImportSessionStatus.failed
+        db.add(ScraperUsage(provider="manyfold", source_url=url, success=False))  # type: ignore[union-attr]
+        return True
+
+    try:
+        secret = decrypt(instance.client_secret_enc)
+    except InvalidToken:
+        session.error = "Manyfold client secret could not be decrypted."
+        session.scrape_note = session.error
+        session.status = ImportSessionStatus.failed
+        db.add(ScraperUsage(provider="manyfold", source_url=url, success=False))  # type: ignore[union-attr]
+        return True
+
+    try:
+        try:
+            token = mc.get_cached_access_token(
+                instance.id, instance.base_url, instance.client_id, secret,
+                scopes=instance.scopes,
+            )
+            model = mc.fetch_model(instance.base_url, model_id, token)
+        except mc.ManyfoldAuthError:
+            # Cached token was rejected (e.g. revoked server-side) — refetch
+            # once and retry before giving up.
+            token = mc.get_cached_access_token(
+                instance.id, instance.base_url, instance.client_id, secret,
+                scopes=instance.scopes, force_refresh=True,
+            )
+            model = mc.fetch_model(instance.base_url, model_id, token)
+    except mc.ManyfoldError as exc:
+        log.warning("_maybe_manyfold_import: fetch failed for %s: %s", _su, exc)
+        session.error = f"Manyfold import failed: {exc}"
+        session.scrape_note = str(exc)
+        session.status = ImportSessionStatus.failed
+        db.add(ScraperUsage(provider="manyfold", source_url=url, success=False))  # type: ignore[union-attr]
+        return True
+
+    # ---- Populate session fields the same way the static-scrape path does
+    # (session.creator_name/profile_url as plain strings — Creator FK
+    # resolution stays a commit-time-only concern via _ensure_creator so the
+    # wizard can still let the user edit/override the creator before any
+    # Creator row exists; see docs/decisions.md). ----
+    if not session.suggested_title:
+        session.suggested_title = model.title
+    if not session.confirmed_title:
+        session.confirmed_title = model.title
+    if not session.description:
+        session.description = model.caption or model.description
+    if not session.source_site:
+        session.source_site = domain
+    if not session.license and model.license_id:
+        session.license = model.license_id
+    if model.creator_name and not session.creator_name:
+        session.creator_name = model.creator_name
+        session.creator_profile_url = model.creator_profile_url
+        session.creator_source_site = domain
+
+    from app.routers.import_sessions import reconcile_tags  # noqa: PLC0415
+
+    session.tag_state = (
+        await reconcile_tags(db, model.tags) if model.tags else {"confirmed": [], "pending": []}  # type: ignore[arg-type]
+    )
+
+    # ---- Ensure the session has a staging dir (lazy-create, same pattern as
+    # the upload-file endpoint's lazy init for URL sessions). ----
+    if not session.staging_dir:
+        from uuid import uuid4  # noqa: PLC0415
+
+        from app.routers.import_sessions.helpers import _get_staging_dir  # noqa: PLC0415
+
+        staging_path = _get_staging_dir() / str(uuid4())
+        staging_path.mkdir(parents=True, exist_ok=True)
+        session.staging_dir = str(staging_path)
+    staging_dir = Path(session.staging_dir)  # type: ignore[arg-type]
+    staging_dir.mkdir(parents=True, exist_ok=True)
+
+    image_max_bytes = _settings.SCRAPE_IMAGE_MAX_MB * 1024 * 1024
+    file_max_bytes = _settings.MANYFOLD_FILE_MAX_MB * 1024 * 1024
+
+    existing_orders = {img.order for img in await _load_session_images(db, session.id)}
+    order = len(existing_orders)
+    added_images: list[ImportSessionImage] = []
+    n_images = 0
+    n_files = 0
+
+    for mfile in model.files:
+        if not mfile.content_url:
+            log.debug(
+                "_maybe_manyfold_import: skipping %s (no contentUrl)",
+                sanitize_for_log(mfile.filename or mfile.name),
+            )
+            continue
+        raw_name = (mfile.filename or mfile.name or mfile.id.rsplit("/", 1)[-1])
+        safe_name = raw_name.replace("/", "_").replace("..", "_").strip() or "file"
+
+        if mfile.is_image:
+            dest_path = staging_dir / f"manyfold_{order:02d}_{safe_name}"
+            try:
+                mc.download_file(
+                    mfile.content_url, token, dest_path, max_bytes=image_max_bytes
+                )
+            except (mc.ManyfoldError, SSRFBlockedError) as exc:
+                # A single bad/blocked file (broken link, or a redirect the
+                # SSRF guard refused to follow) shouldn't fail the whole
+                # import — skip it and keep the rest of the model's files.
+                log.warning(
+                    "_maybe_manyfold_import: image download failed for %s: %s",
+                    sanitize_for_log(mfile.content_url), exc,
+                )
+                continue
+            img = ImportSessionImage(
+                session_id=session.id,
+                path=str(dest_path),
+                is_url=False,
+                source="scrape",
+                order=order,
+                is_default=(mfile.id == model.preview_file_id),
+            )
+            db.add(img)  # type: ignore[union-attr]
+            added_images.append(img)
+            order += 1
+            n_images += 1
+        else:
+            dest_path = staging_dir / safe_name
+            try:
+                written = mc.download_file(
+                    mfile.content_url, token, dest_path, max_bytes=file_max_bytes
+                )
+            except (mc.ManyfoldError, SSRFBlockedError) as exc:
+                log.warning(
+                    "_maybe_manyfold_import: file download failed for %s: %s",
+                    sanitize_for_log(mfile.content_url), exc,
+                )
+                continue
+            db.add(  # type: ignore[union-attr]
+                ImportSessionFile(
+                    session_id=session.id,
+                    staged_path=str(dest_path),
+                    original_name=safe_name,
+                    role="model",
+                    size=written,
+                    selected=True,
+                )
+            )
+            n_files += 1
+
+    # Honor Manyfold's designated preview image as the default; fall back to
+    # the first successfully staged image if none matched preview_file_id (or
+    # the preview image itself failed to download).
+    if added_images and not any(img.is_default for img in added_images):
+        added_images[0].is_default = True
+    default_img = next((img for img in added_images if img.is_default), None)
+    if default_img is not None:
+        session.default_image_path = default_img.path
+
+    session.scrape_note = (
+        f"Imported {n_files} file(s) and {n_images} image(s) via Manyfold."
+    )
+    session.status = ImportSessionStatus.pending_wizard
+    db.add(ScraperUsage(provider="manyfold", source_url=url, success=True))  # type: ignore[union-attr]
+
+    log.info(
+        "_maybe_manyfold_import: %s → pending_wizard (title=%r tags=%d images=%d files=%d)",
+        _su, model.title, len(model.tags), n_images, n_files,
+    )
+    return True
+
+
 async def process_import_session(ctx: dict, session_id: str) -> None:
     """Pre-fill an ImportSession: scrape URL, read sidecar, reconcile tags.
 
@@ -402,6 +637,25 @@ async def process_import_session(ctx: dict, session_id: str) -> None:
             # ---- URL scrape ----
             if session.source_url:
                 from app.config import settings as _settings  # noqa: PLC0415
+
+                # Manyfold primary path (Part 2 of 3): if the URL's domain
+                # matches a configured, enabled ManyfoldInstance, import the
+                # model straight from Manyfold's OAuth API instead of scraping
+                # HTML — Manyfold's model pages are an authenticated SPA, not
+                # public OG-tagged HTML, so a scrape/fallback attempt would
+                # never succeed there anyway. This fully populates the session
+                # (title, description, creator, tags, images, files) and sets
+                # its terminal status itself, so on a match we skip scrape_url
+                # and the whole fallback chain entirely. See docs/decisions.md.
+                if await _maybe_manyfold_import(session, session.source_url, db):
+                    session.updated_at = datetime.now(UTC)
+                    await db.commit()
+                    log.info(
+                        "process_import_session: session %s handled by the "
+                        "Manyfold connector (status=%s)",
+                        session_id, session.status,
+                    )
+                    return
 
                 domain = extract_domain(session.source_url)
 
