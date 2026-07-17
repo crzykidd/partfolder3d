@@ -6,55 +6,55 @@ It is NOT a full reference: durable rules live in `CLAUDE.md`, the module map + 
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
 "Current state" + "Next phases" before every `/clear`.
 
-**Last updated:** 2026-07-05 (v0.5.0 released) — **v0.5.0 tagged + GitHub release live + release
-images published**; `dev` == `main`; #23 + #27 auto-closed on merge (PR #34). Next up = bulk
-move-assets UI (last Phase 2 item), then `gh issue list`.
+**Last updated:** 2026-07-17 (v0.5.1 released 2026-07-05; owner rebooting host) — `dev` is
+**one commit ahead of `main`** (What's-New-modal fix, queued for next release). **Open thread:
+prod MakerWorld imports missing creator info** — diagnosis points at the AgentQL fallback;
+awaiting prod-side evidence from owner (see below).
 
 ## Current state
 
-- **Latest release: `v0.5.0`** (2026-07-05 — tagged from `main`, release-event image build green:
-  `:latest`/`:0.5.0`/`:0` on all three images). **`dev` == `main`, nothing queued.** Suites at
-  release: 822 backend / 401 frontend. What shipped (full detail `CHANGELOG.md [0.5.0]`):
-  - **#23 DONE** — pluggable fallback-scraper framework per `docs/scrapers-spec.md`: dispatcher tries
-    enabled backends by priority (default FlareSolverr → AgentQL); per-scraper enable/priority/timeout/
-    test-connection; usage rows + daily retention cron + manual clear; `flaresolverr` service added to
-    `docker-compose.dev.yml` (internal `http://flaresolverr:8191`, enabled + validated on the live
-    stack — real MakerWorld imports came back "Fetched via FlareSolverr").
-  - **#27 DONE (option b)** — URL-import wizard attaches files mid-wizard: relaxed
-    `POST /api/import-sessions/{id}/files` (url + pending_wizard, lazy staging dir), DELETE staged
-    file, inline "Attach Model Files" section on Review & Commit **plus** an attach-or-create-
-    without-objects modal for zero-file URL imports. Auto-fetch of model files stays deferred
-    (login-gated on Printables/MakerWorld; possible later per-site on the #23 framework — NOT filed
-    as an issue yet).
-  - **MakerWorld extraction** — `__NEXT_DATA__` enrichment (Designer name/profile, clean title,
-    category tags, official `design_pictures` gallery) + generic image hygiene (query-string dedupe,
-    <400px width-hint drop, `/comment/` path drop).
-  - **Scrapers admin UI** — collapsible per-scraper sections (name + Enabled/Disabled pill,
-    sessionStorage-persisted, expanded default), drag-to-reorder priority (desktop-only) + up/down
-    arrows (touch fallback). Numeric priority inputs removed.
-  - **Catalog has-asset** — `has_asset` flag (roles model+gcode) + All/With files/Without files
-    filter + card/table icon.
-  - **Bug fixes found in testing:** CSRF cookie now has `max_age` matching the session cookie
-    (was browser-session-only → "Missing X-CSRF-Token header" after browser restart; users with
-    old cookies must log out/in once); upload endpoint gained CSRF + stale-`files`-collection fix.
-- **The docker stack runs on THIS host** — diagnose live via `docker logs`/`exec` + the app DB
-  (`docker exec partfolder3d-db-1 psql -U partfolder3d -d partfolder3d`). Backend routes + frontend
-  **hot-reload** from the repo; the **worker does NOT** (restart it after worker/task/scraper edits).
-  FlareSolverr container is running and configured (Admin → Site Capabilities).
+- **Latest release: `v0.5.1`** (2026-07-05, PR #35 — hotfix). What shipped:
+  - **Prod nginx CSP fix** — `img-src` now allows `https:`; the old `'self'`-only policy made
+    the browser block the wizard's hotlinked scraped-image previews in prod (dev nginx has no
+    CSP → looked fine). This was the "prod doesn't show images" bug.
+  - **Side-nav user-menu z-order fix** (dropdown rendered behind stat strip / widget rail —
+    backdrop-filter stacking-context trap; header got explicit `position:relative; z-index`).
+- **Queued on `dev` (unreleased, commit 63c55a4):** the post-upgrade **"What's New" modal was
+  empty for 0.5.0/0.5.1** — it reads a curated map in `frontend/src/lib/releaseNotes.ts`
+  (does NOT parse the changelog); entries added + `/release-prep` gained **Step 4b** so every
+  release adds one. (One cosmetic edit to the command's commit template was permission-blocked;
+  substantive fix landed.)
+- **OPEN DIAGNOSIS — prod MakerWorld imports missing creator/tags:** verified from this host
+  that the FlareSolverr path (shared `https://flaresolverr.crzynet.com/`) extracts creator +
+  profile + tags + gallery correctly (repro script hit a live model page through the repo
+  pipeline). The **AgentQL fallback returns NO creator by design** (query is only
+  `{ title description images[] }`). Suspicion: prod scrapes are landing on AgentQL. Waiting on
+  owner to check prod: Admin → Site Capabilities usage rows (provider per URL), FlareSolverr
+  card enabled/priority/Test-connection, and `docker logs partfolder3d-worker | grep
+  flaresolverr` for the failure reason. **Candidate issue to file:** extend the AgentQL query
+  with creator fields so the fallback isn't creator-blind.
+- **Prod deploy facts** (compose in `~/projects/docker-compose/apps/partfolder3d/` on this
+  host, deployed elsewhere via Komodo): `:latest` images, Traefik ingress
+  (`partfolder3d.crzynet.com`), NFS library, `user: 2000:66000`, worker capped
+  `cpus:2 / 6G` (matches `RENDER_CPU_THREADS=2`; `WORKER_MAX_JOBS=2`, `RENDER_CONCURRENCY=1`
+  defaults). Shared FlareSolverr compose in `~/projects/docker-compose/apps/flaresolverr/`.
+- **The dev docker stack on THIS host was DOWN at last check** (only `pf3d-pg-v` test PG up).
+  Bring up with `docker compose -f docker-compose.dev.yml up -d`. When up: backend/frontend
+  hot-reload from the repo; the **worker does NOT** (restart after worker/task/scraper edits).
 
 ## Next phases (roadmap)
 
-**Phase 2 — owner-decision items.** #27 ✅ and #23 ✅ (above). Remaining:
-  - **Bulk move-assets UI** (#25 follow-up) — the backend bulk endpoint is live + tested; the UI needs
-    a catalog **multi-select** affordance that doesn't exist yet (a real UX decision — discuss with
-    owner before building).
-
-**Phase 3 — v0.5.0 released ✅ (2026-07-05, PR #34; CodeQL came up clean this time).** Next release
-is `/release-prep <next>` when the next batch is ready. Standing release gotchas: CodeQL on large
-diffs surfaces pre-existing/moved alerts (fix real log-injections via `sanitize_for_log`; dismiss
-path-injection FPs that already have a `resolve()`+`is_relative_to()` barrier); prod users opt into
-FlareSolverr via the commented example block in `docker-compose.yml`. Then `gh issue list` for the
-rest.
+- **Resolve the MakerWorld-creator thread** (above) once owner reports prod evidence.
+- **Bulk move-assets UI** (#25 follow-up) — last Phase 2 item. Backend bulk endpoint live +
+  tested; catalog needs a **multi-select** affordance (real UX decision — discuss with owner
+  before building).
+- **Issue tracker is EMPTY** (everything through #31 closed). Unfiled candidates: AgentQL
+  creator-fields query (above); opportunistic auto-fetch of model files on the scraper
+  framework (login-gated on Printables/MakerWorld — deferred from #27).
+- Next release = `/release-prep <next>` when a batch is ready (What's-New fix already queued).
+  Standing gotchas: CodeQL on big diffs surfaces pre-existing alerts (`sanitize_for_log` real
+  ones; dismiss path-injection FPs with existing `resolve()`+`is_relative_to()` barriers);
+  transient pip-download timeouts in the Image build check — just re-run the failed job.
 
 ## How we work (recap — full rules in `CLAUDE.md`)
 
@@ -65,7 +65,7 @@ rest.
 - **During active build/test sessions the owner wants each verified item committed AND pushed to `dev`**
   (not just committed) so pushing rebuilds the `:dev` images and the owner's on-host stack + testers can
   pull. Gate each push on `make verify` (full backend suite + fresh frontend build/vitest).
-- **Flag genuine design forks** (like #27 core / #23 open questions) for the owner instead of guessing.
+- **Flag genuine design forks** for the owner instead of guessing.
 - **Live-iteration caveat:** owner runs the vite dev server / the `:dev` stack on this repo; for bigger
   changes while they test, dispatch to an **isolated worktree** (Agent `isolation: worktree`).
 - **Verify + gotchas are NOT here.** Verify discipline: `CLAUDE.md` + `scripts/verify-*.sh` (`make verify`).
@@ -74,9 +74,8 @@ rest.
 
 ## Backlog (themes — `gh issue list` is the source of truth for what we build **now**, not the PRD)
 
-- **Shipped in v0.5.0:** #23, #27 (auto-closed by PR #34; both have status comments).
-- **Needs owner decision:** bulk-move multi-select UI; whether to file the opportunistic
-  auto-fetch-model-file idea as an issue.
+- **Tracker is empty.** Candidates to file: AgentQL creator fields; auto-fetch model files.
+- **Needs owner decision:** bulk-move multi-select UX.
 - Older PRD §18 notes: real slicing for filament estimates, trash-purge UI, `.bgcode`/multi-filament gcode.
 
 ## Session start order
@@ -91,14 +90,15 @@ rest.
 
 - **Code:** GitHub [`crzykidd/partfolder3d`](https://github.com/crzykidd/partfolder3d). `main` protected
   (PR-only, 6 required CI checks). Work on `dev`. `gh` authed as `crzykidd`.
-- **Live stack on THIS host:** `partfolder3d-{backend,worker,db,redis,nginx,frontend}-1` on `:dev`
-  images. `docker logs`/`exec` to diagnose; app DB via `docker exec partfolder3d-db-1 psql -U
+- **Dev stack on THIS host** (when up): `partfolder3d-{backend,worker,db,redis,nginx,frontend,flaresolverr}-1`
+  on `:dev` images. `docker logs`/`exec` to diagnose; app DB via `docker exec partfolder3d-db-1 psql -U
   partfolder3d -d partfolder3d`. Separate ephemeral **test** pg: `pf3d-pg-v` on :5433 (pytest only).
+  Dev scraper config in DB points at the **shared** FlareSolverr (`https://flaresolverr.crzynet.com/`).
 - **Run from scratch:** `cp .env.example .env` → `docker compose -f docker-compose.dev.yml up --build`
   (dev) or `docker compose up -d --build` (prod) → http://localhost:8973 first-run wizard. Migrations
   auto-run via the backend entrypoint. External port **8973** (nginx).
 - **No sandbox here** — bash may prompt unless auto-approve is on. **System Python is PEP-668** (pip
-  blocked); a scratchpad venv exists for image work — recreate if gone.
+  blocked); `backend/.venv` exists and runs repo code directly (used for the scrape repro).
 
 ## Before-`/clear` checklist
 
