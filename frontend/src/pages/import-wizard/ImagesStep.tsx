@@ -178,7 +178,10 @@ export function ImagesStep({ session, onNext, onPrev }: ImagesStepProps) {
                     transition: 'border-color 0.15s, box-shadow 0.15s',
                   }}
                 >
-                  {img.is_url || img.source === 'capture' || img.source === 'upload' ? (
+                  {img.is_url ||
+                  img.source === 'capture' ||
+                  img.source === 'upload' ||
+                  img.source === 'scrape' ? (
                     <img
                       src={
                         img.is_url

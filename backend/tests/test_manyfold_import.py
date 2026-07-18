@@ -701,3 +701,81 @@ def test_download_file_blocks_cross_host_redirect_from_private_instance(
     with patch("socket.getaddrinfo", _private_getaddrinfo), pytest.raises(SSRFBlockedError):
         mc.download_file(download_url, "tok", dest, max_bytes=1024)
     assert not dest.exists()
+
+
+# ---------------------------------------------------------------------------
+# 7. Creation-time SSRF exemption for configured Manyfold instances
+#    (found via UI live-testing: a private-IP instance was rejected with
+#     "URL is not allowed." at POST /api/import-sessions, before the worker ran)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_session_exempts_manyfold_url_from_ssrf(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """A URL on an enabled Manyfold instance is exempt from the creation-time
+    SSRF pre-check (a self-hosted instance may resolve to a private/LAN IP),
+    while a plain private-IP URL is still rejected."""
+    csrf, _uid = await _admin_setup(client)
+    await _create_instance(db_session)  # domain manyfold.example.com, enabled
+
+    # Manyfold-instance URL: accepted — the SSRF pre-check is skipped for it.
+    ok = await client.post(
+        "/api/import-sessions",
+        json={"source_type": "url", "source_url": f"{BASE_URL}/models/xyz789"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["source_url"] == f"{BASE_URL}/models/xyz789"
+
+    # A non-Manyfold private URL is still blocked by the SSRF guard.
+    blocked = await client.post(
+        "/api/import-sessions",
+        json={"source_type": "url", "source_url": "http://192.168.5.5/thing"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert blocked.status_code == 422
+    assert "not allowed" in blocked.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_create_session_disabled_manyfold_instance_not_exempt(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """A DISABLED Manyfold instance grants no SSRF exemption — its URL on a
+    private host is still rejected (only enabled instances are trusted)."""
+    csrf, _uid = await _admin_setup(client)
+    await _create_instance(db_session, domain="192.168.9.9", enabled=False)
+
+    blocked = await client.post(
+        "/api/import-sessions",
+        json={"source_type": "url", "source_url": "http://192.168.9.9/models/x"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert blocked.status_code == 422
+    assert "not allowed" in blocked.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# 8. Staged-filename extension derivation (found via UI live-testing: an
+#    instance served display-name filenames with no extension, so the .3mf
+#    wasn't recognized as a model and images served as octet-stream)
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_manyfold_ext_derives_from_encoding_format() -> None:
+    from app.worker.tasks.import_session import _ensure_manyfold_ext
+
+    # No extension on the name → derive from the MIME type.
+    assert _ensure_manyfold_ext("Cool Model", "model/3mf") == "Cool Model.3mf"
+    assert _ensure_manyfold_ext("preview 04", "image/webp") == "preview 04.webp"
+    assert _ensure_manyfold_ext("part", "model/stl") == "part.stl"
+    # MIME with parameters is tolerated.
+    assert _ensure_manyfold_ext("clip", "video/mp4; codecs=avc1") == "clip.mp4"
+    # A name that already has a sensible suffix is trusted unchanged.
+    assert _ensure_manyfold_ext("model.stl", "model/stl") == "model.stl"
+    assert _ensure_manyfold_ext("img.PNG", "image/png") == "img.PNG"
+    # Unknown/empty MIME and no suffix → left as-is (no guessing).
+    assert _ensure_manyfold_ext("mystery", "") == "mystery"
+    assert _ensure_manyfold_ext("mystery", "application/x-unknown") == "mystery"

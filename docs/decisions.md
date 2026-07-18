@@ -2,6 +2,30 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-17 — Manyfold connector: three more UI-live-test fixes
+
+**Context:** Owner tested the finished feature through the wizard UI against the real
+private-IP instance; three issues surfaced that the mocked integration tests didn't.
+
+- **Creation-time SSRF exemption for configured instances.** `POST /api/import-sessions`
+  SSRF-checks `source_url` before persisting; a private-IP Manyfold instance was rejected
+  with "URL is not allowed." *before* the worker's Manyfold branch ran. Added
+  `url_matches_enabled_manyfold(db, url)` (same `extract_domain` + enabled-instance match as
+  the worker) and skip the pre-check for those URLs — completing the "admin-configured
+  instance is trusted" posture across every layer (creation gate, worker, download).
+- **Wizard renders locally-staged scrape images.** Manyfold images are staged *local* files
+  (`source='scrape'`, `is_url=false`) because they need the bearer token to download —
+  unlike normal scrape images which are remote `is_url=true` hotlinks. The Images step only
+  served local files for `capture`/`upload`, so Manyfold images showed "(preview after
+  commit)". Added `scrape` to the served-locally set; the existing `serve_session_file`
+  staging-dir endpoint already streams them.
+- **Derive file extension from `encodingFormat` when the Manyfold filename lacks one.** This
+  instance serves display-name filenames with no extension (`Muchshape Lollypop Rose
+  Universal`), which would leave a `.3mf` unrecognized by the render/analyze pipeline and
+  serve images as `octet-stream`. `_ensure_manyfold_ext(name, mime)` appends an extension
+  from a MIME→ext map when the name has no sensible suffix; a name that already has one is
+  trusted.
+
 ## 2026-07-17 — Manyfold connector: two live-test fixes (internal-URL rewrite, host-scoped SSRF trust)
 
 **Context:** End-to-end validation of the connector against a real instance

@@ -49,6 +49,7 @@ from .helpers import (
     _load_session,
     _session_out,
     reconcile_tags,
+    url_matches_enabled_manyfold,
 )
 from .schemas import (
     CreateSessionRequest,
@@ -138,20 +139,26 @@ async def create_import_session(
             detail="source_url is required when source_type='url'",
         )
 
-    # SSRF guard — validate the scrape target URL before persisting or scraping
+    # SSRF guard — validate the scrape target URL before persisting or scraping.
+    # Exception: URLs on an admin-configured, enabled Manyfold instance are
+    # trusted (a self-hosted instance may resolve to a private/LAN IP), matching
+    # the worker's Manyfold branch and the download SSRF exemption. Without this,
+    # a Manyfold instance on a private IP is rejected here with "URL is not
+    # allowed." before the worker's Manyfold path ever runs.
     if src == "url" and body.source_url:
         from ...storage.ssrf_guard import SSRFBlockedError, assert_safe_url  # noqa: PLC0415
 
-        try:
-            assert_safe_url(body.source_url)
-        except SSRFBlockedError as exc:
-            # Log the specific block reason server-side; return a generic message
-            # so we don't leak internal-network topology to the importing user.
-            log.warning("create_import_session: SSRF-blocked source URL: %s", exc)
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="URL is not allowed.",
-            ) from exc
+        if not await url_matches_enabled_manyfold(db, body.source_url):
+            try:
+                assert_safe_url(body.source_url)
+            except SSRFBlockedError as exc:
+                # Log the specific block reason server-side; return a generic message
+                # so we don't leak internal-network topology to the importing user.
+                log.warning("create_import_session: SSRF-blocked source URL: %s", exc)
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="URL is not allowed.",
+                ) from exc
 
     # Validate library if provided
     library_id = body.library_id

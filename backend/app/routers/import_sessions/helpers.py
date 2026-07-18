@@ -236,3 +236,29 @@ async def _enqueue_import_job(session_id: str, pool: ArqRedis) -> None:
         log.exception(
             "_enqueue_import_job: failed to enqueue for session %s", session_id
         )
+
+
+async def url_matches_enabled_manyfold(db: AsyncSession, url: str | None) -> bool:
+    """True if *url*'s domain matches an enabled Manyfold instance.
+
+    Admin-configured Manyfold instances are trusted sources (a self-hosted one
+    may resolve to a private/LAN IP), so their URLs are exempt from the
+    creation-time SSRF pre-check — mirroring the worker's Manyfold branch and the
+    download SSRF exemption. Uses the SAME ``extract_domain`` + enabled-instance
+    match as the worker so the entry point and the worker never disagree.
+    """
+    if not url:
+        return False
+    from ...models.manyfold import ManyfoldInstance  # noqa: PLC0415
+    from ...storage.scraper import extract_domain  # noqa: PLC0415
+
+    domain = extract_domain(url)
+    if not domain:
+        return False
+    res = await db.execute(
+        select(ManyfoldInstance).where(
+            ManyfoldInstance.domain == domain,
+            ManyfoldInstance.enabled.is_(True),
+        )
+    )
+    return res.scalar_one_or_none() is not None

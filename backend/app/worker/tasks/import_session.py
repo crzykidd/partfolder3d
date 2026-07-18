@@ -327,6 +327,44 @@ async def _try_fallback_scrapers(
     return last_result, ""
 
 
+# encodingFormat (MIME) → file extension, for Manyfold files whose `filename`
+# lacks one (some instances serve display-name-only filenames). Getting this
+# right matters beyond the wizard preview: the render/analyze pipeline and the
+# committed file type are keyed off the extension, so a `.3mf` with no suffix
+# would never be recognized as a model.
+_MANYFOLD_MIME_TO_EXT: dict[str, str] = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "model/stl": ".stl",
+    "application/sla": ".stl",
+    "model/3mf": ".3mf",
+    "application/vnd.ms-package.3dmanufacturing-3dmodel+xml": ".3mf",
+    "model/obj": ".obj",
+    "model/step": ".step",
+    "model/step+xml": ".step",
+    "application/step": ".step",
+    "model/vnd.collada+xml": ".dae",
+    "application/zip": ".zip",
+    "video/mp4": ".mp4",
+    "application/pdf": ".pdf",
+}
+
+
+def _ensure_manyfold_ext(name: str, encoding_format: str) -> str:
+    """Return *name* with an extension, deriving one from *encoding_format* when
+    the name has none. A name that already carries a short suffix is trusted."""
+    from pathlib import Path as _P  # noqa: PLC0415
+
+    suffix = _P(name).suffix
+    if suffix and 2 <= len(suffix) <= 6:
+        return name
+    ext = _MANYFOLD_MIME_TO_EXT.get((encoding_format or "").split(";", 1)[0].strip().lower())
+    return f"{name}{ext}" if ext else name
+
+
 async def _maybe_manyfold_import(session: object, url: str, db: object) -> bool:
     """Import a model straight from a configured Manyfold instance (Part 2 of 3).
 
@@ -488,6 +526,7 @@ async def _maybe_manyfold_import(session: object, url: str, db: object) -> bool:
             continue
         raw_name = (mfile.filename or mfile.name or mfile.id.rsplit("/", 1)[-1])
         safe_name = raw_name.replace("/", "_").replace("..", "_").strip() or "file"
+        safe_name = _ensure_manyfold_ext(safe_name, mfile.encoding_format)
 
         if mfile.is_image:
             dest_path = staging_dir / f"manyfold_{order:02d}_{safe_name}"
