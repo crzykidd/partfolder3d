@@ -10,16 +10,15 @@
 
 </div>
 
-> [!WARNING]
-> **Early alpha (v0.5.1) — under active development.** This is an early release: expect rough
-> edges, and **breaking changes can land between releases** (database schema, config, or API).
-> It's usable and published — pull the images and follow [Getting started](#getting-started) — but
-> **pin a specific version, back up your data, and read the release notes before upgrading.**
-> Watch/star the repo to follow progress.
+> [!IMPORTANT]
+> **Under active development.** PartFolder 3D is usable and published — pull the images and
+> follow [Getting started](#getting-started). It's still evolving quickly, so **breaking changes
+> can land between releases** (database schema, config, or API): pin a specific version, back up
+> your data, and read the release notes before upgrading. Watch/star the repo to follow progress.
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.5.1-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.6.0-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 
@@ -29,141 +28,16 @@
 
 ## What's New
 
-### v0.5.1 (2026-07-05)
+### v0.6.0 (2026-07-19)
 
-Hotfix release. **Scraped-image previews now display in production** — the production nginx
-Content-Security-Policy only allowed same-origin images, so the import wizard's previews of
-scraped images (hotlinked from the source site until commit downloads them) were silently
-blocked by the browser and imports looked like the scrape found no images; `img-src` now
-permits `https:`. If you bind-mount a **custom nginx config**, reconcile it against the
-updated `nginx/nginx.conf` before upgrading. Also fixed: in the side-nav layout the
-**user-profile menu** no longer opens underneath the stat strip and right widget rail.
+**Added: Manyfold import workflow.** Import a model straight from a self-hosted
+[Manyfold](https://manyfold.org) instance — register the instance with its OAuth credentials
+under **Admin → AI & Scraping → Manyfold**, then paste any model URL from it into the
+import wizard. PartFolder pulls the metadata, tags, images, and 3D files straight from Manyfold's
+API into the wizard for review (a new **Assets** step lets you deselect any files you don't want
+before committing).
 
-### v0.5.0 (2026-07-05)
-
-Scrapers + import-flow release. **Pluggable fallback scrapers** — the Cloudflare-fallback scrape
-path is now a framework: **FlareSolverr** (free, self-hosted — a commented-out example service
-ships in `docker-compose.yml`) and **AgentQL** run in a configurable priority order, each with
-enable/disable, timeout, **Test connection**, and usage tracking (with auto-retention and manual
-clear). The admin Scrapers UI has **collapsible per-scraper sections** reordered by **drag or
-up/down arrows**. **URL imports can now attach model files** — an "Attach Model Files" section on
-Review & Commit plus a popup for zero-file imports (attach, or create metadata-only). **MakerWorld
-imports** now pre-fill the Designer, a clean title, category tags, and the official full-res
-gallery (no more social-card duplicates or comment-photo strays). **Catalog** — filter by items
-**with/without print files**, with a file icon on cards that have them. Plus fixes: the CSRF
-cookie now survives browser restarts (if a save fails with a CSRF error after upgrading, log out
-and back in once — see [CHANGELOG.md](CHANGELOG.md)).
-
-### v0.4.0 (2026-07-05)
-
-Security + features release. **Security hardening** — the scrape/import path is guarded against
-SSRF (internal-network fetches blocked, size-capped, redirect-re-checked), `javascript:`-scheme XSS
-is blocked on item/creator links, **Redis now requires a password**, nginx sends security headers
-(CSP, X-Frame-Options, nosniff), ZIP/3MF parsing is hardened, print-record and auth checks were
-tightened, and the backend **fails fast if the DB password is left at the default**. **Jobs
-monitor** now shows **queued** and **analyze** jobs (previously invisible). **Libraries** — move
-items between libraries, **filter the catalog by library** (multi-select), and mount **multiple
-library roots**. **Import wizard** — full-resolution scraped images, cleaned titles/descriptions,
-creator pre-fill, a **"Try to render file"** viewport capture, tags shown immediately, and a Files
-row that flags metadata-only commits. **Tags** — an **auto-approve** setting + bulk "Approve all".
-Plus fixes: catalog pagination, scraped images now appear in the file list, and imported items are
-analyzed automatically. **Upgrading:** set `POSTGRES_PASSWORD` **and** `REDIS_PASSWORD` in `.env`
-(now required) and drain the worker queue across the upgrade — see [CHANGELOG.md](CHANGELOG.md).
-
-### v0.3.0 (2026-07-03)
-
-Big feature + polish release. **Bulk import** — commit many pending imports at once, with a
-configurable default library and inbox auto-resolution. **Item file management** — upload,
-rename, and delete individual files right from the item page, plus a **Rescan disk** button.
-**3D viewer** — capture a snapshot of the current view as an item image (great for 3MF, which
-has no server render), and the viewer now opens as a proper centered overlay with
-expand-to-full-window and zoom-to-cursor. **Catalog** — the grid adapts its columns to your
-window, a **Compact / Full** toggle switches between dense and whole-image views, and page size
-is configurable. **Object Breakdown** shows real analysis job status (running %/queued/failed)
-instead of a vague "pending" and is honest about 3MF. **Worker resource limits** — new `.env`
-settings + docker CPU/memory caps so a big import can't overrun a small host. Plus a
-release-notes popup, an app-wide error boundary, wider item pages, collapsible/scrollable file
-lists, and import-wizard AI fixes. See [CHANGELOG.md](CHANGELOG.md) for the full list.
-
-### v0.2.5 (2026-07-02)
-
-Setup + import bug fixes. **First-run setup now logs you straight in** — completing the
-wizard previously bounced you back to the login screen; it now lands you in the app. The
-setup form also gains a **confirm-password field** to catch typos. **The import wizard's
-"set default image" now takes effect** — the image you pick is applied to the item on
-commit (previously ignored, most visibly for URL imports).
-
-### v0.2.4 (2026-07-02)
-
-Production reliability + admin UX. **Fixes production image display** — nginx was 404-ing
-item thumbnails/renders and logos (`/api/…/*.png`), so nothing rendered; now fixed. Adds
-**fail-loud startup logging** to the backend and frontend containers (version banner, DB
-preflight, writable checks, streamed migrations with a hard timeout, redacted config) so a
-"won't start" is never a silent hang. Fixes `ALLOWED_ORIGINS` crashing boot when set as a
-comma-separated string. Adds an **admin folder browser** for picking a library mount path
-(instead of typing it), stops offering **disabled libraries** as an add-item destination,
-fixes a stale settings-nav link, and makes native **dark-mode dropdowns** render dark.
-See [CHANGELOG.md](CHANGELOG.md) for the full details.
-
-### v0.2.3 (2026-07-02)
-
-Production-deploy hardening. The **frontend and nginx images are now published**
-(`ghcr.io/crzykidd/partfolder3d-frontend` + `-nginx`), and the **nginx config is baked into
-its image** — so a production host runs with just `docker-compose.yml` + `.env`, no host
-config files. The nginx config can still be overridden via an optional bind-mount. Also fixes
-the frontend production build (it now compiles under the strict project-reference typecheck)
-and corrects the CI + release build gates to use `npm run build`. **⚠️ If you run a custom
-nginx config, reconcile it against this release's `nginx/nginx.conf` before upgrading.**
-See [CHANGELOG.md](CHANGELOG.md) for the full details.
-
-### v0.2.2 (2026-07-02)
-
-Deployment and infrastructure. Adds **configurable `PUID`/`PGID`** so the backend,
-worker, and frontend containers run as a chosen UID:GID — files written to library
-mounts and `/data` land with correct host ownership (NFS-friendly). Also parallelizes
-the backend CI test suite with `pytest-xdist` (~3.7× faster) so releases and PRs turn
-around quicker. See [CHANGELOG.md](CHANGELOG.md) for the full details.
-
-### v0.2.0 (2026-07-01)
-
-Asset-detail and 3D overhaul. **3MF files are now read, not rendered** — the slicer's
-embedded thumbnail and real slice data (print time, filament grams/meters, colors, plate
-and object counts) are extracted directly, and each `.3mf` shows its own thumbnail.
-**Uploaded/imported ZIPs auto-extract** into the item with folder structure preserved (lone
-wrapper folder stripped, collisions renamed, zip-slip/zip-bomb guarded). The Files &
-Downloads list is now a **collapsible folder tree**, and clicking a model opens an
-**interactive in-browser 3D viewer** (STL/OBJ/3MF, lazy-loaded so it never bloats the initial
-page). Server rendering is bounded to STL/OBJ/PLY and now runs on a headless `vtk-osmesa`
-backend (no X server). See [CHANGELOG.md](CHANGELOG.md) for the full details.
-
-### v0.1.1 (2026-07-01)
-
-Render controls and reliability, complete job lifecycle management, per-type issue
-resolution, and catalog polish. Adds: configurable `RENDER_MODE` (all / no-images /
-off), per-render subprocess kill-timeout and CPU-thread cap, render crash recovery on
-worker restart; job cancel / restart / archive / retention with a context-sensitive
-*Clear…* button and archive view; per-type issue resolution actions (orphan → Import /
-Delete / Ignore; conflict, dead-link, corruption, missing-file, and sidecar-error each
-get a targeted fix) with issue deduplication; clickable home-page stat tiles; sortable
-Category and Uses columns on the admin Tags table. Key fixes: scraped-image filename
-collision on MakerWorld import, tag-cloud font scaling cap, admin sidebar
-active-section highlight, and dark-theme native dropdowns/scrollbars.
-See [CHANGELOG.md](CHANGELOG.md) for the full details.
-
-### v0.1.0 (2026-07-01)
-
-> **Note:** v0.1.0 shipped untagged — the first published git tag is **v0.1.1**, which
-> superseded it the same day. It's kept here for the historical feature record.
-
-First full-stack alpha covering all core features: multi-user catalog with full-text
-search and tag cloud browse; item library with YAML sidecars and atomic renames;
-import/inbox wizard with URL scraping and tag reconciliation; headless CPU mesh
-rendering (STL/3MF/OBJ/PLY) with subprocess isolation, configurable timeout/mode, and
-orphan recovery; reconcile engine with actionable per-type issue resolution, change log,
-and review queue; print history with gcode parsing; tokenized share links with audit;
-optional AI tagging (Claude / OpenAI / Ollama); admin backup, JSON export, and tag
-management; enhanced job lifecycle (cancel, restart, retry, archive, retention).
-See [CHANGELOG.md](CHANGELOG.md) for the full details.
+For the full, per-release history of every version, see **[CHANGELOG.md](CHANGELOG.md)**.
 
 ---
 
@@ -181,7 +55,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.5.1 alpha) — see the
+> The full feature set below is **built and released** (v0.6.0) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -199,7 +73,7 @@ transfer, and resilience against database loss.
 
 ## Features
 
-> Built and working in the current alpha (pending the first tagged release).
+> Built and working in the current release.
 
 ### 📚 Catalog, search & browse
 - Shared multi-user catalog — everyone sees the same items, files, and images.
@@ -235,6 +109,9 @@ transfer, and resilience against database loss.
   watcher detects it and queues an import wizard.
 - **"Add Asset" web wizard** — drag-drop upload with source URL, tags, description.
 - **Source-URL-only** import — fetch public metadata/images where permitted.
+- **Manyfold import** — connect self-hosted [Manyfold](https://manyfold.org) instances
+  with OAuth credentials, then import a model straight from its URL: metadata, tags,
+  images, and 3D files are pulled via Manyfold's API into the wizard for review.
 - **Import from another instance's share link** — pull assets + metadata and
   reconcile against your library and canonical tags.
 - Wizard suggests an **editable title** before commit (becomes the on-disk name and
@@ -445,7 +322,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is at the **alpha** stage (v0.5.1).
+Honest snapshot — this project is in **active development** (v0.6.0).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -587,11 +464,11 @@ After setup, visit **http://localhost:8973/quick-start** for the in-app Quick St
 
 ## Upgrading
 
-This is alpha software — **breaking changes can land between releases** (schema, config,
+This project is in active development — **breaking changes can land between releases** (schema, config,
 or API), so upgrade deliberately:
 
 1. **Pin a specific version.** Set explicit image tags in `docker-compose.yml` (e.g.
-   `:0.5.1` instead of `:latest`) so a `pull` never surprises you.
+   `:0.6.0` instead of `:latest`) so a `pull` never surprises you.
 2. **Read the release notes first.** Check the [CHANGELOG](CHANGELOG.md) / the GitHub
    release for the version you're moving to — watch for **⚠️ nginx config changed** and
    other migration callouts.
@@ -658,6 +535,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — alpha (v0.5.1) · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — v0.6.0 · built by <code>crzykidd</code></sub>
 
 </div>

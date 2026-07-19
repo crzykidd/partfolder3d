@@ -18,6 +18,17 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: Record<string, ReleaseNote> = {
+  '0.6.0': {
+    title: "What's New in v0.6.0",
+    bullets: [
+      'Manyfold import — connect self-hosted Manyfold instances with OAuth credentials, then import a model straight from its URL',
+      'Pasting a Manyfold model URL pulls the title, description, license, creator, tags, images, and 3D files directly from Manyfold’s API — no page scraping',
+      'New wizard Assets step — review the pulled 3D files (checked by default) and deselect any you don’t want before committing',
+      'Configure instances under Admin → AI & Scraping → Manyfold; the OAuth secret is stored encrypted and verified with a Test connection button',
+      'Fix — the post-upgrade "What’s New" popup was empty for v0.5.0 and v0.5.1',
+    ],
+    githubReleaseUrl: 'https://github.com/crzykidd/partfolder3d/releases/tag/v0.6.0',
+  },
   '0.5.1': {
     title: "What's New in v0.5.1",
     bullets: [

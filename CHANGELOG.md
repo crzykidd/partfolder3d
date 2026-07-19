@@ -20,32 +20,22 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-07-19
+
 ### Added
 
-- **Manyfold instance configuration (admin) — Part 1 of 3.** Admins can register one or
-  more self-hosted Manyfold instances by URL and OAuth client credentials
-  (`client_id`/`client_secret`, Fernet-encrypted), and verify them with a
-  test-connection call that fetches a real OAuth token. This lays the groundwork for
-  importing a model straight from a Manyfold URL (connector + frontend land in Parts 2
-  and 3). No user-facing UI yet — admin API only (`/api/admin/manyfold`).
-- **Import a model directly from a configured Manyfold instance — pulls metadata, tags,
-  images, and 3D files into the wizard.** Part 2 of 3: when an import URL's domain
-  matches an enabled Manyfold instance, the import worker fetches the model straight from
-  Manyfold's OAuth API instead of scraping the page — title, description, license,
-  creator, and every keyword tag are pre-filled, and every image and 3D file is
-  downloaded into the session for review. Staged files can now be individually
-  deselected in the wizard (`PATCH /api/import-sessions/{id}/files/{file_id}`) before
-  committing, so a model with several file variants doesn't force all of them into the
-  item. Frontend UI lands in Part 3.
-- **Admin UI to configure Manyfold instances; import wizard lets you review/deselect
-  pulled 3D files.** Part 3 of 3 (final): a new **Manyfold** admin screen
-  (Admin → AI & Scraping → Manyfold) lists configured instances and lets you add one
-  (base URL, display name, OAuth client ID/secret, scopes), rotate the secret, toggle
-  enabled, test the connection, and delete — the secret is write-only and never
-  rendered back. The import wizard gains an **Assets** step, shown whenever a session
-  has staged files (Manyfold pulls or plain multi-file uploads alike): each file is
-  listed with its role and size, checked by default, and can be deselected without
-  deleting it; the Summary step's file count reflects the selection.
+- **Import a model directly from a self-hosted Manyfold instance.** Register one or more
+  [Manyfold](https://manyfold.org) instances in the admin UI (**Admin → AI & Scraping →
+  Manyfold**) with their OAuth client credentials — the client secret is stored encrypted
+  and never shown again, and a **Test connection** button verifies it against the instance.
+  Once an instance is configured, paste any model URL from it into the import wizard and
+  PartFolder pulls the model straight from Manyfold's API instead of scraping the page:
+  title, description, license, creator, and all tags are pre-filled, and every image and 3D
+  file is downloaded into the session for review. A new wizard **Assets** step lists the
+  pulled files (checked by default) so you can deselect any you don't want before committing
+  — handy for models with several file variants. The Assets step also applies to plain
+  multi-file uploads. Multiple Manyfold instances are supported, and instances that resolve
+  to a private/LAN address (self-hosted) are handled correctly.
 
 ### Fixed
 
@@ -1171,7 +1161,8 @@ detail in this one file. (An earlier plan to archive closed minor series into
 <!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
      earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
 
-[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/crzykidd/partfolder3d/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/crzykidd/partfolder3d/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/crzykidd/partfolder3d/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/crzykidd/partfolder3d/compare/v0.3.0...v0.4.0
