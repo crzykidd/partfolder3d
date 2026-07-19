@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -396,6 +396,146 @@ async def test_recover_orphaned_nonidempotent_job_failed_not_reenqueued(
     assert updated.finished_at is not None
     assert "not auto-retried" in (updated.error or "")
     mock_redis.enqueue_job.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests: orphan-requeue attempt cap (issue #37, fix #1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_recover_orphaned_job_capped_after_max_attempts(
+    db_session: AsyncSession,
+) -> None:
+    """3rd orphan-failure within the window trips the cap: no re-enqueue.
+
+    Seeds 2 already-'failed' orphan rows (prior crash-loop attempts) plus 1
+    'running' orphan for the same item.  Recovery marks the running row
+    'failed' too, bringing the recent count to 3 == the cap, so it must NOT
+    be re-enqueued, and its error must carry the terminal message.
+    """
+    from worker import _recover_orphaned_jobs  # noqa: PLC0415
+
+    item_id = 779001
+    now = datetime.now(UTC)
+
+    for _ in range(2):
+        prior = Job(
+            type="analyze",
+            status="failed",
+            progress=0,
+            payload={"item_id": item_id},
+            item_id=None,
+            started_at=now,
+            finished_at=now,
+            error="orphaned by worker restart — re-queued",
+        )
+        db_session.add(prior)
+
+    orphan = Job(
+        type="analyze",
+        status="running",
+        progress=10,
+        payload={"item_id": item_id},
+        item_id=None,
+        started_at=now,
+    )
+    db_session.add(orphan)
+    await db_session.flush()
+    orphan_id: uuid.UUID = orphan.id
+
+    mock_redis = AsyncMock()
+    await _recover_orphaned_jobs({"redis": mock_redis}, _db=db_session)
+
+    result = await db_session.execute(sa.select(Job).where(Job.id == orphan_id))
+    updated = result.scalar_one()
+    assert updated.status == "failed"
+    error = updated.error or ""
+    assert "not retried" in error
+    assert "issue #37" in error
+
+    calls = {call.args for call in mock_redis.enqueue_job.call_args_list}
+    assert ("analyze_item", item_id) not in calls
+
+
+@pytest.mark.asyncio
+async def test_recover_orphaned_job_below_cap_still_reenqueues(
+    db_session: AsyncSession,
+) -> None:
+    """Only 2 recent orphan-failures (below the cap of 3) → still re-enqueued."""
+    from worker import _recover_orphaned_jobs  # noqa: PLC0415
+
+    item_id = 779002
+    now = datetime.now(UTC)
+
+    prior = Job(
+        type="analyze",
+        status="failed",
+        progress=0,
+        payload={"item_id": item_id},
+        item_id=None,
+        started_at=now,
+        finished_at=now,
+        error="orphaned by worker restart — re-queued",
+    )
+    db_session.add(prior)
+
+    orphan = Job(
+        type="analyze",
+        status="running",
+        progress=10,
+        payload={"item_id": item_id},
+        item_id=None,
+        started_at=now,
+    )
+    db_session.add(orphan)
+    await db_session.flush()
+
+    mock_redis = AsyncMock()
+    await _recover_orphaned_jobs({"redis": mock_redis}, _db=db_session)
+
+    mock_redis.enqueue_job.assert_called_once_with("analyze_item", item_id)
+
+
+@pytest.mark.asyncio
+async def test_recover_orphaned_job_stale_history_ignored(
+    db_session: AsyncSession,
+) -> None:
+    """Prior orphan-failures outside the recency window don't count toward the cap."""
+    from worker import _recover_orphaned_jobs  # noqa: PLC0415
+
+    item_id = 779003
+    now = datetime.now(UTC)
+    stale = now - timedelta(hours=7)  # _ORPHAN_REQUEUE_WINDOW_HOURS (6) + 1
+
+    for _ in range(3):
+        prior = Job(
+            type="analyze",
+            status="failed",
+            progress=0,
+            payload={"item_id": item_id},
+            item_id=None,
+            started_at=stale,
+            finished_at=stale,
+            error="orphaned by worker restart — re-queued",
+        )
+        db_session.add(prior)
+
+    orphan = Job(
+        type="analyze",
+        status="running",
+        progress=10,
+        payload={"item_id": item_id},
+        item_id=None,
+        started_at=now,
+    )
+    db_session.add(orphan)
+    await db_session.flush()
+
+    mock_redis = AsyncMock()
+    await _recover_orphaned_jobs({"redis": mock_redis}, _db=db_session)
+
+    mock_redis.enqueue_job.assert_called_once_with("analyze_item", item_id)
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,31 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-19 — Orphan-requeue attempt cap: count by payload item_id + recency window (issue #37, fix #1)
+
+**Context:** A worker crash-loop (e.g. an OOM-killing analyze job on a huge mesh) was
+observed re-queuing the same job forever — 31 restarts in one incident — because
+`_recover_orphaned_jobs` has no memory across restarts: every re-enqueue creates a brand
+**new** `Job` row, so there's no single row to bump an attempt counter on. This
+implements proposed-fix #1 of issue #37 only (a hard 3-attempts/6h cap); the other three
+proposals (subprocess-isolate analyze, dedup concurrent analyze jobs, guard huge meshes)
+remain open follow-ups on #37.
+
+- **Count by `payload["item_id"]`, not the `item_id` FK column.** Real analyze/render
+  jobs set both, but the FK can be NULL (confirmed by the existing render-recovery test
+  seeds using `item_id=None`). The re-enqueue path already keys off `payload["item_id"]`,
+  so the attempt count must match exactly what's being deduped/re-enqueued — using the FK
+  instead would silently undercount and never trip the cap for NULL-FK rows.
+- **A shared error-message marker (`"orphaned by worker restart"`) is the count signal**,
+  scoped with `Job.type == <the orphan's own type>` and a `finished_at >= now - 6h`
+  recency window. The window exists so the cap targets an *active* crash-loop storm (which
+  re-queues within seconds) without accumulating stale failures from unrelated past
+  restarts weeks apart into a false-positive terminal fail.
+- **No Alembic migration, no `Job` model schema change, no task-signature change.** The
+  cap is derived entirely from existing columns (`type`, `status`, `error`, `payload`,
+  `finished_at`) via a COUNT query inside `_recover_orphaned_jobs` — deliberately kept to
+  a pure logic change so the fix stays small and surgical per the prompt's scope.
+
 ## 2026-07-17 — Manyfold connector: three more UI-live-test fixes
 
 **Context:** Owner tested the finished feature through the wizard UI against the real

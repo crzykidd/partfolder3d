@@ -20,6 +20,11 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Fixed
+
+- Worker no longer crash-loops on a job that repeatedly kills it: orphaned jobs are
+  re-queued at most 3× within 6h, then marked terminally failed (issue #37).
+
 ## [0.6.0] — 2026-07-19
 
 ### Added
