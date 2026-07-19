@@ -128,6 +128,27 @@ async def _reconcile_embedded_thumbnail(
     return rel_path
 
 
+def _build_cap_skip_stub(source_hash: str | None, max_triangles: int) -> dict[str, Any]:
+    """Build a low-confidence stub FileAnalysis for an over-cap mesh (issue #37 fix #4).
+
+    Stored sha-keyed exactly like a normal result, so the sha-cache in
+    ``_analyze_item_body`` treats it as "analyzed" and never retries the file —
+    an oversized mesh gets a stable, visible "too large to analyze" state
+    instead of an infinite retry loop or a silent gap in the UI.
+    """
+    return {
+        "analyzed_at": datetime.now(UTC).isoformat(),
+        "source_hash": source_hash,
+        "objects": [],
+        "total_objects": 0,
+        "total_colors": 0,
+        "total_est_grams": 0.0,
+        "low_confidence": True,
+        "analysis_skipped": "too_large",
+        "note": f"mesh exceeds {max_triangles:,}-triangle analyze cap",
+    }
+
+
 def _build_sliced_analysis(
     info: dict[str, Any],
     source_hash: str | None,
@@ -284,11 +305,16 @@ async def _analyze_item_body(ctx: dict, item_id: int, _finish: Any) -> None:
 
     import sqlalchemy as sa  # noqa: PLC0415
 
+    from app.config import settings  # noqa: PLC0415
     from app.db import SessionLocal  # noqa: PLC0415
     from app.models.file import File, FileRole  # noqa: PLC0415
     from app.models.item import Item  # noqa: PLC0415
     from app.models.setting import Setting  # noqa: PLC0415
-    from app.worker.mesh_analysis import MESH_ANALYSIS_EXTENSIONS, analyze_file  # noqa: PLC0415
+    from app.worker.analyze_subprocess import (  # noqa: PLC0415
+        AnalyzeCapSkip,
+        run_analyze_subprocess,
+    )
+    from app.worker.mesh_analysis import MESH_ANALYSIS_EXTENSIONS  # noqa: PLC0415
     from app.worker.threemf import read_3mf  # noqa: PLC0415
 
     # Load settings (density + infill) once; fall back to defaults
@@ -415,23 +441,32 @@ async def _analyze_item_body(ctx: dict, item_id: int, _finish: Any) -> None:
                     # Use slicer data (accurate) instead of volume estimate
                     result = _build_sliced_analysis(info, current_sha)
                 else:
-                    # Unsliced 3MF — fall back to trimesh volume estimate
-                    result = analyze_file(
+                    # Unsliced 3MF — fall back to trimesh volume estimate, run in
+                    # an isolated subprocess (issue #37 fix #2 / #4).
+                    result = await run_analyze_subprocess(
                         file_path,
                         density_g_cm3=density_g_cm3,
                         infill_pct=infill_pct,
                         source_hash=current_sha,
+                        timeout_s=settings.ANALYZE_TIMEOUT_S,
+                        mem_limit_mb=settings.ANALYZE_MEM_LIMIT_MB,
+                        max_triangles=settings.ANALYZE_MAX_TRIANGLES,
                     )
 
                 # Store per-file thumbnail path (None when no embedded thumbnail).
                 # Generic field: STL/OBJ renders can populate it in the future.
                 result["thumbnail_path"] = thumb_path
             else:
-                result = analyze_file(
+                # STL / OBJ / PLY: always trimesh-based — run in an isolated
+                # subprocess (issue #37 fix #2 / #4).
+                result = await run_analyze_subprocess(
                     file_path,
                     density_g_cm3=density_g_cm3,
                     infill_pct=infill_pct,
                     source_hash=current_sha,
+                    timeout_s=settings.ANALYZE_TIMEOUT_S,
+                    mem_limit_mb=settings.ANALYZE_MEM_LIMIT_MB,
+                    max_triangles=settings.ANALYZE_MAX_TRIANGLES,
                 )
 
             async with SessionLocal() as db:
@@ -449,7 +484,27 @@ async def _analyze_item_body(ctx: dict, item_id: int, _finish: Any) -> None:
                 result.get("total_objects", 0),
                 result.get("total_est_grams") or 0.0,
             )
+        except AnalyzeCapSkip as exc:
+            # Mesh too large to analyze (issue #37 fix #4) — NOT an error: store a
+            # low-confidence stub, sha-keyed so it is cached and never retried.
+            stub = _build_cap_skip_stub(current_sha, settings.ANALYZE_MAX_TRIANGLES)
+            async with SessionLocal() as db:
+                await db.execute(
+                    sa.update(File)
+                    .where(File.id == f.id)
+                    .values(object_analysis=stub)
+                )
+                await db.commit()
+            skipped += 1
+            log.info(
+                "analyze_item: item=%s file %s skipped — %s",
+                item_id, f.path, exc,
+            )
         except Exception as exc:
+            # Covers AnalyzeTimeout / AnalyzeError (subprocess timed out or
+            # crashed/OOM'd — issue #37 fix #2) as well as any other failure.
+            # The worker survives; this one file is marked errored and retried
+            # on the next rescan (the sha-cache does not store a result for it).
             errors += 1
             log.warning(
                 "analyze_item: item=%s file %s failed: %s",

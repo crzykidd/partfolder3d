@@ -24,6 +24,10 @@ prefix appears only on git tags and GitHub releases.
 
 - Worker no longer crash-loops on a job that repeatedly kills it: orphaned jobs are
   re-queued at most 3× within 6h, then marked terminally failed (issue #37).
+- Mesh analysis now runs in an isolated subprocess with a memory + wall-clock bound, so a
+  pathologically large model can no longer OOM-kill the whole worker (issue #37).
+- Very large meshes (> configurable triangle cap) are skipped and flagged low-confidence
+  instead of attempting an unbounded load (issue #37).
 
 ## [0.6.0] — 2026-07-19
 

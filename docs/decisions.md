@@ -2,6 +2,44 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-19 — Subprocess-isolate analyze + guard huge meshes (issue #37, fixes #2 & #4)
+
+**Context:** Fix #1 (orphan-requeue cap) stops the infinite re-queue loop from a poison
+mesh, but the worker still dies (SIGKILL, uncatchable) on every such file, because
+`analyze_item` loaded meshes with trimesh inline in the worker process. This implements
+fixes #2 (subprocess-isolate analyze) and #4 (guard very large meshes) of issue #37. Fix
+#3 (dedup concurrent analyze jobs) remains open — not attempted here, and issue #37 is
+NOT closed.
+
+- **`RLIMIT_AS` in the child is the crux, not just spawning a subprocess.** A bare
+  subprocess is not sufficient isolation: the worker container has ONE cgroup memory cap
+  shared by every process in it, so an over-large allocation in a plain child could still
+  push total container RSS over the limit — and the kernel's OOM-killer picks its victim
+  by heuristic, which can be the PARENT worker, not the child, taking every other in-flight
+  job down with it. Setting `resource.setrlimit(resource.RLIMIT_AS, ...)` in the child
+  **before importing trimesh/numpy** bounds that process's own virtual address space, so an
+  over-limit allocation raises a catchable `MemoryError` inside the child instead — the
+  parent always survives. Floored at 1024 MB (never bind lower, even if misconfigured) with
+  a default of `ANALYZE_MEM_LIMIT_MB=4096`; mirrors the same `RENDER_CPU_THREADS`-derived
+  numeric-thread env caps `worker.py`'s `startup()` sets, applied inside the child itself
+  so the subprocess module is self-contained (does not depend on `startup()` having already
+  run in this process).
+- **Cap-skip is stored as a low-confidence stub result, not treated as an error.** A mesh
+  over `ANALYZE_MAX_TRIANGLES` (default 2,000,000) raises `MeshTooLargeError` in
+  `mesh_analysis.analyze_file` (new optional `max_triangles` param, `None` = no cap — so
+  existing direct callers/tests are unaffected) → `__CAP_SKIP__:` sentinel → parent raises
+  `AnalyzeCapSkip` → `_analyze_item_body` stores a fixed-shape stub
+  (`analysis_skipped: "too_large"`, `low_confidence: True`, zeroed totals) sha-keyed exactly
+  like a normal result. This makes an oversized mesh a stable, visible "too large to
+  analyze" UI state instead of either an infinite retry or a silent gap — and counts toward
+  `skipped`, not `errors`, so the Job still finishes `succeeded`.
+- **Env-only config for now — no admin UI.** `ANALYZE_TIMEOUT_S`, `ANALYZE_MEM_LIMIT_MB`,
+  `ANALYZE_MAX_TRIANGLES` are `config.py` settings + `.env.example` entries only, mirroring
+  the existing `RENDER_*` caps. No settings-UI/schema work was in scope for this pass.
+- **No Alembic migration, no `File`/`Job` schema change.** The child returns the existing
+  `FileAnalysis` dict as JSON (already what gets stored in `File.object_analysis` JSONB);
+  the cap-skip stub uses the same shape. Purely a worker-process change.
+
 ## 2026-07-19 — Orphan-requeue attempt cap: count by payload item_id + recency window (issue #37, fix #1)
 
 **Context:** A worker crash-loop (e.g. an OOM-killing analyze job on a huge mesh) was

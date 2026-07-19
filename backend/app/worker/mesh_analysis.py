@@ -66,6 +66,16 @@ log = logging.getLogger(__name__)
 # Extensions we know how to analyze
 MESH_ANALYSIS_EXTENSIONS = frozenset({".stl", ".3mf", ".obj", ".ply"})
 
+
+class MeshTooLargeError(Exception):
+    """Raised when a mesh's triangle count exceeds the ``max_triangles`` cap.
+
+    Not a load/parse failure — the caller (``analyze_subprocess``'s child entry
+    point) converts this into a ``__CAP_SKIP__:`` signal so the parent raises
+    ``AnalyzeCapSkip`` and stores a low-confidence stub result instead of
+    treating it as an analysis error (issue #37 fix #4).
+    """
+
 # 3MF XML namespaces
 _NS_3MF = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
 _NS_MAT = "http://schemas.microsoft.com/3dmanufacturing/material/2015/02"
@@ -331,10 +341,24 @@ def _parse_3mf_colors(zip_bytes: bytes) -> dict[str, tuple[list[str], bool]]:
 # ---------------------------------------------------------------------------
 
 
+def _check_triangle_cap(path: Path, total_faces: int, max_triangles: int | None) -> None:
+    """Raise ``MeshTooLargeError`` when *total_faces* exceeds *max_triangles*.
+
+    A no-op when ``max_triangles`` is None (no cap — existing direct callers of
+    ``analyze_file`` are unaffected; see issue #37 fix #4).
+    """
+    if max_triangles is not None and total_faces > max_triangles:
+        raise MeshTooLargeError(
+            f"{path.name} has {total_faces:,} triangles "
+            f"(cap {max_triangles:,}) — skipping analysis"
+        )
+
+
 def _analyze_stl(
     path: Path,
     density: float,
     infill_pct: float,
+    max_triangles: int | None = None,
 ) -> list[ObjectAnalysis]:
     """STL → single object, 1 color."""
     import trimesh  # noqa: PLC0415
@@ -351,6 +375,8 @@ def _analyze_stl(
     else:
         raise ValueError(f"Unexpected trimesh type for STL {path.name}: {type(loaded)}")
 
+    _check_triangle_cap(path, len(mesh.faces), max_triangles)
+
     return [_make_object_result(path.stem, mesh, [], 1, density, infill_pct)]
 
 
@@ -358,6 +384,7 @@ def _analyze_3mf(
     path: Path,
     density: float,
     infill_pct: float,
+    max_triangles: int | None = None,
 ) -> list[ObjectAnalysis]:
     """3MF → potentially multiple objects; colors from XML via lxml."""
     import trimesh  # noqa: PLC0415
@@ -371,6 +398,7 @@ def _analyze_3mf(
     loaded = trimesh.load(str(path))
 
     if isinstance(loaded, trimesh.Trimesh):
+        _check_triangle_cap(path, len(loaded.faces), max_triangles)
         # Single-body 3MF
         # Try to match by first object in color_map
         obj_ids = list(color_map.keys())
@@ -389,6 +417,11 @@ def _analyze_3mf(
 
     if not loaded.geometry:
         raise ValueError(f"3MF loaded as empty Scene: {path.name}")
+
+    # Cap check: total triangles across ALL objects in the scene (a many-small-
+    # object 3MF can still be a huge overall mesh).
+    total_faces = sum(len(m.faces) for m in loaded.geometry.values())
+    _check_triangle_cap(path, total_faces, max_triangles)
 
     # Map geometry names to object ids: trimesh uses metadata or object names
     # Attempt to match color_map keys to geometry names
@@ -432,6 +465,7 @@ def _analyze_generic(
     path: Path,
     density: float,
     infill_pct: float,
+    max_triangles: int | None = None,
 ) -> list[ObjectAnalysis]:
     """OBJ / PLY / other → load, concatenate if multi-body, 1 color."""
     import trimesh  # noqa: PLC0415
@@ -443,6 +477,8 @@ def _analyze_generic(
         meshes = list(loaded.geometry.values())
         if not meshes:
             raise ValueError(f"File loaded as empty Scene: {path.name}")
+        total_faces = sum(len(m.faces) for m in meshes)
+        _check_triangle_cap(path, total_faces, max_triangles)
         # Return each geometry as its own object
         objects: list[ObjectAnalysis] = []
         for name, mesh in loaded.geometry.items():
@@ -450,6 +486,7 @@ def _analyze_generic(
         return objects
 
     if isinstance(loaded, trimesh.Trimesh):
+        _check_triangle_cap(path, len(loaded.faces), max_triangles)
         return [_make_object_result(path.stem, loaded, [], 1, density, infill_pct)]
 
     raise ValueError(f"Unexpected trimesh type for {path.name}: {type(loaded)}")
@@ -465,6 +502,7 @@ def analyze_file(
     density_g_cm3: float = 1.24,
     infill_pct: float = 15.0,
     source_hash: str | None = None,
+    max_triangles: int | None = None,
 ) -> FileAnalysis:
     """Analyze a mesh file and return a FileAnalysis dict.
 
@@ -473,6 +511,10 @@ def analyze_file(
         density_g_cm3: Filament density (g/cm³).  Default 1.24 (PLA).
         infill_pct:    Infill percentage (0–100).  Default 15.
         source_hash:   sha256 of the file bytes; computed here if None.
+        max_triangles: Triangle-count cap (issue #37 fix #4).  Meshes with more
+                       total faces than this raise ``MeshTooLargeError`` instead
+                       of being fully loaded.  ``None`` (default) — no cap, so
+                       existing direct callers of ``analyze_file`` are unaffected.
 
     Returns:
         FileAnalysis dict with 'objects', 'total_objects', 'total_colors',
@@ -480,6 +522,7 @@ def analyze_file(
 
     Raises:
         ValueError: unsupported extension or failed to load.
+        MeshTooLargeError: total triangle count exceeds ``max_triangles``.
         Any trimesh / lxml error is surfaced as-is; callers should wrap in
         try/except and mark the file as unanalyzed.
     """
@@ -495,11 +538,11 @@ def analyze_file(
         raise ValueError(f"Unsupported extension for analysis: {ext!r}")
 
     if ext == ".stl":
-        objects = _analyze_stl(path, density_g_cm3, infill_pct)
+        objects = _analyze_stl(path, density_g_cm3, infill_pct, max_triangles)
     elif ext == ".3mf":
-        objects = _analyze_3mf(path, density_g_cm3, infill_pct)
+        objects = _analyze_3mf(path, density_g_cm3, infill_pct, max_triangles)
     else:
-        objects = _analyze_generic(path, density_g_cm3, infill_pct)
+        objects = _analyze_generic(path, density_g_cm3, infill_pct, max_triangles)
 
     # Aggregate totals
     all_colors: set[str] = set()

@@ -372,6 +372,55 @@ def test_analyze_file_unsupported_extension(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Tests: analyze_file — max_triangles cap (issue #37 fix #4)
+# ---------------------------------------------------------------------------
+
+
+def test_analyze_stl_max_triangles_cap_raises(tmp_path: Path) -> None:
+    """A box STL (12 triangles) over a tiny max_triangles cap → MeshTooLargeError."""
+    from app.worker.mesh_analysis import MeshTooLargeError, analyze_file  # noqa: PLC0415
+
+    p = tmp_path / "box.stl"
+    _write_box_stl(p, size=10.0)
+
+    with pytest.raises(MeshTooLargeError, match="triangles"):
+        analyze_file(p, max_triangles=1)
+
+
+def test_analyze_stl_max_triangles_none_unaffected(tmp_path: Path) -> None:
+    """max_triangles=None (default) behaves exactly as before — no cap applied."""
+    from app.worker.mesh_analysis import analyze_file  # noqa: PLC0415
+
+    p = tmp_path / "box.stl"
+    _write_box_stl(p, size=10.0)
+
+    result = analyze_file(p, max_triangles=None)
+    assert result["total_objects"] == 1
+
+
+def test_analyze_stl_max_triangles_generous_cap_passes(tmp_path: Path) -> None:
+    """A cap comfortably above the mesh's triangle count does not raise."""
+    from app.worker.mesh_analysis import analyze_file  # noqa: PLC0415
+
+    p = tmp_path / "box.stl"
+    _write_box_stl(p, size=10.0)
+
+    result = analyze_file(p, max_triangles=1_000_000)
+    assert result["total_objects"] == 1
+
+
+def test_analyze_3mf_max_triangles_cap_raises(tmp_path: Path) -> None:
+    """A 3MF (tetrahedra) over a tiny max_triangles cap → MeshTooLargeError."""
+    from app.worker.mesh_analysis import MeshTooLargeError, analyze_file  # noqa: PLC0415
+
+    p = tmp_path / "two_color.3mf"
+    _write_two_color_3mf(p)
+
+    with pytest.raises(MeshTooLargeError, match="triangles"):
+        analyze_file(p, max_triangles=1)
+
+
+# ---------------------------------------------------------------------------
 # Tests: _safe_volume_cm3 helpers
 # ---------------------------------------------------------------------------
 
