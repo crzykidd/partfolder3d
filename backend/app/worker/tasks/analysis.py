@@ -241,7 +241,11 @@ async def _analyze_item_inner(ctx: dict, item_id: int) -> None:
     Enqueued alongside render_item on item create / file change / rescan.
     """
     from app.db import SessionLocal  # noqa: PLC0415
-    from app.worker.job_tracker import claim_or_create_job, finish_job  # noqa: PLC0415
+    from app.worker.job_tracker import (  # noqa: PLC0415
+        claim_or_create_job,
+        finish_job,
+        mark_superseded,
+    )
 
     # Issue #30: claim the queued Job row written at enqueue time (→ running), or
     # insert a fresh running row when none exists, so mesh-analysis work is
@@ -263,6 +267,54 @@ async def _analyze_item_inner(ctx: dict, item_id: int) -> None:
             " — continuing without tracking",
             item_id,
         )
+
+    # Issue #37 fix #3 (PRIMARY guard): dedup concurrent analyze jobs per item.
+    # A worker restart's orphan-requeue, an enqueue-time race, or a manual
+    # re-trigger can produce a second analyze Job for the same item while one is
+    # already running. If so, this job is redundant — supersede it and return
+    # BEFORE the expensive _analyze_item_body runs. Best-effort: a tight race
+    # where two claims land in the same instant may both see zero running peers
+    # (acceptable — fix #1's retry cap bounds any residual waste, and the
+    # sha-cache means a second pass mostly no-ops). Only 'running' peers count
+    # (not 'queued') and the current job_id is excluded, so a job can never
+    # supersede itself.
+    if job_id is not None:
+        try:
+            import sqlalchemy as sa  # noqa: PLC0415
+
+            from app.models.job import Job  # noqa: PLC0415
+
+            async with SessionLocal() as db:
+                other_running = await db.execute(
+                    sa.select(Job.id).where(
+                        Job.type == "analyze",
+                        Job.item_id == item_id,
+                        Job.status == "running",
+                        Job.id != job_id,
+                    )
+                )
+                if other_running.scalars().first() is not None:
+                    await mark_superseded(
+                        db,
+                        job_id,
+                        reason=(
+                            "deduped: another analyze job for this item is"
+                            " already running"
+                        ),
+                    )
+                    await db.commit()
+                    log.info(
+                        "analyze_item: item=%s deduped — concurrent analyze"
+                        " already running, superseding",
+                        item_id,
+                    )
+                    return
+        except Exception:
+            log.exception(
+                "analyze_item: dedup check failed for item %s"
+                " — continuing without dedup",
+                item_id,
+            )
 
     async def _finish(
         succeeded: bool,

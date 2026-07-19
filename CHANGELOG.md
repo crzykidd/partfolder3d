@@ -28,6 +28,9 @@ prefix appears only on git tags and GitHub releases.
   pathologically large model can no longer OOM-kill the whole worker (issue #37).
 - Very large meshes (> configurable triangle cap) are skipped and flagged low-confidence
   instead of attempting an unbounded load (issue #37).
+- Analyze jobs are now deduped per item: a second analyze for the same item is skipped at
+  enqueue and superseded at claim time, so a restart or double-enqueue can't run the same
+  expensive mesh analysis twice (issue #37).
 
 ## [0.6.0] — 2026-07-19
 

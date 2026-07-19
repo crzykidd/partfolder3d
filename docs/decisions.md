@@ -2,6 +2,51 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-19 — Dedup concurrent analyze jobs per item (issue #37, fix #3 — LAST of four)
+
+**Context:** fixes #1 (retry cap), #2 (subprocess isolation), and #4 (mesh triangle guard)
+stop the crash loop and the OOM, but a worker restart's orphan-requeue (or an enqueue-time
+race) could still produce a second `analyze` Job for the same item while one was already
+`queued`/`running` — running the same expensive mesh analysis twice concurrently. This is
+fix #3, the last of the four #37 fixes, so issue #37 is now closeable.
+
+- **Claim-time supersede is the PRIMARY guard; enqueue-time skip is churn reduction only.**
+  The claim-time check in `_analyze_item_inner` (right after the Job row is claimed, before
+  `_analyze_item_body` runs) is what actually prevents the expensive work from running
+  twice — it fires however the duplicate job came to be enqueued (race, restart,
+  manual retrigger). The enqueue-time `dedup_active` skip in
+  `_write_queued_row_and_enqueue` only reduces redundant `queued` rows / queue churn; it is
+  not load-bearing for correctness, since a caller with no `db` session (or a lost race) can
+  still bypass it — the claim-time guard is unconditional and catches those too.
+- **Best-effort, not transactional — by design.** The claim-time check is a plain
+  `SELECT ... WHERE status = 'running' AND id != job_id` with no row lock; two claims
+  landing in the same instant can both observe zero running peers and both proceed. This is
+  accepted rather than engineered around (e.g. with `SELECT ... FOR UPDATE` or an advisory
+  lock) because fix #1's retry cap already bounds any residual duplicate work, and the
+  sha-cache means a redundant second pass mostly no-ops instead of re-analyzing from
+  scratch. Only `running` peers count (never `queued`) and the current `job_id` is always
+  excluded, so a job can never supersede itself.
+- **Refresh-miss caveat, accepted as self-healing.** If an analyze is already running and
+  the underlying file genuinely changed in that window, the enqueue-time skip means the new
+  change is not picked up until the next item event or the daily
+  `library_reconcile_scan` — acceptable because it self-heals on the next natural trigger,
+  and the sha-cache would make an immediate redundant run mostly redundant anyway.
+- **Scoped to `analyze` only — render/extract unchanged.** `dedup_active` defaults `False`
+  and is passed `True` only from `_enqueue_analyze`; `_enqueue_render` and
+  `_enqueue_extract_archives` are untouched. Render already has its own guard
+  (`RENDER_CONCURRENCY=1` + subprocess isolation + supersede-on-success), so extending dedup
+  there was out of scope and would have been a second, unreviewed behavior change.
+- **New `mark_superseded` helper, not a `finish_job` reuse.** `finish_job` only produces
+  `succeeded`/`failed` and its terminal-status guard would treat `superseded` as a no-op
+  target it can't reach. `mark_superseded` (in `job_tracker.py`) is a small, distinct
+  terminal transition with its own terminal guard (mirroring `finish_job`'s), so it can
+  never clobber a `cancelled`/`succeeded`/`failed` row that raced ahead of it.
+- **No Alembic migration, no schema change** — both guards are query-based; `Job.status`
+  already documents `superseded` as a valid terminal state.
+- **All four #37 fixes are now present in `CHANGELOG.md [Unreleased]`** (retry cap,
+  subprocess isolation, mesh guard, and this dedup fix) — the commit for this task may
+  `closes #37`.
+
 ## 2026-07-19 — Subprocess-isolate analyze + guard huge meshes (issue #37, fixes #2 & #4)
 
 **Context:** Fix #1 (orphan-requeue cap) stops the infinite re-queue loop from a poison

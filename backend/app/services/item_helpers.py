@@ -173,6 +173,7 @@ async def _write_queued_row_and_enqueue(
     task: str,
     job_type: str,
     enqueue_kwargs: dict[str, Any] | None = None,
+    dedup_active: bool = False,
 ) -> None:
     """Write a ``queued`` Job row (when *db* is given) and enqueue *task*.
 
@@ -186,6 +187,16 @@ async def _write_queued_row_and_enqueue(
     guarded — neither may block or roll back item creation/rescan.  When *db* is
     None (a caller that cannot supply a session) we simply enqueue without a
     queued row; the worker's claim-or-create still tracks the job.
+
+    Issue #37 fix #3: when *dedup_active* is True (opt-in — only ``analyze``
+    passes it; render/extract keep the unchanged behaviour), a non-terminal
+    (``queued``/``running``) Job of this *job_type* already existing for
+    *item_id* short-circuits this call entirely — no row is written and nothing
+    is enqueued. This is a churn-reduction guard only; the PRIMARY dedup
+    protection is the claim-time supersede in ``analyze_item``. Checked inside
+    the same SAVEPOINT as the row write so it observes a consistent snapshot.
+    When *db* is None the guard cannot run and we fall through to the plain
+    enqueue — the claim-time guard still catches the duplicate.
     """
     arq_job_id = uuid.uuid4().hex
     row_written = False
@@ -195,6 +206,21 @@ async def _write_queued_row_and_enqueue(
             from ..models.job import Job  # noqa: PLC0415
 
             async with db.begin_nested():
+                if dedup_active:
+                    existing = await db.execute(
+                        sa.select(Job.id).where(
+                            Job.item_id == item_id,
+                            Job.type == job_type,
+                            Job.status.in_(("queued", "running")),
+                        )
+                    )
+                    if existing.scalars().first() is not None:
+                        log.debug(
+                            "%s: dedup — active job already exists for item %s,"
+                            " skipping enqueue",
+                            task, item_id,
+                        )
+                        return
                 db.add(
                     Job(
                         type=job_type,
@@ -279,9 +305,17 @@ async def _enqueue_analyze(
     Phase 16: called on item create / file change / per-item Rescan.
     Issue #30: writes a ``queued`` Job row (type=analyze) so mesh-analysis work
     is visible before and while it runs.  Never blocks item creation.
+    Issue #37 fix #3: ``dedup_active=True`` — skips the enqueue entirely when a
+    queued/running analyze Job already exists for this item (churn reduction;
+    the claim-time supersede in ``analyze_item`` is the primary guard).
     """
     await _write_queued_row_and_enqueue(
-        item_id, pool=pool, db=db, task="analyze_item", job_type="analyze"
+        item_id,
+        pool=pool,
+        db=db,
+        task="analyze_item",
+        job_type="analyze",
+        dedup_active=True,
     )
 
 
