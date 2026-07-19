@@ -42,6 +42,7 @@ import { PasswordResetPage } from '@/pages/admin/PasswordResetPage'
 import { AiProvidersPage } from '@/pages/admin/AiProvidersPage'
 import { AiUsagePage } from '@/pages/admin/AiUsagePage'
 import { SiteCapabilitiesPage } from '@/pages/admin/SiteCapabilitiesPage'
+import { ManyfoldPage } from '@/pages/admin/ManyfoldPage'
 import { JobsPage } from '@/pages/admin/JobsPage'
 import { ScheduledJobsPage } from '@/pages/admin/ScheduledJobsPage'
 import { ReviewsPage } from '@/pages/admin/ReviewsPage'
@@ -80,6 +81,7 @@ const AI_TABS = [
   { label: 'AI Providers',     path: '/admin/ai/providers' },
   { label: 'AI Usage',         path: '/admin/ai/usage' },
   { label: 'Site Capabilities', path: '/admin/ai/sites' },
+  { label: 'Manyfold',         path: '/admin/ai/manyfold' },
 ]
 
 const ACTIVITY_TABS = [
@@ -190,6 +192,7 @@ function App() {
                     <Route path="providers" element={<AiProvidersPage />} />
                     <Route path="usage" element={<AiUsagePage />} />
                     <Route path="sites" element={<SiteCapabilitiesPage />} />
+                    <Route path="manyfold" element={<ManyfoldPage />} />
                   </Route>
 
                   {/* Jobs & Activity: Jobs · Scheduled · Reviews · Issues · Change Log */}

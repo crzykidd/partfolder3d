@@ -145,6 +145,12 @@ class Settings(BaseSettings):
     # Max size (MB) of an HTML page body read by the URL scraper.  Streamed with
     # the same abort-on-cap guard; non-HTML/oversized responses are rejected.
     SCRAPE_HTML_MAX_MB: int = 5
+    # Max size (MB) of a single 3D model/archive file downloaded from a Manyfold
+    # instance (Part 2 of 3). No generic "arbitrary file download" cap existed
+    # elsewhere in the codebase to reuse (SCRAPE_IMAGE_MAX_MB is image-only); this
+    # is sized like ZIP_MAX_UNCOMPRESSED_MB since model archives can be large.
+    # download_file() streams and aborts once this cap is exceeded.
+    MANYFOLD_FILE_MAX_MB: int = 2048
 
     # ---- Sharing (Phase 7) ----
     # NOTE: the default share-link expiry is NOT an env var — it lives in the DB

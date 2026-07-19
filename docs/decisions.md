@@ -2,6 +2,219 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-17 — Manyfold connector: three more UI-live-test fixes
+
+**Context:** Owner tested the finished feature through the wizard UI against the real
+private-IP instance; three issues surfaced that the mocked integration tests didn't.
+
+- **Creation-time SSRF exemption for configured instances.** `POST /api/import-sessions`
+  SSRF-checks `source_url` before persisting; a private-IP Manyfold instance was rejected
+  with "URL is not allowed." *before* the worker's Manyfold branch ran. Added
+  `url_matches_enabled_manyfold(db, url)` (same `extract_domain` + enabled-instance match as
+  the worker) and skip the pre-check for those URLs — completing the "admin-configured
+  instance is trusted" posture across every layer (creation gate, worker, download).
+- **Wizard renders locally-staged scrape images.** Manyfold images are staged *local* files
+  (`source='scrape'`, `is_url=false`) because they need the bearer token to download —
+  unlike normal scrape images which are remote `is_url=true` hotlinks. The Images step only
+  served local files for `capture`/`upload`, so Manyfold images showed "(preview after
+  commit)". Added `scrape` to the served-locally set; the existing `serve_session_file`
+  staging-dir endpoint already streams them.
+- **Derive file extension from `encodingFormat` when the Manyfold filename lacks one.** This
+  instance serves display-name filenames with no extension (`Muchshape Lollypop Rose
+  Universal`), which would leave a `.3mf` unrecognized by the render/analyze pipeline and
+  serve images as `octet-stream`. `_ensure_manyfold_ext(name, mime)` appends an extension
+  from a MIME→ext map when the name has no sensible suffix; a name that already has one is
+  trusted.
+
+## 2026-07-17 — Manyfold connector: two live-test fixes (internal-URL rewrite, host-scoped SSRF trust)
+
+**Context:** End-to-end validation of the connector against a real instance
+(`manyfold.crzynet.com`, pulling `.../models/4jlf2g117t4p`) surfaced two bugs that unit
+tests with a canned public host could not — both would have made real imports fail.
+
+- **Rewrite response-serialized URLs onto the configured `base_url` origin.** A Manyfold
+  behind a reverse proxy serializes `@id` / `contentUrl` / `preview_file` / `creator`
+  with its *internal* host (here `http://localhost:3214`), not the public origin we call.
+  `fetch_model` fetched those internal URLs → connection-refused (and the SSRF guard would
+  block localhost anyway) → **every file silently dropped** (`files: 0`). Fix: a
+  `_rewrite_to_base()` helper swaps scheme+host+port for `base_url`'s on every
+  response-provided URL, since all those resources are served by the same instance. The
+  only legitimately cross-host hop is the download-time 302 to object storage, handled by
+  `download_file`.
+- **SSRF trust is host-scoped to the configured instance, not blanket, and not applied to
+  the instance's own host.** A self-hosted Manyfold legitimately resolves to a private/LAN
+  IP (here `192.168.51.1`). `download_file` was SSRF-guarding *every* hop including the
+  first (the trusted instance) → all downloads refused. Fix: exempt hops whose host equals
+  the configured instance host (matching how the token/model JSON fetches already trust
+  `base_url`, and the FlareSolverr `base_url` precedent); still guard any redirect that
+  *leaves* the instance. Caveat unchanged: a redirect to internal/private object storage
+  on a *different* host is still refused (documented private-object-storage limitation).
+
+## 2026-07-17 — Manyfold connector Part 3: admin page placement, conditional Assets step
+
+**Context:** Wiring up the frontend for the Manyfold connector — an admin screen to
+register/enable instances (Part 1 backend) and an import-wizard affordance to review
+pulled 3D files (Part 2 backend). Final part of 3.
+
+- **Manyfold instances got their own sibling admin page (`ManyfoldPage.tsx` at
+  `/admin/ai/manyfold`), not a section bolted onto `SiteCapabilitiesPage.tsx`.**
+  `SiteCapabilitiesPage`'s "Scrapers" section is a fixed pair of named backends
+  (FlareSolverr, AgentQL) rendered as collapsible cards with drag-to-reorder — that
+  shape doesn't fit a variable-length list of admin-created instances with their own
+  id-keyed CRUD (add/edit/rotate-secret/delete). `AiProvidersPage.tsx` (multiple named
+  AI provider configs, each with a write-only credential) is the closer structural
+  analog, so `ManyfoldPage` mirrors its table-row + inline-add-form + inline-edit-panel
+  pattern instead. It was added as a 4th tab in the existing "AI & Scraping" section
+  (`AI_TABS` in `App.tsx`) rather than a new top-level admin section, matching where an
+  admin would already look for AI-adjacent scraping config.
+- **The wizard's Assets step is conditional on `session.files.length > 0`, not always
+  shown.** The prior wizard step sequence (`WIZARD_STEPS` in `import-utils.ts`) was a
+  fixed 5-step array driving `nextStep`/`prevStep`/`stepIndex`/`isFirstStep`/
+  `isLastStep`/`StepProgress` by array position. Rather than special-casing "skip if
+  session has no files" inline at each call site, `WIZARD_STEPS` grew a 6th step
+  (`'assets'`, placed before `'summary'`) and every navigation helper took an optional
+  `hasFiles` param (default `false`) that filters it out via a new `visibleSteps()`
+  helper. Defaulting to `false` means every pre-existing single-argument call site
+  (and test) keeps the old 5-step behavior unchanged — only `ImportWizardPage.tsx`
+  (which now computes `hasFiles = session.files.length > 0` and threads it through)
+  and `StepProgress` (new optional `hasFiles` prop) opt into showing the step. This
+  keeps the step visible for *any* session with staged files, not just Manyfold
+  pulls — a plain multi-file upload benefits too, per the handoff prompt's "so it also
+  benefits plain uploads" requirement.
+- **`SummaryStep`'s Files row shows the plain `"N file(s)"` text when every staged file
+  is still selected (the default), and only switches to `"N of M file(s) selected"`
+  once something has been deselected.** This keeps every pre-existing test assertion
+  on that literal text passing unchanged (backward compatible) while still surfacing
+  the selection state once it diverges from "everything selected." A file with zero
+  selected files (all deselected) gets an additional warn note that the commit will be
+  metadata-only, mirroring the existing zero-files note.
+
+## 2026-07-17 — Manyfold connector Part 2: primary-path bypass, redirect-auth posture, error/edge behavior
+
+**Context:** Building the connector (API client + worker import path + asset download) —
+Part 2 of 3 (config/admin API landed in Part 1; frontend is Part 3). When an import URL's
+domain matches an admin-registered `ManyfoldInstance`, the worker should pull the model
+straight from Manyfold's OAuth API instead of running the generic HTML scraper.
+
+**Decisions:**
+
+- **Manyfold is a *primary* path that fully bypasses `scrape_url` and the fallback chain
+  (FlareSolverr/AgentQL), not an additional fallback tried after them.** Manyfold's model
+  pages are an authenticated SPA (no public OG tags), so a scrape attempt there would
+  never yield anything — trying it first (or as a fallback) would just burn a scrape/
+  fallback-backend budget call for a guaranteed-empty result. `_maybe_manyfold_import` is
+  called at the very top of `process_import_session`'s `if session.source_url:` block; a
+  `True` return short-circuits with an immediate `db.commit()` + `return`, before
+  `extract_domain`/`SiteCapability`/`scrape_url` ever run.
+- **Not-a-model-URL (domain matches an instance, but the path isn't `/models/{id}`) lands
+  in `pending_wizard` with a clear note, not `failed`.** Nothing actually went wrong here
+  — the user just pasted a collection/profile link — so it's treated like a "blocked"
+  static-scrape result (manual entry available), not an error state.
+- **Any real Manyfold API failure (missing/undecryptable secret, auth/network/parse error
+  from `fetch_model`) sets the session to `failed`, not `pending_wizard`, and does NOT
+  fall through to a generic scrape.** A scrape would be doomed for the same SPA reason as
+  above, so falling through would just trade one empty result for a slower one; `failed`
+  with a clear `scrape_note`/`error` is more honest about what happened.
+- **A single file/image whose download fails (broken link, or an SSRF-blocked redirect)
+  is skipped, not treated as a whole-import failure** — mirrors how the commit-time
+  scraped-image downloader already treats a bad image URL as best-effort. The two
+  per-file `download_file` calls in `_maybe_manyfold_import` catch both
+  `ManyfoldError` and `SSRFBlockedError` and `continue`; only a failure in the model
+  metadata fetch itself (`fetch_model`) is a whole-import failure.
+- **`download_file` drops the `Authorization: Bearer` token the moment a redirect
+  crosses to a different host.** Manyfold's `contentUrl` can 302 to an object-storage
+  host (e.g. S3/MinIO) that authenticates via its own presigned-URL query params, not a
+  Bearer token — sending Manyfold's OAuth token to that third party would leak it
+  needlessly. Every hop (including the first) is re-validated with `assert_safe_url`
+  before it's followed, exactly mirroring `guarded_fetch`'s SSRF posture for the scrape
+  path; the residual DNS-rebinding TOCTOU caveat already recorded for `guarded_fetch`
+  applies here identically (not re-litigated).
+- **No existing generic "max file size to download" setting existed to reuse** —
+  `SCRAPE_IMAGE_MAX_MB` is image-only. Added `MANYFOLD_FILE_MAX_MB` (default 2048,
+  matching `ZIP_MAX_UNCOMPRESSED_MB`'s scale since model archives can be large) rather
+  than inventing a smaller/unrelated cap or leaving 3D-file downloads unbounded.
+- **Session fields are populated the same way the static-scrape path does: plain
+  `creator_name`/`creator_profile_url`/`creator_source_site` strings, not an eager
+  `_ensure_creator(...)` call that materializes a `Creator` row during processing.**
+  Creator FK resolution stays a commit-time-only concern (`_commit_session_inner` step
+  1) across every import source, so the wizard can still let the user edit or override
+  the creator before any `Creator` row exists. (The prompt's "creator (via
+  `_ensure_creator`...)" phrasing was read as "reuse the codebase's creator-resolution
+  building blocks," not as a literal instruction to duplicate commit-time creator
+  creation into the worker — the overriding instruction was "populate the session the
+  SAME way the static-scrape path does," which never calls `_ensure_creator` either.)
+- **`default_image_path` honors Manyfold's own `preview_file` designation** (the
+  downloaded image whose file `@id` matches `model.preview_file_id` is marked
+  `is_default=True` and its staged path is written to `session.default_image_path`)
+  rather than defaulting to image order 0 like the static-scrape path (which has no
+  equivalent "this is the cover image" signal from the source site). Falls back to the
+  first successfully staged image if the designated preview image failed to download.
+- **`hasPart[].encodingFormat` starting with `image/` classifies a file as an image;
+  everything else (`model/stl`, `model/3mf`, `application/*`, ...) is staged as an
+  `ImportSessionFile` with `role="model"`.** No allowlist of 3D formats is maintained —
+  Manyfold's own MIME classification is trusted as-is, consistent with the API doc's
+  "build defensively, tolerate missing keys" guidance (an unrecognized non-image MIME
+  type still lands as a downloadable model file rather than being silently dropped).
+- **`ImportSessionFile.selected` (migration 0024) is a session-wide per-file commit
+  toggle, not Manyfold-specific**, even though Manyfold multi-file staging is what
+  motivated it — a model import can stage several file variants (e.g. a presupported
+  and a non-presupported STL) and the user picks which land in the item. Defaults `True`
+  so every pre-existing staged-file flow (plain upload, inbox) is unaffected until a
+  user explicitly deselects something via the new
+  `PATCH /api/import-sessions/{id}/files/{file_id}` endpoint. `_commit_session_inner`
+  skips `selected=False` rows when moving files into the item dir but leaves their
+  bytes in staging untouched (the staging dir is still fully removed at the end of
+  commit regardless, as it already was for every import type — deselecting a file
+  means "don't put this in the item," not "keep it around after commit").
+- **Fixed a latent bug found while wiring up local Manyfold-staged images**: the
+  commit-time image loop's `is_url=False` branch only ever mapped `source == "capture"`
+  to `ImageSource.captured`, with every other local-image `source` value (including the
+  pre-existing `"scrape"` value used by nothing until now) falling through to
+  `ImageSource.uploaded`. A Manyfold-downloaded image is `source="scrape"`, so it now
+  correctly maps to `ImageSource.scraped`.
+
+## 2026-07-17 — Manyfold connector Part 1: base_url/domain split, secret masking, id-keyed CRUD
+
+**Context:** Building admin config for Manyfold instances (self-hosted, OAuth2
+`client_credentials` API) — Part 1 of 3 (config + admin API only; connector/worker in
+Part 2, frontend in Part 3). Two existing admin-CRUD patterns were candidates to mirror:
+`site_capabilities.py` (domain-keyed, single row per domain, PK = domain) and
+`ai_providers.py` (id-keyed, multiple rows, `has_key: bool` secret masking).
+
+**Decisions:**
+
+- **Id-keyed CRUD (mirrors `ai_providers.py`), not domain-keyed.** An admin registers
+  potentially several Manyfold instances; `id` is the primary key and `domain` is a
+  separate unique-indexed column, not the PK. This matches the prompt's explicit route
+  shape (`GET/PATCH/DELETE /{id}`) and leaves room for a future instance rename/base_url
+  change without an awkward PK rewrite (`site_capabilities.py`'s domain-as-PK would force
+  exactly that on a base_url change).
+- **`base_url` (full origin, used for API calls) vs. `domain` (host-only, unique, used to
+  match an import URL → instance in Part 2) are separate columns, `domain` derived from
+  `base_url` on every write.** Normalization: lowercase host, require `http`/`https`
+  scheme, strip a trailing path slash. `domain` intentionally excludes the port so two
+  instances can't silently collide on `example.com` vs `example.com:8080` without an
+  explicit decision — deferred; not needed for Part 1's single-current-deployment case,
+  revisit if a port-differentiated setup is requested.
+- **Secret masking follows the `ai_providers.py` `has_key` convention** (`has_secret:
+  bool` here) rather than `site_capabilities.py`'s separate-token-table shape — a single
+  `client_secret_enc` column on the same row is simpler and there's exactly one secret
+  per instance (no multi-token-per-domain need).
+- **`client_id` is stored plaintext** (it's a public OAuth identifier, not a secret,
+  matching Manyfold's own `/oauth/applications` UI which treats it as non-sensitive);
+  only `client_secret` is Fernet-encrypted via `app.crypto`.
+- **`manyfold_client.py`'s HTTP call is behind a `_manyfold_token_caller` seam that
+  returns `(status_code, json_body)`** rather than a `ScrapeResult`-shaped return (the
+  `flaresolverr_client.py`/`agentql_client.py` convention) — this module does a single
+  OAuth token request/response, not a best-effort scrape, so callers (the test-connection
+  endpoint) want a typed exception (`ManyfoldAuthError`/`ManyfoldScopeError`/
+  `ManyfoldConnectionError`) they can branch on, not a result object with a `blocked`
+  flag.
+- **`base_url` is NOT SSRF-guarded** — it's admin-trusted config (entered via the admin
+  API, not derived from a scraped/user-supplied import URL), mirroring FlareSolverr's
+  configured `base_url` exemption. Part 2 will need to SSRF-guard the file-download path
+  separately, since a Manyfold response could contain a redirect to an internal host.
+
 ## 2026-07-05 — "Print asset" role-set for has_asset flag and catalog filter
 
 **Context:** The catalog "has print asset" filter (#28) needs a precise definition of which

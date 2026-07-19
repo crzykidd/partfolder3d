@@ -53,6 +53,7 @@ function makeFile(overrides: Partial<ImportSessionFile>): ImportSessionFile {
     original_name: 'model.stl',
     role: 'model',
     size: 100,
+    selected: true,
     ...overrides,
   }
 }

@@ -164,6 +164,7 @@ from .routers import (  # noqa: E402  # noqa: E402
     items,
     jobs,
     libraries,
+    manyfold,
     me,
     password_reset,
     print_records,
@@ -218,6 +219,8 @@ app.include_router(tag_admin.router)
 app.include_router(agentql.router)
 # Issue #8 — Admin filesystem browser
 app.include_router(fs_browse.router)
+# Manyfold connector — Part 1: config + admin API
+app.include_router(manyfold.router)
 
 
 # ---------------------------------------------------------------------------

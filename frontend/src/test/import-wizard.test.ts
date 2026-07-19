@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   WIZARD_STEPS,
+  visibleSteps,
   nextStep,
   prevStep,
   stepIndex,
@@ -74,8 +75,66 @@ describe('stepIndex', () => {
     expect(stepIndex('summary')).toBe(4)
   })
 
-  it('total steps count is 5', () => {
-    expect(WIZARD_STEPS.length).toBe(5)
+  it('total steps count is 5 for the default (no staged files) sequence', () => {
+    expect(visibleSteps(false).length).toBe(5)
+  })
+
+  it('WIZARD_STEPS is the full 6-step canonical order, including the conditional "assets" step', () => {
+    expect(WIZARD_STEPS.length).toBe(6)
+    expect(WIZARD_STEPS).toEqual(['title', 'images', 'tags', 'creator', 'assets', 'summary'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// visibleSteps / hasFiles-aware navigation (Manyfold Part 3 — conditional
+// "assets" step, only shown when the session has staged files)
+// ---------------------------------------------------------------------------
+
+describe('visibleSteps', () => {
+  it('omits "assets" when hasFiles is false (default)', () => {
+    expect(visibleSteps(false)).toEqual(['title', 'images', 'tags', 'creator', 'summary'])
+    expect(visibleSteps()).toEqual(['title', 'images', 'tags', 'creator', 'summary'])
+  })
+
+  it('includes "assets" (before summary) when hasFiles is true', () => {
+    expect(visibleSteps(true)).toEqual([
+      'title', 'images', 'tags', 'creator', 'assets', 'summary',
+    ])
+  })
+})
+
+describe('nextStep / prevStep with hasFiles=true', () => {
+  it('advances from creator to assets, then assets to summary', () => {
+    expect(nextStep('creator', true)).toBe('assets')
+    expect(nextStep('assets', true)).toBe('summary')
+  })
+
+  it('goes back from summary to assets, then assets to creator', () => {
+    expect(prevStep('summary', true)).toBe('assets')
+    expect(prevStep('assets', true)).toBe('creator')
+  })
+
+  it('skips assets entirely when hasFiles is false', () => {
+    expect(nextStep('creator', false)).toBe('summary')
+    expect(prevStep('summary', false)).toBe('creator')
+  })
+})
+
+describe('stepIndex / isFirstStep / isLastStep with hasFiles=true', () => {
+  it('assets sits at index 4 (before summary at index 5)', () => {
+    expect(stepIndex('assets', true)).toBe(4)
+    expect(stepIndex('summary', true)).toBe(5)
+  })
+
+  it('summary is still the last step whether or not assets is visible', () => {
+    expect(isLastStep('summary', true)).toBe(true)
+    expect(isLastStep('summary', false)).toBe(true)
+    expect(isLastStep('assets', true)).toBe(false)
+  })
+
+  it('title is still the first step whether or not assets is visible', () => {
+    expect(isFirstStep('title', true)).toBe(true)
+    expect(isFirstStep('title', false)).toBe(true)
   })
 })
 

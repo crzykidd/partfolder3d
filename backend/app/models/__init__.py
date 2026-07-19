@@ -26,6 +26,7 @@ from .issue import Issue, IssueSeverity, IssueStatus, IssueType
 from .item import Item
 from .job import Job
 from .library import Library
+from .manyfold import ManyfoldInstance
 from .password_reset import PasswordResetToken
 from .print_record import PrintRecord
 from .review_item import ReviewItem, ReviewStatus
@@ -93,4 +94,6 @@ __all__ = [
     "PrintRecord",
     "ShareLink",
     "ShareAuditEvent",
+    # Manyfold connector (Part 1 of 3)
+    "ManyfoldInstance",
 ]

@@ -47,8 +47,15 @@ class ImportSessionFileOut(BaseModel):
     original_name: str
     role: str
     size: int
+    selected: bool
 
     model_config = {"from_attributes": True}
+
+
+class PatchFileSelectionRequest(BaseModel):
+    """Request body for PATCH /api/import-sessions/{id}/files/{file_id}."""
+
+    selected: bool
 
 
 class ImportSessionImageOut(BaseModel):

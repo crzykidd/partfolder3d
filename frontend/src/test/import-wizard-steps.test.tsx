@@ -24,6 +24,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { TagsStep } from '@/pages/import-wizard/TagsStep'
 import { SummaryStep } from '@/pages/import-wizard/SummaryStep'
+import { AssetsStep } from '@/pages/import-wizard/AssetsStep'
 import type { ImportSession } from '@/lib/api'
 
 // ---------------------------------------------------------------------------
@@ -41,6 +42,7 @@ vi.mock('@/lib/api', async () => {
     uploadSessionFiles: vi.fn(),
     deleteSessionFile: vi.fn(),
     commitImportSession: vi.fn(),
+    patchSessionFileSelection: vi.fn(),
   }
 })
 
@@ -184,7 +186,7 @@ describe('SummaryStep — Files row surfaces zero-file commit (#27 step 5)', () 
       <SummaryStep
         session={makeSession({
           files: [
-            { id: 1, staged_path: '/x/a.stl', original_name: 'a.stl', role: 'model', size: 123 },
+            { id: 1, staged_path: '/x/a.stl', original_name: 'a.stl', role: 'model', size: 123, selected: true },
           ],
         })}
         onPrev={() => {}}
@@ -250,8 +252,8 @@ describe('SummaryStep — mid-wizard file attach UI (#27 fix)', () => {
         session={makeSession({
           source_type: 'url',
           files: [
-            { id: 1, staged_path: '/s/a.stl', original_name: 'a.stl', role: 'model', size: 42 },
-            { id: 2, staged_path: '/s/b.zip', original_name: 'b.zip', role: 'zip', size: 100 },
+            { id: 1, staged_path: '/s/a.stl', original_name: 'a.stl', role: 'model', size: 42, selected: true },
+            { id: 2, staged_path: '/s/b.zip', original_name: 'b.zip', role: 'zip', size: 100, selected: true },
           ],
         })}
         onPrev={() => {}}
@@ -277,7 +279,7 @@ describe('SummaryStep — mid-wizard file attach UI (#27 fix)', () => {
         session={makeSession({
           source_type: 'url',
           files: [
-            { id: 7, staged_path: '/s/x.stl', original_name: 'x.stl', role: 'model', size: 10 },
+            { id: 7, staged_path: '/s/x.stl', original_name: 'x.stl', role: 'model', size: 10, selected: true },
           ],
         })}
         onPrev={() => {}}
@@ -301,7 +303,7 @@ describe('SummaryStep — mid-wizard file attach UI (#27 fix)', () => {
   it('calls uploadSessionFiles when files are selected', async () => {
     const updatedSession = makeSession({
       source_type: 'url',
-      files: [{ id: 5, staged_path: '/s/new.stl', original_name: 'new.stl', role: 'model', size: 99 }],
+      files: [{ id: 5, staged_path: '/s/new.stl', original_name: 'new.stl', role: 'model', size: 99, selected: true }],
     })
     vi.mocked(api.uploadSessionFiles).mockResolvedValue(updatedSession)
 
@@ -425,7 +427,7 @@ describe('SummaryStep — attach-or-create modal for url+0-file sessions', () =>
         session={makeSession({
           source_type: 'url',
           files: [
-            { id: 1, staged_path: '/s/a.stl', original_name: 'a.stl', role: 'model', size: 42 },
+            { id: 1, staged_path: '/s/a.stl', original_name: 'a.stl', role: 'model', size: 42, selected: true },
           ],
         })}
         onPrev={() => {}}
@@ -534,5 +536,136 @@ describe('SummaryStep — attach-or-create modal for url+0-file sessions', () =>
       expect(screen.getByText('Files')).toBeInTheDocument()
     })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// SummaryStep — Files row reflects the selected-file count (Manyfold Part 3)
+// ---------------------------------------------------------------------------
+
+describe('SummaryStep — selected file count (Manyfold Part 3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    sessionStorage.setItem('pf3d-attach-modal-dismissed-sess-1', '1')
+    vi.mocked(api.listLibraries).mockResolvedValue([])
+  })
+
+  it('shows "N of M file(s) selected" when some staged files are deselected', async () => {
+    renderWithProviders(
+      <SummaryStep
+        session={makeSession({
+          files: [
+            { id: 1, staged_path: '/s/a.stl', original_name: 'a.stl', role: 'model', size: 42, selected: true },
+            { id: 2, staged_path: '/s/b.stl', original_name: 'b.stl', role: 'model', size: 10, selected: false },
+          ],
+        })}
+        onPrev={() => {}}
+        onCancelled={() => {}}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('1 of 2 file(s) selected')).toBeInTheDocument()
+    })
+  })
+
+  it('warns when every staged file is deselected', async () => {
+    renderWithProviders(
+      <SummaryStep
+        session={makeSession({
+          files: [
+            { id: 1, staged_path: '/s/a.stl', original_name: 'a.stl', role: 'model', size: 42, selected: false },
+          ],
+        })}
+        onPrev={() => {}}
+        onCancelled={() => {}}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('0 of 1 file(s) selected')).toBeInTheDocument()
+    })
+    expect(
+      screen.getByText('All staged files are deselected — this will commit as metadata-only.'),
+    ).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AssetsStep — Manyfold Part 3 wizard file-selection step
+// ---------------------------------------------------------------------------
+
+describe('AssetsStep', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  function makeFiles(): ImportSession['files'] {
+    return [
+      { id: 1, staged_path: '/s/a.stl', original_name: 'a.stl', role: 'model', size: 1024, selected: true },
+      { id: 2, staged_path: '/s/b.zip', original_name: 'b.zip', role: 'zip', size: 2048, selected: true },
+    ]
+  }
+
+  it('lists staged files with name, role, and size, checked by default', async () => {
+    renderWithProviders(
+      <AssetsStep
+        session={makeSession({ files: makeFiles() })}
+        onNext={() => {}}
+        onPrev={() => {}}
+      />,
+    )
+
+    expect(screen.getByText('a.stl')).toBeInTheDocument()
+    expect(screen.getByText('b.zip')).toBeInTheDocument()
+
+    const checkboxes = screen.getAllByRole('checkbox') as HTMLInputElement[]
+    expect(checkboxes).toHaveLength(2)
+    expect(checkboxes.every((cb) => cb.checked)).toBe(true)
+
+    expect(screen.getByText('2 of 2 files selected')).toBeInTheDocument()
+  })
+
+  it('unchecking a file calls patchSessionFileSelection with selected=false', async () => {
+    const updatedSession = makeSession({
+      files: [
+        { id: 1, staged_path: '/s/a.stl', original_name: 'a.stl', role: 'model', size: 1024, selected: false },
+        { id: 2, staged_path: '/s/b.zip', original_name: 'b.zip', role: 'zip', size: 2048, selected: true },
+      ],
+    })
+    vi.mocked(api.patchSessionFileSelection).mockResolvedValue(updatedSession)
+
+    renderWithProviders(
+      <AssetsStep
+        session={makeSession({ files: makeFiles() })}
+        onNext={() => {}}
+        onPrev={() => {}}
+      />,
+    )
+
+    const checkboxes = screen.getAllByRole('checkbox')
+    fireEvent.click(checkboxes[0])
+
+    await waitFor(() => {
+      expect(vi.mocked(api.patchSessionFileSelection)).toHaveBeenCalledWith('sess-1', 1, false)
+    })
+  })
+
+  it('calls onNext / onPrev from the footer buttons', () => {
+    const onNext = vi.fn()
+    const onPrev = vi.fn()
+    renderWithProviders(
+      <AssetsStep
+        session={makeSession({ files: makeFiles() })}
+        onNext={onNext}
+        onPrev={onPrev}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /back/i }))
+    expect(onPrev).toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: /next/i }))
+    expect(onNext).toHaveBeenCalled()
   })
 })

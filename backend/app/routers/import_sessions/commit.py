@@ -117,7 +117,13 @@ async def _commit_session_inner(
     item_dir.mkdir(parents=True, exist_ok=True)
 
     # ---- 3. Move staged files into item dir ----
+    # Files the user deselected in the wizard (selected=False — e.g. a
+    # Manyfold import staged several file variants and the user only wants
+    # some of them) are left in staging untouched; only their bytes are
+    # dropped when the staging dir is cleaned up in step 12.
     for sf in session.files:
+        if not sf.selected:
+            continue
         src_path = Path(sf.staged_path)
         if src_path.exists():
             dest_path = item_dir / src_path.name
@@ -275,10 +281,12 @@ async def _commit_session_inner(
                 log.warning("commit: failed to download image %s", _safe_img_url)
         else:
             # Local (is_url=False) session image — e.g. a wizard viewport
-            # capture (#26) staged in the session's staging dir.  Locate the
-            # source bytes (prefer the staged absolute path; fall back to a file
-            # already sitting in the item dir), copy into images/, and record a
-            # matching images/<name> Image row.
+            # capture (#26), or a Manyfold model image downloaded straight to
+            # staging during processing (source="scrape", Part 2 of 3) — staged
+            # in the session's staging dir.  Locate the source bytes (prefer the
+            # staged absolute path; fall back to a file already sitting in the
+            # item dir), copy into images/, and record a matching images/<name>
+            # Image row.
             rel = Path(si.path).name
             src = Path(si.path)
             src_file: Path | None = None
@@ -294,11 +302,12 @@ async def _commit_session_inner(
                 if src_file.resolve() != dest.resolve():
                     shutil.copy2(str(src_file), str(dest))
                 rel_path = str(dest.relative_to(item_dir))
-                img_source = (
-                    ImageSource.captured
-                    if si.source == "capture"
-                    else ImageSource.uploaded
-                )
+                if si.source == "capture":
+                    img_source = ImageSource.captured
+                elif si.source == "scrape":
+                    img_source = ImageSource.scraped
+                else:
+                    img_source = ImageSource.uploaded
                 img_obj = Image(
                     item_id=item.id,
                     path=rel_path,

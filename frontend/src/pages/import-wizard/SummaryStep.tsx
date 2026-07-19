@@ -358,6 +358,19 @@ export function SummaryStep({ session, onPrev, onCancelled }: SummaryStepProps) 
   const confirmed = session.tag_state?.confirmed ?? []
   const title = session.confirmed_title ?? session.suggested_title ?? '—'
 
+  // Files row reflects the selected-file count (Manyfold Part 3 — a session can
+  // stage several file variants and let the user deselect some before commit).
+  // When every staged file is still selected (the default), keep the original
+  // "N file(s)" text unchanged.
+  const totalFiles = session.files.length
+  const selectedFiles = session.files.filter((f) => f.selected).length
+  const filesValue =
+    totalFiles === 0
+      ? '0 file(s)'
+      : selectedFiles === totalFiles
+        ? `${totalFiles} file(s)`
+        : `${selectedFiles} of ${totalFiles} file(s) selected`
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       {/* Attach-or-create modal — portals to <body> to escape backdrop-filter stacking */}
@@ -401,14 +414,16 @@ export function SummaryStep({ session, onPrev, onCancelled }: SummaryStepProps) 
             />
             <SummaryRow
               label="Files"
-              value={`${session.files.length} file(s)`}
-              warn={session.files.length === 0}
+              value={filesValue}
+              warn={totalFiles === 0 || selectedFiles === 0}
               note={
-                session.files.length === 0
+                totalFiles === 0
                   ? session.source_type === 'url'
                     ? 'No model files attached — attach the file you downloaded from the source site, or commit metadata-only.'
                     : 'No model file attached — this will be a metadata-only entry.'
-                  : undefined
+                  : selectedFiles === 0
+                    ? 'All staged files are deselected — this will commit as metadata-only.'
+                    : undefined
               }
             />
             <SummaryRow

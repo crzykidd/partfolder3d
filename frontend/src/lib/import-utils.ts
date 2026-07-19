@@ -8,13 +8,14 @@
 // Wizard step definitions
 // ---------------------------------------------------------------------------
 
-export type WizardStep = 'title' | 'images' | 'tags' | 'creator' | 'summary'
+export type WizardStep = 'title' | 'images' | 'tags' | 'creator' | 'assets' | 'summary'
 
 export const WIZARD_STEPS: WizardStep[] = [
   'title',
   'images',
   'tags',
   'creator',
+  'assets',
   'summary',
 ]
 
@@ -23,36 +24,52 @@ export const STEP_LABELS: Record<WizardStep, string> = {
   images: 'Images',
   tags: 'Tags',
   creator: 'Creator',
+  assets: 'Assets',
   summary: 'Review & Commit',
 }
 
+/**
+ * Steps visible for this wizard run. The 'assets' (file-selection) step only
+ * appears when the session has staged files — a metadata-only session (e.g.
+ * a URL import with nothing downloadable) skips straight from Creator to
+ * Summary. `hasFiles` defaults to false so callers that don't pass it get
+ * the original 5-step sequence unchanged.
+ */
+export function visibleSteps(hasFiles = false): WizardStep[] {
+  return hasFiles ? WIZARD_STEPS : WIZARD_STEPS.filter((s) => s !== 'assets')
+}
+
 /** Navigate to the next step, clamping at the last step. */
-export function nextStep(current: WizardStep): WizardStep {
-  const idx = WIZARD_STEPS.indexOf(current)
-  if (idx < 0 || idx >= WIZARD_STEPS.length - 1) return current
-  return WIZARD_STEPS[idx + 1]
+export function nextStep(current: WizardStep, hasFiles = false): WizardStep {
+  const steps = visibleSteps(hasFiles)
+  const idx = steps.indexOf(current)
+  if (idx < 0 || idx >= steps.length - 1) return current
+  return steps[idx + 1]
 }
 
 /** Navigate to the previous step, clamping at the first step. */
-export function prevStep(current: WizardStep): WizardStep {
-  const idx = WIZARD_STEPS.indexOf(current)
+export function prevStep(current: WizardStep, hasFiles = false): WizardStep {
+  const steps = visibleSteps(hasFiles)
+  const idx = steps.indexOf(current)
   if (idx <= 0) return current
-  return WIZARD_STEPS[idx - 1]
+  return steps[idx - 1]
 }
 
-/** Index (0-based) of the step in the wizard. */
-export function stepIndex(step: WizardStep): number {
-  return WIZARD_STEPS.indexOf(step)
+/** Index (0-based) of the step in the wizard's visible sequence. */
+export function stepIndex(step: WizardStep, hasFiles = false): number {
+  return visibleSteps(hasFiles).indexOf(step)
 }
 
 /** Whether the step is the first in the wizard. */
-export function isFirstStep(step: WizardStep): boolean {
-  return step === WIZARD_STEPS[0]
+export function isFirstStep(step: WizardStep, hasFiles = false): boolean {
+  const steps = visibleSteps(hasFiles)
+  return step === steps[0]
 }
 
 /** Whether the step is the last in the wizard. */
-export function isLastStep(step: WizardStep): boolean {
-  return step === WIZARD_STEPS[WIZARD_STEPS.length - 1]
+export function isLastStep(step: WizardStep, hasFiles = false): boolean {
+  const steps = visibleSteps(hasFiles)
+  return step === steps[steps.length - 1]
 }
 
 // ---------------------------------------------------------------------------

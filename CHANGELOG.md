@@ -20,6 +20,31 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-07-19
+
+### Added
+
+- **Import a model directly from a self-hosted Manyfold instance.** Register one or more
+  [Manyfold](https://manyfold.org) instances in the admin UI (**Admin → AI & Scraping →
+  Manyfold**) with their OAuth client credentials — the client secret is stored encrypted
+  and never shown again, and a **Test connection** button verifies it against the instance.
+  Once an instance is configured, paste any model URL from it into the import wizard and
+  PartFolder pulls the model straight from Manyfold's API instead of scraping the page:
+  title, description, license, creator, and all tags are pre-filled, and every image and 3D
+  file is downloaded into the session for review. A new wizard **Assets** step lists the
+  pulled files (checked by default) so you can deselect any you don't want before committing
+  — handy for models with several file variants. The Assets step also applies to plain
+  multi-file uploads. Multiple Manyfold instances are supported, and instances that resolve
+  to a private/LAN address (self-hosted) are handled correctly.
+
+### Fixed
+
+- **The post-upgrade "What's New" popup was empty for v0.5.0 and v0.5.1.** The modal
+  reads a curated per-version map in `frontend/src/lib/releaseNotes.ts` (it does not
+  parse the changelog), and no entries were added for those releases. Entries for
+  0.5.0 and 0.5.1 are now present, and the release-prep checklist gained an explicit
+  step so future releases can't skip it.
+
 ## [0.5.1] — 2026-07-05
 
 > ⚠️ **nginx config changed** — if you are running a custom nginx config
@@ -1136,7 +1161,8 @@ detail in this one file. (An earlier plan to archive closed minor series into
 <!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
      earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
 
-[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/crzykidd/partfolder3d/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/crzykidd/partfolder3d/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/crzykidd/partfolder3d/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/crzykidd/partfolder3d/compare/v0.3.0...v0.4.0
