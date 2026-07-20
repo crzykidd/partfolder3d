@@ -18,7 +18,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.6.0-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.6.1-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 
@@ -27,6 +27,19 @@
 ---
 
 ## What's New
+
+### v0.6.1 (2026-07-19)
+
+- **Fixes a worker crash-loop on large models.** Analyzing a very large mesh could
+  out-of-memory–kill the whole background worker and then retry forever, stalling all
+  jobs. Mesh analysis now runs in an isolated, memory- and time-bounded subprocess, so one
+  bad file can never take the worker down, and a repeatedly-failing job is retried a
+  bounded number of times and then marked failed instead of looping.
+- **Very large models are skipped gracefully.** Meshes over a configurable size — including
+  huge multi-object 3MFs (detected by uncompressed geometry size before loading) — are
+  flagged "too large to analyze" and cached, instead of failing on every rescan.
+- **No more duplicate analysis.** A model is no longer analyzed twice at once after a
+  restart or double-enqueue.
 
 ### v0.6.0 (2026-07-19)
 
@@ -55,7 +68,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.6.0) — see the
+> The full feature set below is **built and released** (v0.6.1) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -322,7 +335,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is in **active development** (v0.6.0).
+Honest snapshot — this project is in **active development** (v0.6.1).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -468,7 +481,7 @@ This project is in active development — **breaking changes can land between re
 or API), so upgrade deliberately:
 
 1. **Pin a specific version.** Set explicit image tags in `docker-compose.yml` (e.g.
-   `:0.6.0` instead of `:latest`) so a `pull` never surprises you.
+   `:0.6.1` instead of `:latest`) so a `pull` never surprises you.
 2. **Read the release notes first.** Check the [CHANGELOG](CHANGELOG.md) / the GitHub
    release for the version you're moving to — watch for **⚠️ nginx config changed** and
    other migration callouts.
@@ -535,6 +548,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — v0.6.0 · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — v0.6.1 · built by <code>crzykidd</code></sub>
 
 </div>

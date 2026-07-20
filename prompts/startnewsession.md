@@ -6,44 +6,36 @@ It is NOT a full reference: durable rules live in `CLAUDE.md`, the module map + 
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
 "Current state" + "Next phases" before every `/clear`.
 
-**Last updated:** 2026-07-17 (v0.5.1 released 2026-07-05) — `dev` is **several commits ahead of
-`main`** (What's-New-modal fix + the whole **Manyfold connector** feature, all queued for the next
-release). **MakerWorld creator thread RESOLVED** (prod-side AgentQL misconfig, fixed by owner).
-**Manyfold connector shipped to `dev`** (Parts 1–3 + a live-test fix) and validated end-to-end
-against the real `manyfold.crzynet.com` instance — see Current state.
+**Last updated:** 2026-07-19 — **`v0.6.0` RELEASED** (Manyfold import; PR #36 merged, tag `v0.6.0`
+cut, prod images publishing `:latest`/`:0.6.0`/`:0`). `dev` == `main`. **One open issue: #37**
+(worker crash-loops OOM-analyzing large meshes — see below). MakerWorld creator thread RESOLVED
+earlier (prod AgentQL misconfig).
 
 ## Current state
 
-- **Latest release: `v0.5.1`** (2026-07-05, PR #35 — hotfix). What shipped:
-  - **Prod nginx CSP fix** — `img-src` now allows `https:`; the old `'self'`-only policy made
-    the browser block the wizard's hotlinked scraped-image previews in prod (dev nginx has no
-    CSP → looked fine). This was the "prod doesn't show images" bug.
-  - **Side-nav user-menu z-order fix** (dropdown rendered behind stat strip / widget rail —
-    backdrop-filter stacking-context trap; header got explicit `position:relative; z-index`).
-- **Manyfold connector — SHIPPED to `dev` (unreleased), full feature, live-validated.** Import a
-  model straight from a self-hosted **Manyfold** URL via its OAuth2 (`client_credentials`) JSON-LD
-  API — a *primary authenticated* source, NOT a scraper (it bypasses the scrape/fallback chain and
-  downloads real 3D files). Four commits: **Part 1** admin config (`ManyfoldInstance`, migration
-  `0023`, `/api/admin/manyfold` CRUD + test-connection, secret Fernet-encrypted & write-only);
-  **Part 2** connector (`storage/manyfold_client.py`) + worker branch `_maybe_manyfold_import`
-  (domain match → OAuth → fetch model → download all images + 3D files into staging → reconcile all
-  tags), migration `0024` adds `import_session_files.selected` (commit skips deselected);
-  **Part 3** admin UI (`/admin/ai/manyfold` tab, mirrors `AiProvidersPage`) + wizard **Assets step**
-  (files checked by default, deselectable); **a fix** from live-testing — rewrite Manyfold's
-  internal-host `@id`/`contentUrl` onto the configured `base_url`, and scope the download SSRF guard
-  so the trusted instance host (may be a private/LAN IP) is exempt while cross-host redirects are
-  still guarded. `make verify` green (849 backend / 425 frontend). **Live full-stack import
-  succeeded** (`.../models/4jlf2g117t4p` → pending_wizard with 2 images + the 37.9 MB `.3mf`). NOTE:
-  the dev DB has a **pre-registered instance** (`manyfold.crzynet.com`, display "Live test",
-  enabled, real creds encrypted) + a demo `pending_wizard` session `a017b561-…` left in place so the
-  owner can view it in the UI; delete either if starting a clean UI add-flow. Classification nuance:
-  a `video/mp4` model asset stages as a `role="model"` file (deselectable) — fine, not a bug.
-- **Queued on `dev` (unreleased, commit 63c55a4):** the post-upgrade **"What's New" modal was
-  empty for 0.5.0/0.5.1** — it reads a curated map in `frontend/src/lib/releaseNotes.ts`
-  (does NOT parse the changelog); entries added + `/release-prep` gained **Step 4b** so every
-  release adds one. (One cosmetic edit to the command's commit template was permission-blocked;
-  substantive fix landed.) **Reminder: the Manyfold What's-New entry still needs adding at release
-  time** (Step 4b).
+- **Latest release: `v0.6.0`** (2026-07-19, PR #36 — Manyfold import). Headline feature:
+  **import a model straight from a self-hosted Manyfold instance** via its OAuth2
+  (`client_credentials`) JSON-LD API — a *primary authenticated* source, NOT a scraper (bypasses
+  the scrape/fallback chain and downloads real 3D files). Admin config (`ManyfoldInstance`,
+  migrations `0023`/`0024`, `/api/admin/manyfold`, secret Fernet-encrypted & write-only), worker
+  branch `_maybe_manyfold_import` (`storage/manyfold_client.py`), `/admin/ai/manyfold` admin tab,
+  and a wizard **Assets** step (`import_session_files.selected`, files checked-by-default,
+  deselectable). Live-validated end-to-end against the real `manyfold.crzynet.com`. Two live-found
+  fixes baked in: rewrite Manyfold's internal-host `@id`/`contentUrl` onto the configured
+  `base_url`; scope the download SSRF guard so the trusted instance host (may be a private/LAN IP)
+  is exempt while cross-host redirects stay guarded; and derive a file extension from
+  `encodingFormat` when the Manyfold filename lacks one. What's-New modal + README updated (README
+  history collapsed to latest + CHANGELOG link; early-alpha warning softened to
+  active-development).
+- **OPEN — issue #37 (`bug`): worker crash-loops OOM-analyzing large meshes.** `analyze_item` runs
+  **inline in the worker** (not subprocess-isolated like render), so a huge mesh (repro: a 1.36M-
+  vertex / 37.9 MB `.3mf` needs ~4.7 GiB) OOM-kills the worker at its mem cap → SIGKILL (uncatchable)
+  → container restart → the `on_startup` orphan-recovery re-queues the 'running' job with **no
+  attempt cap** → infinite loop (saw 31 restarts). Prod (6 GiB cap) likely survives *this* file but
+  any bigger one loops the same way. Proposed fixes in #37: cap orphan re-queue → mark failed;
+  subprocess-isolate analyze; dedup concurrent analyze jobs per item; guard/decimate huge meshes.
+  **Dev mitigation already applied:** bumped the dev worker to 6 GiB (`WORKER_MEM_LIMIT=6g` in the
+  gitignored `.env`) and cleared the storm (cancelled the dup item-35 jobs, flushed the arq queue).
 - **RESOLVED — prod MakerWorld imports missing creator/tags:** root cause was a prod-side
   AgentQL misconfiguration (not a code bug); owner corrected the config and imports now pull
   creator info. No code change needed. (Latent candidate, low priority: the AgentQL fallback
@@ -54,23 +46,28 @@ against the real `manyfold.crzynet.com` instance — see Current state.
   (`partfolder3d.crzynet.com`), NFS library, `user: 2000:66000`, worker capped
   `cpus:2 / 6G` (matches `RENDER_CPU_THREADS=2`; `WORKER_MAX_JOBS=2`, `RENDER_CONCURRENCY=1`
   defaults). Shared FlareSolverr compose in `~/projects/docker-compose/apps/flaresolverr/`.
-- **The dev docker stack on THIS host was DOWN at last check** (only `pf3d-pg-v` test PG up).
-  Bring up with `docker compose -f docker-compose.dev.yml up -d`. When up: backend/frontend
-  hot-reload from the repo; the **worker does NOT** (restart after worker/task/scraper edits).
+- **The dev docker stack on THIS host is UP** (worker recreated at **6 GiB** via
+  `WORKER_MEM_LIMIT=6g` in `.env` — see #37). Bring up/down with
+  `docker compose -f docker-compose.dev.yml {up -d,stop}`. backend/frontend hot-reload from the
+  repo; the **worker does NOT** (restart after worker/task/scraper edits). The dev DB has a
+  **configured Manyfold instance** (`manyfold.crzynet.com`, "Live test", real creds encrypted) +
+  a few committed test imports (items ~30–35) from release testing.
 
 ## Next phases (roadmap)
 
 - **Bulk move-assets UI** (#25 follow-up) — last Phase 2 item. Backend bulk endpoint live +
   tested; catalog needs a **multi-select** affordance (real UX decision — discuss with owner
   before building).
-- **Issue tracker is EMPTY** (everything through #31 closed). Unfiled candidates: harden the
-  creator-blind AgentQL fallback query (low priority — see RESOLVED note above); opportunistic
-  auto-fetch of model files on the scraper framework (login-gated on Printables/MakerWorld —
-  deferred from #27).
-- Next release = `/release-prep <next>` when a batch is ready (What's-New fix already queued).
-  Standing gotchas: CodeQL on big diffs surfaces pre-existing alerts (`sanitize_for_log` real
-  ones; dismiss path-injection FPs with existing `resolve()`+`is_relative_to()` barriers);
-  transient pip-download timeouts in the Image build check — just re-run the failed job.
+- **Issue #37 (`bug`) — worker analyze crash-loop robustness** (see Current state). Good next pickup:
+  retry-cap the orphan re-queue + subprocess-isolate analyze. Not a release blocker.
+- **Unfiled candidates:** harden the creator-blind AgentQL fallback query (low priority — see
+  RESOLVED note); opportunistic auto-fetch of model files on the scraper framework (login-gated on
+  Printables/MakerWorld — deferred from #27).
+- Next release = `/release-prep <next>` when a batch is ready. Standing gotchas: CodeQL on big
+  diffs surfaces pre-existing alerts (`sanitize_for_log` real ones; dismiss path-injection FPs with
+  existing `resolve()`+`is_relative_to()` barriers); transient pip-download timeouts in the Image
+  build check — just re-run the failed job; the local `verify-frontend` gate can flake (waitFor
+  timeouts) when the host is CPU-loaded — CI on a clean runner is the authority.
 
 ## How we work (recap — full rules in `CLAUDE.md`)
 
@@ -90,8 +87,8 @@ against the real `manyfold.crzynet.com` instance — see Current state.
 
 ## Backlog (themes — `gh issue list` is the source of truth for what we build **now**, not the PRD)
 
-- **Tracker is empty.** Candidates to file: harden creator-blind AgentQL fallback (low pri);
-  auto-fetch model files.
+- **Open: #37** (worker analyze crash-loop robustness). Unfiled candidates: harden creator-blind
+  AgentQL fallback (low pri); auto-fetch model files.
 - **Needs owner decision:** bulk-move multi-select UX.
 - Older PRD §18 notes: real slicing for filament estimates, trash-purge UI, `.bgcode`/multi-filament gcode.
 

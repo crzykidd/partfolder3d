@@ -18,6 +18,17 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: Record<string, ReleaseNote> = {
+  '0.6.1': {
+    title: "What's New in v0.6.1",
+    bullets: [
+      'Fixes a worker crash-loop — analyzing a very large model could out-of-memory–kill the whole background worker and retry forever, stalling all jobs',
+      'Mesh analysis now runs in an isolated, memory- and time-bounded subprocess, so one bad file can never take the worker down',
+      'Very large models — including huge multi-object 3MFs — are flagged "too large to analyze" and cached instead of failing on every rescan',
+      'A repeatedly-failing job is now retried a bounded number of times, then marked failed instead of looping',
+      'A model is no longer analyzed twice at once after a restart or double-enqueue',
+    ],
+    githubReleaseUrl: 'https://github.com/crzykidd/partfolder3d/releases/tag/v0.6.1',
+  },
   '0.6.0': {
     title: "What's New in v0.6.0",
     bullets: [

@@ -2,6 +2,155 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-19 — Pre-load 3MF geometry-XML size guard (issue #37 follow-up)
+
+**Context:** the four #37 fixes (retry cap, subprocess isolation, triangle cap, analyze
+dedup) stopped the crash loop, but the triangle cap only fires AFTER `trimesh.load` has
+already parsed the mesh — and for 3MF specifically, trimesh parses each
+`3D/Objects/*.model` (or `3D/3dmodel.model`) part into an lxml DOM. Live-diagnosed:
+`Dahlias+3MF+Complete.3mf` is 1.09 GB uncompressed with two ~505 MB geometry-XML parts;
+parsing either one balloons the in-memory lxml tree past 8 GB — well past the 4 GB
+`ANALYZE_MEM_LIMIT_MB` RLIMIT_AS bound — so the child dies before the triangle cap ever
+gets a chance to run, and the file never gets analyzed (and re-fails on every rescan
+since no result is cached).
+
+- **Why a pre-load, size-only guard (no decompression):** `zipfile.ZipFile(path).infolist()`
+  exposes each ZIP entry's `file_size` (uncompressed) straight from the central directory —
+  no decompression, negligible cost. Summing the `.model` parts under `3D/` (case-insensitive
+  match, `3D/3dmodel.model` + any `3D/Objects/*.model`) gives a reliable proxy for how large
+  the lxml DOM will get, calculable BEFORE calling `trimesh.load` at all.
+- **~15-20x XML→DOM blow-up, empirically observed.** The ~505 MB part that produced an
+  8 GB+ tree implies roughly a 15-20x expansion from raw XML bytes to the parsed lxml DOM.
+  `ANALYZE_MAX_3MF_XML_MB` defaults to 256 MB so the worst-case tree (256 MB × ~20 = ~5 GB)
+  stays within the 4 GB `ANALYZE_MEM_LIMIT_MB` bound with headroom — but the two knobs are
+  kept independent (not hard-tied) since one bounds input bytes and the other bounds child
+  RSS; a future retune of either shouldn't require touching the other.
+- **Reuses the existing `MeshTooLargeError` → `__CAP_SKIP__` → `AnalyzeCapSkip` → stub
+  chain** (issue #37 fix #4) rather than inventing a new signal — the guard is just an
+  earlier raise site (top of `_analyze_3mf`, before `trimesh.load`) for the same exception
+  type. `_build_cap_skip_stub` in `app.worker.tasks.analysis` was changed to take the
+  `AnalyzeCapSkip` message directly as the stub's `note` (rather than a hardcoded
+  triangle-count format string) so the stored "too large" reason is accurate regardless of
+  which cap tripped.
+- **Defensive fall-through on unreadable ZIP, by design.** If `zipfile.ZipFile(path)` raises
+  (corrupt file, not a ZIP at all, truncated), the guard logs a warning and returns — it does
+  NOT raise `MeshTooLargeError`. A genuinely corrupt file must surface as a real load/analysis
+  error (visible, distinct failure mode), not get silently miscategorized as "too large".
+- **`max_3mf_xml_mb: int | None = None` threaded like the triangle cap** — `_analyze_3mf` →
+  `analyze_file` → `run_analyze_subprocess`/`_analyze_worker`, defaulting to `None` so
+  existing direct callers/tests are unaffected. The worker task
+  (`app.worker.tasks.analysis`) passes `settings.ANALYZE_MAX_3MF_XML_MB` at both
+  `run_analyze_subprocess` call sites uniformly (the generic STL/OBJ/PLY branch is a no-op
+  for this cap, since the guard only fires inside `_analyze_3mf`).
+
+## 2026-07-19 — Dedup concurrent analyze jobs per item (issue #37, fix #3 — LAST of four)
+
+**Context:** fixes #1 (retry cap), #2 (subprocess isolation), and #4 (mesh triangle guard)
+stop the crash loop and the OOM, but a worker restart's orphan-requeue (or an enqueue-time
+race) could still produce a second `analyze` Job for the same item while one was already
+`queued`/`running` — running the same expensive mesh analysis twice concurrently. This is
+fix #3, the last of the four #37 fixes, so issue #37 is now closeable.
+
+- **Claim-time supersede is the PRIMARY guard; enqueue-time skip is churn reduction only.**
+  The claim-time check in `_analyze_item_inner` (right after the Job row is claimed, before
+  `_analyze_item_body` runs) is what actually prevents the expensive work from running
+  twice — it fires however the duplicate job came to be enqueued (race, restart,
+  manual retrigger). The enqueue-time `dedup_active` skip in
+  `_write_queued_row_and_enqueue` only reduces redundant `queued` rows / queue churn; it is
+  not load-bearing for correctness, since a caller with no `db` session (or a lost race) can
+  still bypass it — the claim-time guard is unconditional and catches those too.
+- **Best-effort, not transactional — by design.** The claim-time check is a plain
+  `SELECT ... WHERE status = 'running' AND id != job_id` with no row lock; two claims
+  landing in the same instant can both observe zero running peers and both proceed. This is
+  accepted rather than engineered around (e.g. with `SELECT ... FOR UPDATE` or an advisory
+  lock) because fix #1's retry cap already bounds any residual duplicate work, and the
+  sha-cache means a redundant second pass mostly no-ops instead of re-analyzing from
+  scratch. Only `running` peers count (never `queued`) and the current `job_id` is always
+  excluded, so a job can never supersede itself.
+- **Refresh-miss caveat, accepted as self-healing.** If an analyze is already running and
+  the underlying file genuinely changed in that window, the enqueue-time skip means the new
+  change is not picked up until the next item event or the daily
+  `library_reconcile_scan` — acceptable because it self-heals on the next natural trigger,
+  and the sha-cache would make an immediate redundant run mostly redundant anyway.
+- **Scoped to `analyze` only — render/extract unchanged.** `dedup_active` defaults `False`
+  and is passed `True` only from `_enqueue_analyze`; `_enqueue_render` and
+  `_enqueue_extract_archives` are untouched. Render already has its own guard
+  (`RENDER_CONCURRENCY=1` + subprocess isolation + supersede-on-success), so extending dedup
+  there was out of scope and would have been a second, unreviewed behavior change.
+- **New `mark_superseded` helper, not a `finish_job` reuse.** `finish_job` only produces
+  `succeeded`/`failed` and its terminal-status guard would treat `superseded` as a no-op
+  target it can't reach. `mark_superseded` (in `job_tracker.py`) is a small, distinct
+  terminal transition with its own terminal guard (mirroring `finish_job`'s), so it can
+  never clobber a `cancelled`/`succeeded`/`failed` row that raced ahead of it.
+- **No Alembic migration, no schema change** — both guards are query-based; `Job.status`
+  already documents `superseded` as a valid terminal state.
+- **All four #37 fixes are now present in `CHANGELOG.md [Unreleased]`** (retry cap,
+  subprocess isolation, mesh guard, and this dedup fix) — the commit for this task may
+  `closes #37`.
+
+## 2026-07-19 — Subprocess-isolate analyze + guard huge meshes (issue #37, fixes #2 & #4)
+
+**Context:** Fix #1 (orphan-requeue cap) stops the infinite re-queue loop from a poison
+mesh, but the worker still dies (SIGKILL, uncatchable) on every such file, because
+`analyze_item` loaded meshes with trimesh inline in the worker process. This implements
+fixes #2 (subprocess-isolate analyze) and #4 (guard very large meshes) of issue #37. Fix
+#3 (dedup concurrent analyze jobs) remains open — not attempted here, and issue #37 is
+NOT closed.
+
+- **`RLIMIT_AS` in the child is the crux, not just spawning a subprocess.** A bare
+  subprocess is not sufficient isolation: the worker container has ONE cgroup memory cap
+  shared by every process in it, so an over-large allocation in a plain child could still
+  push total container RSS over the limit — and the kernel's OOM-killer picks its victim
+  by heuristic, which can be the PARENT worker, not the child, taking every other in-flight
+  job down with it. Setting `resource.setrlimit(resource.RLIMIT_AS, ...)` in the child
+  **before importing trimesh/numpy** bounds that process's own virtual address space, so an
+  over-limit allocation raises a catchable `MemoryError` inside the child instead — the
+  parent always survives. Floored at 1024 MB (never bind lower, even if misconfigured) with
+  a default of `ANALYZE_MEM_LIMIT_MB=4096`; mirrors the same `RENDER_CPU_THREADS`-derived
+  numeric-thread env caps `worker.py`'s `startup()` sets, applied inside the child itself
+  so the subprocess module is self-contained (does not depend on `startup()` having already
+  run in this process).
+- **Cap-skip is stored as a low-confidence stub result, not treated as an error.** A mesh
+  over `ANALYZE_MAX_TRIANGLES` (default 2,000,000) raises `MeshTooLargeError` in
+  `mesh_analysis.analyze_file` (new optional `max_triangles` param, `None` = no cap — so
+  existing direct callers/tests are unaffected) → `__CAP_SKIP__:` sentinel → parent raises
+  `AnalyzeCapSkip` → `_analyze_item_body` stores a fixed-shape stub
+  (`analysis_skipped: "too_large"`, `low_confidence: True`, zeroed totals) sha-keyed exactly
+  like a normal result. This makes an oversized mesh a stable, visible "too large to
+  analyze" UI state instead of either an infinite retry or a silent gap — and counts toward
+  `skipped`, not `errors`, so the Job still finishes `succeeded`.
+- **Env-only config for now — no admin UI.** `ANALYZE_TIMEOUT_S`, `ANALYZE_MEM_LIMIT_MB`,
+  `ANALYZE_MAX_TRIANGLES` are `config.py` settings + `.env.example` entries only, mirroring
+  the existing `RENDER_*` caps. No settings-UI/schema work was in scope for this pass.
+- **No Alembic migration, no `File`/`Job` schema change.** The child returns the existing
+  `FileAnalysis` dict as JSON (already what gets stored in `File.object_analysis` JSONB);
+  the cap-skip stub uses the same shape. Purely a worker-process change.
+
+## 2026-07-19 — Orphan-requeue attempt cap: count by payload item_id + recency window (issue #37, fix #1)
+
+**Context:** A worker crash-loop (e.g. an OOM-killing analyze job on a huge mesh) was
+observed re-queuing the same job forever — 31 restarts in one incident — because
+`_recover_orphaned_jobs` has no memory across restarts: every re-enqueue creates a brand
+**new** `Job` row, so there's no single row to bump an attempt counter on. This
+implements proposed-fix #1 of issue #37 only (a hard 3-attempts/6h cap); the other three
+proposals (subprocess-isolate analyze, dedup concurrent analyze jobs, guard huge meshes)
+remain open follow-ups on #37.
+
+- **Count by `payload["item_id"]`, not the `item_id` FK column.** Real analyze/render
+  jobs set both, but the FK can be NULL (confirmed by the existing render-recovery test
+  seeds using `item_id=None`). The re-enqueue path already keys off `payload["item_id"]`,
+  so the attempt count must match exactly what's being deduped/re-enqueued — using the FK
+  instead would silently undercount and never trip the cap for NULL-FK rows.
+- **A shared error-message marker (`"orphaned by worker restart"`) is the count signal**,
+  scoped with `Job.type == <the orphan's own type>` and a `finished_at >= now - 6h`
+  recency window. The window exists so the cap targets an *active* crash-loop storm (which
+  re-queues within seconds) without accumulating stale failures from unrelated past
+  restarts weeks apart into a false-positive terminal fail.
+- **No Alembic migration, no `Job` model schema change, no task-signature change.** The
+  cap is derived entirely from existing columns (`type`, `status`, `error`, `payload`,
+  `finished_at`) via a COUNT query inside `_recover_orphaned_jobs` — deliberately kept to
+  a pure logic change so the fix stays small and surgical per the prompt's scope.
+
 ## 2026-07-17 — Manyfold connector: three more UI-live-test fixes
 
 **Context:** Owner tested the finished feature through the wizard UI against the real

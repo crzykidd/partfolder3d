@@ -20,6 +20,23 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-07-19
+
+### Fixed
+
+- Worker no longer crash-loops on a job that repeatedly kills it: orphaned jobs are
+  re-queued at most 3× within 6h, then marked terminally failed (issue #37).
+- Mesh analysis now runs in an isolated subprocess with a memory + wall-clock bound, so a
+  pathologically large model can no longer OOM-kill the whole worker (issue #37).
+- Very large meshes (> configurable triangle cap) are skipped and flagged low-confidence
+  instead of attempting an unbounded load (issue #37).
+- Analyze jobs are now deduped per item: a second analyze for the same item is skipped at
+  enqueue and superseded at claim time, so a restart or double-enqueue can't run the same
+  expensive mesh analysis twice (issue #37).
+- Very large 3MF files are now detected by uncompressed geometry size and skipped
+  (low-confidence) before trimesh attempts a multi-GB parse, so a huge multi-object 3MF is
+  cached as "too large" instead of failing analysis on every rescan (issue #37).
+
 ## [0.6.0] — 2026-07-19
 
 ### Added
@@ -1161,7 +1178,8 @@ detail in this one file. (An earlier plan to archive closed minor series into
 <!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
      earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
 
-[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/crzykidd/partfolder3d/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/crzykidd/partfolder3d/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/crzykidd/partfolder3d/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/crzykidd/partfolder3d/compare/v0.4.0...v0.5.0

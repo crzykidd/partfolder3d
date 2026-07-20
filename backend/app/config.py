@@ -126,6 +126,35 @@ class Settings(BaseSettings):
     # Max mesh-ANALYSIS jobs running at once.  Analysis loads whole meshes into RAM
     # (trimesh); on a memory-constrained host keep this low (1–2).
     ANALYZE_CONCURRENCY: int = 2
+    # Wall-clock kill timeout (seconds) for a single file's analyze subprocess.
+    # Mesh analysis (issue #37) runs in an isolated spawned child; it is
+    # SIGTERM'd (then SIGKILL'd) after this many seconds.
+    ANALYZE_TIMEOUT_S: int = 300
+    # Per-child virtual-memory bound (MB) for the analyze subprocess, enforced
+    # via RLIMIT_AS set BEFORE trimesh/numpy are imported in the child.  This is
+    # the crux of issue #37 fix #2: a bare subprocess is NOT enough isolation,
+    # because the container's cgroup OOM-killer can pick the PARENT worker as
+    # its victim when a child balloons.  RLIMIT_AS makes an over-limit
+    # allocation raise a catchable MemoryError inside the child instead, so the
+    # worker always survives.  Never set below 1024 (numpy/trimesh import needs
+    # headroom) — the runner enforces that floor even if this is misconfigured.
+    ANALYZE_MEM_LIMIT_MB: int = 4096
+    # Max triangle count for mesh analysis (issue #37 fix #4).  Meshes over this
+    # cap are skipped (not attempted) and stored as a low-confidence stub result
+    # instead of a full trimesh load, so a pathologically large model can't stall
+    # or OOM the analyze subprocess.
+    ANALYZE_MAX_TRIANGLES: int = 2_000_000
+    # Max uncompressed size (MB) of a 3MF's geometry-XML parts (3D/3dmodel.model
+    # + 3D/Objects/*.model), summed from the ZIP central directory WITHOUT
+    # decompressing (pre-load guard, issue #37 follow-up). trimesh parses each
+    # part into an lxml DOM, which balloons ~15-20x the raw XML bytes — a
+    # ~505 MB part observed in the wild grew past 8 GB, blowing well past
+    # ANALYZE_MEM_LIMIT_MB even under RLIMIT_AS. Catching this BEFORE calling
+    # trimesh.load avoids a doomed multi-GB parse that fails (and re-fails on
+    # every rescan) instead of being skipped as a low-confidence stub like the
+    # triangle cap. Kept as an independent knob (not tied to
+    # ANALYZE_MEM_LIMIT_MB) since it bounds input bytes, not the child's RSS.
+    ANALYZE_MAX_3MF_XML_MB: int = 256
 
     # ---- Import / Inbox (Phase 5) ----
     # Directory the inbox scanner watches for incoming asset folders.

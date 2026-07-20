@@ -129,6 +129,16 @@ _IDEMPOTENT_JOB_TASKS: dict[str, str] = {
     "extract_archives": "extract_archives",
 }
 
+# Orphan-requeue attempt cap (issue #37, fix #1) — a job that repeatedly
+# crashes/kills the worker (e.g. a poison mesh that OOMs the analyze subprocess)
+# would otherwise be re-queued forever by _recover_orphaned_jobs below, since
+# every restart creates a NEW Job row with no memory of prior attempts.  We
+# count recent orphan-failures for the same (task, item_id) via the shared
+# error-message marker and stop re-enqueuing once the cap is hit.
+_ORPHAN_REQUEUE_MARKER = "orphaned by worker restart"
+_MAX_ORPHAN_REQUEUE_ATTEMPTS = 3
+_ORPHAN_REQUEUE_WINDOW_HOURS = 6
+
 
 async def _recover_orphaned_jobs(
     ctx: dict,
@@ -156,7 +166,7 @@ async def _recover_orphaned_jobs(
         _db:  Optional AsyncSession for testing (mirrors the _reconcile_render_images
               pattern).  When None (production), opens its own SessionLocal.
     """
-    from datetime import UTC, datetime  # noqa: PLC0415
+    from datetime import UTC, datetime, timedelta  # noqa: PLC0415
 
     import sqlalchemy as sa  # noqa: PLC0415
 
@@ -185,15 +195,21 @@ async def _recover_orphaned_jobs(
         now = datetime.now(UTC)
         to_enqueue: dict[str, list[int]] = {}
         seen: dict[str, set[int]] = {}
+        # Rows marked failed THIS pass, keyed by (task_name, item_id) — needed so
+        # we can overwrite the error message with a terminal one if the attempt
+        # cap is hit below.
+        item_jobs: dict[tuple[str, int], list[Job]] = {}
 
         for job in orphans:
             job.status = "failed"  # type: ignore[union-attr]
             job.finished_at = now  # type: ignore[union-attr]
             task_name = _IDEMPOTENT_JOB_TASKS.get(job.type)  # type: ignore[union-attr]
             if task_name is not None:
-                job.error = "orphaned by worker restart — re-queued"  # type: ignore[union-attr]
+                job.error = f"{_ORPHAN_REQUEUE_MARKER} — re-queued"  # type: ignore[union-attr]
                 item_id: int | None = (job.payload or {}).get("item_id")  # type: ignore[union-attr]
                 if item_id is not None:
+                    key = (task_name, int(item_id))
+                    item_jobs.setdefault(key, []).append(job)
                     bucket = seen.setdefault(task_name, set())
                     if item_id not in bucket:
                         bucket.add(item_id)
@@ -205,6 +221,45 @@ async def _recover_orphaned_jobs(
                 )
 
         await db.flush()  # type: ignore[union-attr]
+
+        # Gate each candidate re-enqueue by its recent orphan-failure count, so a
+        # crash-looping job (same task+item_id orphaned over and over) fails
+        # terminally instead of being re-queued forever (issue #37).
+        window_start = now - timedelta(hours=_ORPHAN_REQUEUE_WINDOW_HOURS)
+        for (task_name, item_id), rows in item_jobs.items():
+            job_type = rows[0].type  # type: ignore[union-attr]
+            count_result = await db.execute(  # type: ignore[union-attr]
+                sa.select(sa.func.count()).select_from(Job).where(
+                    Job.type == job_type,
+                    Job.status == "failed",
+                    Job.error.like(f"{_ORPHAN_REQUEUE_MARKER}%"),
+                    Job.payload["item_id"].astext == str(item_id),
+                    Job.finished_at >= window_start,
+                )
+            )
+            attempt_count = count_result.scalar_one()
+
+            if attempt_count >= _MAX_ORPHAN_REQUEUE_ATTEMPTS:
+                if item_id in to_enqueue.get(task_name, []):
+                    to_enqueue[task_name].remove(item_id)
+                    if not to_enqueue[task_name]:
+                        del to_enqueue[task_name]
+                terminal_msg = (
+                    f"{job_type} left orphaned {_MAX_ORPHAN_REQUEUE_ATTEMPTS}× by worker "
+                    f"restarts within {_ORPHAN_REQUEUE_WINDOW_HOURS}h — not retried "
+                    "automatically (possible crash-loop; see issue #37)"
+                )
+                for row in rows:
+                    row.error = terminal_msg  # type: ignore[union-attr]
+                log.error(
+                    "startup: %s for item_id=%d orphaned %d× within %dh — "
+                    "NOT re-queuing (possible crash-loop, issue #37)",
+                    job_type,
+                    item_id,
+                    attempt_count,
+                    _ORPHAN_REQUEUE_WINDOW_HOURS,
+                )
+
         return to_enqueue
 
     if _db is not None:

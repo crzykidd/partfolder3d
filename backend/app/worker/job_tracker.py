@@ -217,6 +217,45 @@ async def finish_job(
         await _supersede_ancestors(db, job.retry_of_job_id)
 
 
+async def mark_superseded(
+    db: Any,
+    job_id: uuid.UUID,
+    reason: str | None = None,
+) -> None:
+    """Mark a Job row as 'superseded' because a concurrent peer made it redundant.
+
+    Issue #37 fix #3: used at analyze **claim** time — when a newly-claimed
+    analyze Job discovers another analyze Job for the same item is already
+    ``running``, the new one is superseded immediately and its (expensive) body
+    is never run. Unlike :func:`finish_job` (which only produces
+    succeeded/failed), this is a distinct terminal outcome: the job did no work.
+
+    No-op if the row is already in a terminal status (mirrors finish_job's
+    guard) so this can never clobber a cancel/finish that raced ahead of it.
+    """
+    from ..models.job import Job  # noqa: PLC0415
+
+    result = await db.execute(sa.select(Job).where(Job.id == job_id))
+    job = result.scalar_one_or_none()
+    if job is None:
+        log.warning("mark_superseded: job %s not found", job_id)
+        return
+
+    if job.status in _TERMINAL_STATUSES:
+        log.debug(
+            "mark_superseded: job %s already in terminal status %r — skipping",
+            job_id,
+            job.status,
+        )
+        return
+
+    job.status = "superseded"
+    job.finished_at = datetime.now(UTC)
+    if reason:
+        job.error = reason
+    await db.flush()
+
+
 async def update_job_progress(
     db: Any,
     job_id: uuid.UUID,

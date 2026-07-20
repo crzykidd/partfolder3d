@@ -128,6 +128,32 @@ async def _reconcile_embedded_thumbnail(
     return rel_path
 
 
+def _build_cap_skip_stub(source_hash: str | None, note: str) -> dict[str, Any]:
+    """Build a low-confidence stub FileAnalysis for an over-cap mesh.
+
+    Stored sha-keyed exactly like a normal result, so the sha-cache in
+    ``_analyze_item_body`` treats it as "analyzed" and never retries the file —
+    an oversized mesh gets a stable, visible "too large to analyze" state
+    instead of an infinite retry loop or a silent gap in the UI.
+
+    *note* is the human-readable reason (the ``AnalyzeCapSkip`` message),
+    covering both the triangle-count cap (issue #37 fix #4) and the 3MF
+    pre-load geometry-XML size cap (issue #37 follow-up) that raise the same
+    ``AnalyzeCapSkip``/stub chain.
+    """
+    return {
+        "analyzed_at": datetime.now(UTC).isoformat(),
+        "source_hash": source_hash,
+        "objects": [],
+        "total_objects": 0,
+        "total_colors": 0,
+        "total_est_grams": 0.0,
+        "low_confidence": True,
+        "analysis_skipped": "too_large",
+        "note": note,
+    }
+
+
 def _build_sliced_analysis(
     info: dict[str, Any],
     source_hash: str | None,
@@ -220,7 +246,11 @@ async def _analyze_item_inner(ctx: dict, item_id: int) -> None:
     Enqueued alongside render_item on item create / file change / rescan.
     """
     from app.db import SessionLocal  # noqa: PLC0415
-    from app.worker.job_tracker import claim_or_create_job, finish_job  # noqa: PLC0415
+    from app.worker.job_tracker import (  # noqa: PLC0415
+        claim_or_create_job,
+        finish_job,
+        mark_superseded,
+    )
 
     # Issue #30: claim the queued Job row written at enqueue time (→ running), or
     # insert a fresh running row when none exists, so mesh-analysis work is
@@ -242,6 +272,54 @@ async def _analyze_item_inner(ctx: dict, item_id: int) -> None:
             " — continuing without tracking",
             item_id,
         )
+
+    # Issue #37 fix #3 (PRIMARY guard): dedup concurrent analyze jobs per item.
+    # A worker restart's orphan-requeue, an enqueue-time race, or a manual
+    # re-trigger can produce a second analyze Job for the same item while one is
+    # already running. If so, this job is redundant — supersede it and return
+    # BEFORE the expensive _analyze_item_body runs. Best-effort: a tight race
+    # where two claims land in the same instant may both see zero running peers
+    # (acceptable — fix #1's retry cap bounds any residual waste, and the
+    # sha-cache means a second pass mostly no-ops). Only 'running' peers count
+    # (not 'queued') and the current job_id is excluded, so a job can never
+    # supersede itself.
+    if job_id is not None:
+        try:
+            import sqlalchemy as sa  # noqa: PLC0415
+
+            from app.models.job import Job  # noqa: PLC0415
+
+            async with SessionLocal() as db:
+                other_running = await db.execute(
+                    sa.select(Job.id).where(
+                        Job.type == "analyze",
+                        Job.item_id == item_id,
+                        Job.status == "running",
+                        Job.id != job_id,
+                    )
+                )
+                if other_running.scalars().first() is not None:
+                    await mark_superseded(
+                        db,
+                        job_id,
+                        reason=(
+                            "deduped: another analyze job for this item is"
+                            " already running"
+                        ),
+                    )
+                    await db.commit()
+                    log.info(
+                        "analyze_item: item=%s deduped — concurrent analyze"
+                        " already running, superseding",
+                        item_id,
+                    )
+                    return
+        except Exception:
+            log.exception(
+                "analyze_item: dedup check failed for item %s"
+                " — continuing without dedup",
+                item_id,
+            )
 
     async def _finish(
         succeeded: bool,
@@ -284,11 +362,16 @@ async def _analyze_item_body(ctx: dict, item_id: int, _finish: Any) -> None:
 
     import sqlalchemy as sa  # noqa: PLC0415
 
+    from app.config import settings  # noqa: PLC0415
     from app.db import SessionLocal  # noqa: PLC0415
     from app.models.file import File, FileRole  # noqa: PLC0415
     from app.models.item import Item  # noqa: PLC0415
     from app.models.setting import Setting  # noqa: PLC0415
-    from app.worker.mesh_analysis import MESH_ANALYSIS_EXTENSIONS, analyze_file  # noqa: PLC0415
+    from app.worker.analyze_subprocess import (  # noqa: PLC0415
+        AnalyzeCapSkip,
+        run_analyze_subprocess,
+    )
+    from app.worker.mesh_analysis import MESH_ANALYSIS_EXTENSIONS  # noqa: PLC0415
     from app.worker.threemf import read_3mf  # noqa: PLC0415
 
     # Load settings (density + infill) once; fall back to defaults
@@ -415,23 +498,34 @@ async def _analyze_item_body(ctx: dict, item_id: int, _finish: Any) -> None:
                     # Use slicer data (accurate) instead of volume estimate
                     result = _build_sliced_analysis(info, current_sha)
                 else:
-                    # Unsliced 3MF — fall back to trimesh volume estimate
-                    result = analyze_file(
+                    # Unsliced 3MF — fall back to trimesh volume estimate, run in
+                    # an isolated subprocess (issue #37 fix #2 / #4).
+                    result = await run_analyze_subprocess(
                         file_path,
                         density_g_cm3=density_g_cm3,
                         infill_pct=infill_pct,
                         source_hash=current_sha,
+                        timeout_s=settings.ANALYZE_TIMEOUT_S,
+                        mem_limit_mb=settings.ANALYZE_MEM_LIMIT_MB,
+                        max_triangles=settings.ANALYZE_MAX_TRIANGLES,
+                        max_3mf_xml_mb=settings.ANALYZE_MAX_3MF_XML_MB,
                     )
 
                 # Store per-file thumbnail path (None when no embedded thumbnail).
                 # Generic field: STL/OBJ renders can populate it in the future.
                 result["thumbnail_path"] = thumb_path
             else:
-                result = analyze_file(
+                # STL / OBJ / PLY: always trimesh-based — run in an isolated
+                # subprocess (issue #37 fix #2 / #4).
+                result = await run_analyze_subprocess(
                     file_path,
                     density_g_cm3=density_g_cm3,
                     infill_pct=infill_pct,
                     source_hash=current_sha,
+                    timeout_s=settings.ANALYZE_TIMEOUT_S,
+                    mem_limit_mb=settings.ANALYZE_MEM_LIMIT_MB,
+                    max_triangles=settings.ANALYZE_MAX_TRIANGLES,
+                    max_3mf_xml_mb=settings.ANALYZE_MAX_3MF_XML_MB,
                 )
 
             async with SessionLocal() as db:
@@ -449,7 +543,29 @@ async def _analyze_item_body(ctx: dict, item_id: int, _finish: Any) -> None:
                 result.get("total_objects", 0),
                 result.get("total_est_grams") or 0.0,
             )
+        except AnalyzeCapSkip as exc:
+            # Mesh too large to analyze (triangle cap, issue #37 fix #4; or 3MF
+            # pre-load geometry-XML size cap, issue #37 follow-up) — NOT an
+            # error: store a low-confidence stub, sha-keyed so it is cached and
+            # never retried.
+            stub = _build_cap_skip_stub(current_sha, str(exc))
+            async with SessionLocal() as db:
+                await db.execute(
+                    sa.update(File)
+                    .where(File.id == f.id)
+                    .values(object_analysis=stub)
+                )
+                await db.commit()
+            skipped += 1
+            log.info(
+                "analyze_item: item=%s file %s skipped — %s",
+                item_id, f.path, exc,
+            )
         except Exception as exc:
+            # Covers AnalyzeTimeout / AnalyzeError (subprocess timed out or
+            # crashed/OOM'd — issue #37 fix #2) as well as any other failure.
+            # The worker survives; this one file is marked errored and retried
+            # on the next rescan (the sha-cache does not store a result for it).
             errors += 1
             log.warning(
                 "analyze_item: item=%s file %s failed: %s",
