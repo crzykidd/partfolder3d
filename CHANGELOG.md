@@ -31,6 +31,9 @@ prefix appears only on git tags and GitHub releases.
 - Analyze jobs are now deduped per item: a second analyze for the same item is skipped at
   enqueue and superseded at claim time, so a restart or double-enqueue can't run the same
   expensive mesh analysis twice (issue #37).
+- Very large 3MF files are now detected by uncompressed geometry size and skipped
+  (low-confidence) before trimesh attempts a multi-GB parse, so a huge multi-object 3MF is
+  cached as "too large" instead of failing analysis on every rescan (issue #37).
 
 ## [0.6.0] — 2026-07-19
 

@@ -68,6 +68,7 @@ def _analyze_worker(
     infill_pct: float,
     source_hash: str | None,
     max_triangles: int | None,
+    max_3mf_xml_mb: int | None,
     mem_limit_mb: int,
     out_file: str,
     err_file: str,
@@ -123,6 +124,7 @@ def _analyze_worker(
             infill_pct=infill_pct,
             source_hash=source_hash,
             max_triangles=max_triangles,
+            max_3mf_xml_mb=max_3mf_xml_mb,
         )
         Path(out_file).write_text(json.dumps(result))
     except MeshTooLargeError as exc:
@@ -147,6 +149,7 @@ async def run_analyze_subprocess(
     timeout_s: int,
     mem_limit_mb: int,
     max_triangles: int | None = None,
+    max_3mf_xml_mb: int | None = None,
 ) -> dict[str, Any]:
     """Run ``analyze_file`` in a spawned child; return the FileAnalysis dict.
 
@@ -164,6 +167,8 @@ async def run_analyze_subprocess(
         timeout_s:      Wall-clock kill timeout in seconds.
         mem_limit_mb:   Per-child RLIMIT_AS bound in MB (floored to 1024).
         max_triangles:  Triangle-count cap; None = no cap.
+        max_3mf_xml_mb: 3MF geometry-XML pre-load size cap in MB (issue #37
+                        follow-up); None = no cap. No-op for non-3MF files.
 
     Returns:
         FileAnalysis dict (same shape as ``mesh_analysis.analyze_file``).
@@ -189,6 +194,7 @@ async def run_analyze_subprocess(
             infill_pct,
             source_hash,
             max_triangles,
+            max_3mf_xml_mb,
             mem_limit_mb,
             out_path,
             err_path,

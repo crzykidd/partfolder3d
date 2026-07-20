@@ -421,6 +421,88 @@ def test_analyze_3mf_max_triangles_cap_raises(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Tests: 3MF pre-load geometry-XML size guard (issue #37 follow-up)
+# ---------------------------------------------------------------------------
+
+
+def test_check_3mf_xml_size_over_cap_raises(tmp_path: Path) -> None:
+    """A tiny cap (0 MB) on a real (small) 3MF → MeshTooLargeError, no trimesh load."""
+    from app.worker.mesh_analysis import MeshTooLargeError, _check_3mf_xml_size  # noqa: PLC0415
+
+    p = tmp_path / "two_color.3mf"
+    _write_two_color_3mf(p)
+
+    with pytest.raises(MeshTooLargeError, match="3MF geometry"):
+        _check_3mf_xml_size(p, max_xml_mb=0)
+
+
+def test_check_3mf_xml_size_none_cap_noop(tmp_path: Path) -> None:
+    """max_xml_mb=None → never raises, regardless of content."""
+    from app.worker.mesh_analysis import _check_3mf_xml_size  # noqa: PLC0415
+
+    p = tmp_path / "two_color.3mf"
+    _write_two_color_3mf(p)
+
+    _check_3mf_xml_size(p, max_xml_mb=None)  # must not raise
+
+
+def test_check_3mf_xml_size_generous_cap_passes(tmp_path: Path) -> None:
+    """A cap comfortably above the tiny fixture's XML size does not raise."""
+    from app.worker.mesh_analysis import _check_3mf_xml_size  # noqa: PLC0415
+
+    p = tmp_path / "two_color.3mf"
+    _write_two_color_3mf(p)
+
+    _check_3mf_xml_size(p, max_xml_mb=1)  # must not raise
+
+
+def test_check_3mf_xml_size_unreadable_file_falls_through(tmp_path: Path) -> None:
+    """A non-ZIP / unreadable file does NOT raise the size-cap error — it falls
+    through so a genuinely corrupt file surfaces as a normal analysis error
+    rather than a spurious 'too large' skip.
+    """
+    from app.worker.mesh_analysis import _check_3mf_xml_size  # noqa: PLC0415
+
+    p = tmp_path / "not_a_zip.3mf"
+    p.write_bytes(b"this is not a zip file at all")
+
+    _check_3mf_xml_size(p, max_xml_mb=0)  # must not raise despite a 0 MB cap
+
+
+def test_analyze_3mf_max_xml_mb_cap_raises(tmp_path: Path) -> None:
+    """analyze_file threads max_3mf_xml_mb through to the pre-load guard."""
+    from app.worker.mesh_analysis import MeshTooLargeError, analyze_file  # noqa: PLC0415
+
+    p = tmp_path / "two_color.3mf"
+    _write_two_color_3mf(p)
+
+    with pytest.raises(MeshTooLargeError, match="3MF geometry"):
+        analyze_file(p, max_3mf_xml_mb=0)
+
+
+def test_analyze_3mf_max_xml_mb_none_unaffected(tmp_path: Path) -> None:
+    """max_3mf_xml_mb=None (default) behaves exactly as before — no cap applied."""
+    from app.worker.mesh_analysis import analyze_file  # noqa: PLC0415
+
+    p = tmp_path / "two_color.3mf"
+    _write_two_color_3mf(p)
+
+    result = analyze_file(p, max_3mf_xml_mb=None)
+    assert result["total_objects"] == 1
+
+
+def test_analyze_3mf_max_xml_mb_generous_cap_passes(tmp_path: Path) -> None:
+    """A cap comfortably above the fixture's XML size does not raise; analyzes normally."""
+    from app.worker.mesh_analysis import analyze_file  # noqa: PLC0415
+
+    p = tmp_path / "two_color.3mf"
+    _write_two_color_3mf(p)
+
+    result = analyze_file(p, max_3mf_xml_mb=1)
+    assert result["total_objects"] == 1
+
+
+# ---------------------------------------------------------------------------
 # Tests: _safe_volume_cm3 helpers
 # ---------------------------------------------------------------------------
 

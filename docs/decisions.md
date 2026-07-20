@@ -2,6 +2,47 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-19 — Pre-load 3MF geometry-XML size guard (issue #37 follow-up)
+
+**Context:** the four #37 fixes (retry cap, subprocess isolation, triangle cap, analyze
+dedup) stopped the crash loop, but the triangle cap only fires AFTER `trimesh.load` has
+already parsed the mesh — and for 3MF specifically, trimesh parses each
+`3D/Objects/*.model` (or `3D/3dmodel.model`) part into an lxml DOM. Live-diagnosed:
+`Dahlias+3MF+Complete.3mf` is 1.09 GB uncompressed with two ~505 MB geometry-XML parts;
+parsing either one balloons the in-memory lxml tree past 8 GB — well past the 4 GB
+`ANALYZE_MEM_LIMIT_MB` RLIMIT_AS bound — so the child dies before the triangle cap ever
+gets a chance to run, and the file never gets analyzed (and re-fails on every rescan
+since no result is cached).
+
+- **Why a pre-load, size-only guard (no decompression):** `zipfile.ZipFile(path).infolist()`
+  exposes each ZIP entry's `file_size` (uncompressed) straight from the central directory —
+  no decompression, negligible cost. Summing the `.model` parts under `3D/` (case-insensitive
+  match, `3D/3dmodel.model` + any `3D/Objects/*.model`) gives a reliable proxy for how large
+  the lxml DOM will get, calculable BEFORE calling `trimesh.load` at all.
+- **~15-20x XML→DOM blow-up, empirically observed.** The ~505 MB part that produced an
+  8 GB+ tree implies roughly a 15-20x expansion from raw XML bytes to the parsed lxml DOM.
+  `ANALYZE_MAX_3MF_XML_MB` defaults to 256 MB so the worst-case tree (256 MB × ~20 = ~5 GB)
+  stays within the 4 GB `ANALYZE_MEM_LIMIT_MB` bound with headroom — but the two knobs are
+  kept independent (not hard-tied) since one bounds input bytes and the other bounds child
+  RSS; a future retune of either shouldn't require touching the other.
+- **Reuses the existing `MeshTooLargeError` → `__CAP_SKIP__` → `AnalyzeCapSkip` → stub
+  chain** (issue #37 fix #4) rather than inventing a new signal — the guard is just an
+  earlier raise site (top of `_analyze_3mf`, before `trimesh.load`) for the same exception
+  type. `_build_cap_skip_stub` in `app.worker.tasks.analysis` was changed to take the
+  `AnalyzeCapSkip` message directly as the stub's `note` (rather than a hardcoded
+  triangle-count format string) so the stored "too large" reason is accurate regardless of
+  which cap tripped.
+- **Defensive fall-through on unreadable ZIP, by design.** If `zipfile.ZipFile(path)` raises
+  (corrupt file, not a ZIP at all, truncated), the guard logs a warning and returns — it does
+  NOT raise `MeshTooLargeError`. A genuinely corrupt file must surface as a real load/analysis
+  error (visible, distinct failure mode), not get silently miscategorized as "too large".
+- **`max_3mf_xml_mb: int | None = None` threaded like the triangle cap** — `_analyze_3mf` →
+  `analyze_file` → `run_analyze_subprocess`/`_analyze_worker`, defaulting to `None` so
+  existing direct callers/tests are unaffected. The worker task
+  (`app.worker.tasks.analysis`) passes `settings.ANALYZE_MAX_3MF_XML_MB` at both
+  `run_analyze_subprocess` call sites uniformly (the generic STL/OBJ/PLY branch is a no-op
+  for this cap, since the guard only fires inside `_analyze_3mf`).
+
 ## 2026-07-19 — Dedup concurrent analyze jobs per item (issue #37, fix #3 — LAST of four)
 
 **Context:** fixes #1 (retry cap), #2 (subprocess isolation), and #4 (mesh triangle guard)

@@ -354,6 +354,48 @@ def _check_triangle_cap(path: Path, total_faces: int, max_triangles: int | None)
         )
 
 
+def _check_3mf_xml_size(path: Path, max_xml_mb: int | None) -> None:
+    """Raise ``MeshTooLargeError`` when a 3MF's geometry-XML parts are too large.
+
+    Reads uncompressed part sizes straight from the ZIP central directory via
+    ``zipfile.infolist()`` — no decompression, negligible cost — and sums the
+    ``file_size`` of every ``.model`` part under ``3D/`` (``3D/3dmodel.model``
+    plus any ``3D/Objects/*.model`` parts; case-insensitive). This is a
+    pre-load proxy for how large the lxml DOM will get once trimesh parses it
+    (issue #37 follow-up — a ~505 MB part was observed ballooning past 8 GB).
+
+    A no-op when *max_xml_mb* is None (no cap). Defensive: if the ZIP can't be
+    opened/read, this does NOT raise the cap error — it logs and falls through,
+    so a genuinely corrupt file surfaces as a normal load/analysis error rather
+    than a spurious "too large" skip.
+    """
+    if max_xml_mb is None:
+        return
+
+    try:
+        with zipfile.ZipFile(path) as zf:
+            total_bytes = sum(
+                info.file_size
+                for info in zf.infolist()
+                if info.filename.lower().startswith("3d/")
+                and info.filename.lower().endswith(".model")
+            )
+    except Exception as exc:
+        log.warning(
+            "_check_3mf_xml_size: could not read %s as ZIP for size check: %s",
+            path.name, exc,
+        )
+        return
+
+    max_bytes = max_xml_mb * 1024 * 1024
+    if total_bytes > max_bytes:
+        total_mb = total_bytes / (1024 * 1024)
+        raise MeshTooLargeError(
+            f"{path.name}: 3MF geometry is {total_mb:.0f} MB uncompressed "
+            f"(cap {max_xml_mb} MB) — skipping analysis"
+        )
+
+
 def _analyze_stl(
     path: Path,
     density: float,
@@ -385,10 +427,16 @@ def _analyze_3mf(
     density: float,
     infill_pct: float,
     max_triangles: int | None = None,
+    max_3mf_xml_mb: int | None = None,
 ) -> list[ObjectAnalysis]:
     """3MF → potentially multiple objects; colors from XML via lxml."""
     import trimesh  # noqa: PLC0415
     import trimesh.util  # noqa: PLC0415
+
+    # Pre-load size guard: raise BEFORE trimesh.load if the geometry-XML parts
+    # are too large to safely parse (issue #37 follow-up).  No-op when
+    # max_3mf_xml_mb is None.
+    _check_3mf_xml_size(path, max_3mf_xml_mb)
 
     # Parse colors from ZIP XML
     raw_bytes = path.read_bytes()
@@ -503,6 +551,7 @@ def analyze_file(
     infill_pct: float = 15.0,
     source_hash: str | None = None,
     max_triangles: int | None = None,
+    max_3mf_xml_mb: int | None = None,
 ) -> FileAnalysis:
     """Analyze a mesh file and return a FileAnalysis dict.
 
@@ -515,6 +564,10 @@ def analyze_file(
                        total faces than this raise ``MeshTooLargeError`` instead
                        of being fully loaded.  ``None`` (default) — no cap, so
                        existing direct callers of ``analyze_file`` are unaffected.
+        max_3mf_xml_mb: 3MF geometry-XML pre-load size cap in MB (issue #37
+                       follow-up).  Only applies to ``.3mf`` files; checked
+                       BEFORE trimesh.load via the ZIP central directory (no
+                       decompression).  ``None`` (default) — no cap.
 
     Returns:
         FileAnalysis dict with 'objects', 'total_objects', 'total_colors',
@@ -522,7 +575,8 @@ def analyze_file(
 
     Raises:
         ValueError: unsupported extension or failed to load.
-        MeshTooLargeError: total triangle count exceeds ``max_triangles``.
+        MeshTooLargeError: total triangle count exceeds ``max_triangles``, or
+            (3MF only) uncompressed geometry-XML exceeds ``max_3mf_xml_mb``.
         Any trimesh / lxml error is surfaced as-is; callers should wrap in
         try/except and mark the file as unanalyzed.
     """
@@ -540,7 +594,7 @@ def analyze_file(
     if ext == ".stl":
         objects = _analyze_stl(path, density_g_cm3, infill_pct, max_triangles)
     elif ext == ".3mf":
-        objects = _analyze_3mf(path, density_g_cm3, infill_pct, max_triangles)
+        objects = _analyze_3mf(path, density_g_cm3, infill_pct, max_triangles, max_3mf_xml_mb)
     else:
         objects = _analyze_generic(path, density_g_cm3, infill_pct, max_triangles)
 

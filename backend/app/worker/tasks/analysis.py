@@ -128,13 +128,18 @@ async def _reconcile_embedded_thumbnail(
     return rel_path
 
 
-def _build_cap_skip_stub(source_hash: str | None, max_triangles: int) -> dict[str, Any]:
-    """Build a low-confidence stub FileAnalysis for an over-cap mesh (issue #37 fix #4).
+def _build_cap_skip_stub(source_hash: str | None, note: str) -> dict[str, Any]:
+    """Build a low-confidence stub FileAnalysis for an over-cap mesh.
 
     Stored sha-keyed exactly like a normal result, so the sha-cache in
     ``_analyze_item_body`` treats it as "analyzed" and never retries the file —
     an oversized mesh gets a stable, visible "too large to analyze" state
     instead of an infinite retry loop or a silent gap in the UI.
+
+    *note* is the human-readable reason (the ``AnalyzeCapSkip`` message),
+    covering both the triangle-count cap (issue #37 fix #4) and the 3MF
+    pre-load geometry-XML size cap (issue #37 follow-up) that raise the same
+    ``AnalyzeCapSkip``/stub chain.
     """
     return {
         "analyzed_at": datetime.now(UTC).isoformat(),
@@ -145,7 +150,7 @@ def _build_cap_skip_stub(source_hash: str | None, max_triangles: int) -> dict[st
         "total_est_grams": 0.0,
         "low_confidence": True,
         "analysis_skipped": "too_large",
-        "note": f"mesh exceeds {max_triangles:,}-triangle analyze cap",
+        "note": note,
     }
 
 
@@ -503,6 +508,7 @@ async def _analyze_item_body(ctx: dict, item_id: int, _finish: Any) -> None:
                         timeout_s=settings.ANALYZE_TIMEOUT_S,
                         mem_limit_mb=settings.ANALYZE_MEM_LIMIT_MB,
                         max_triangles=settings.ANALYZE_MAX_TRIANGLES,
+                        max_3mf_xml_mb=settings.ANALYZE_MAX_3MF_XML_MB,
                     )
 
                 # Store per-file thumbnail path (None when no embedded thumbnail).
@@ -519,6 +525,7 @@ async def _analyze_item_body(ctx: dict, item_id: int, _finish: Any) -> None:
                     timeout_s=settings.ANALYZE_TIMEOUT_S,
                     mem_limit_mb=settings.ANALYZE_MEM_LIMIT_MB,
                     max_triangles=settings.ANALYZE_MAX_TRIANGLES,
+                    max_3mf_xml_mb=settings.ANALYZE_MAX_3MF_XML_MB,
                 )
 
             async with SessionLocal() as db:
@@ -537,9 +544,11 @@ async def _analyze_item_body(ctx: dict, item_id: int, _finish: Any) -> None:
                 result.get("total_est_grams") or 0.0,
             )
         except AnalyzeCapSkip as exc:
-            # Mesh too large to analyze (issue #37 fix #4) — NOT an error: store a
-            # low-confidence stub, sha-keyed so it is cached and never retried.
-            stub = _build_cap_skip_stub(current_sha, settings.ANALYZE_MAX_TRIANGLES)
+            # Mesh too large to analyze (triangle cap, issue #37 fix #4; or 3MF
+            # pre-load geometry-XML size cap, issue #37 follow-up) — NOT an
+            # error: store a low-confidence stub, sha-keyed so it is cached and
+            # never retried.
+            stub = _build_cap_skip_stub(current_sha, str(exc))
             async with SessionLocal() as db:
                 await db.execute(
                     sa.update(File)

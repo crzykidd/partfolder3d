@@ -144,6 +144,17 @@ class Settings(BaseSettings):
     # instead of a full trimesh load, so a pathologically large model can't stall
     # or OOM the analyze subprocess.
     ANALYZE_MAX_TRIANGLES: int = 2_000_000
+    # Max uncompressed size (MB) of a 3MF's geometry-XML parts (3D/3dmodel.model
+    # + 3D/Objects/*.model), summed from the ZIP central directory WITHOUT
+    # decompressing (pre-load guard, issue #37 follow-up). trimesh parses each
+    # part into an lxml DOM, which balloons ~15-20x the raw XML bytes — a
+    # ~505 MB part observed in the wild grew past 8 GB, blowing well past
+    # ANALYZE_MEM_LIMIT_MB even under RLIMIT_AS. Catching this BEFORE calling
+    # trimesh.load avoids a doomed multi-GB parse that fails (and re-fails on
+    # every rescan) instead of being skipped as a low-confidence stub like the
+    # triangle cap. Kept as an independent knob (not tied to
+    # ANALYZE_MEM_LIMIT_MB) since it bounds input bytes, not the child's RSS.
+    ANALYZE_MAX_3MF_XML_MB: int = 256
 
     # ---- Import / Inbox (Phase 5) ----
     # Directory the inbox scanner watches for incoming asset folders.
