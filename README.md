@@ -125,6 +125,11 @@ transfer, and resilience against database loss.
 - **Manyfold import** — connect self-hosted [Manyfold](https://manyfold.org) instances
   with OAuth credentials, then import a model straight from its URL: metadata, tags,
   images, and 3D files are pulled via Manyfold's API into the wizard for review.
+- **Prinnit import** — paste a [prinnit.com](https://prinnit.com) design URL and the
+  wizard pre-fills title, description (with print time / difficulty / weight / filaments),
+  creator, tags, and gallery images via prinnit's public API. No setup — the site's
+  static scraper sees only an empty SPA shell, so a dedicated connector reads the real
+  metadata. You download the paid `.3mf` after purchase and upload it in the wizard.
 - **Import from another instance's share link** — pull assets + metadata and
   reconcile against your library and canonical tags.
 - Wizard suggests an **editable title** before commit (becomes the on-disk name and
