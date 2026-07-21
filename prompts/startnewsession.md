@@ -6,69 +6,72 @@ It is NOT a full reference: durable rules live in `CLAUDE.md`, the module map + 
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
 "Current state" + "Next phases" before every `/clear`.
 
-**Last updated:** 2026-07-20 — **`v0.6.1` RELEASED** (issue #37 — worker analyze crash-loop
-hardening; PR #38 merged, tag `v0.6.1` cut, prod images publishing `:latest`/`:0.6.1`/`:0` for all
-three images). `dev` == `main`. **No open issues** (`#37` fully closed). Previous release `v0.6.0`
-was the Manyfold import feature.
+**Last updated:** 2026-07-20 — **`v0.7.0` RELEASE PREP IN FLIGHT.** Feature: the **prinnit.com
+import connector**. Prep PR **[#39](https://github.com/crzykidd/partfolder3d/pull/39)** (`dev` →
+`main`) is **OPEN, all CI green, mergeable** — **not yet merged, not yet tagged.** `dev` is **3
+commits ahead of `main`** (`v0.6.1`). **No open issues.** Previous release `v0.6.1` was the issue
+#37 worker-analyze crash-loop hardening.
+
+> **⏭️ TO FINISH THE RELEASE (do this first):** 1) merge PR #39 into `main`; 2) wait for the
+> push-to-`main` "Build and publish Docker images" workflow to publish `:latest`/`:0.7.0`/`:0`;
+> 3) run **`/release-cut 0.7.0`** to tag `v0.7.0` + publish the GitHub release (body = the
+> `[0.7.0]` CHANGELOG section, already in the PR description). Do **not** tag from `dev`; do
+> **not** re-tag. After the cut, refresh this file to "`v0.7.0` RELEASED / `dev` == `main`".
 
 ## Current state
 
-- **Latest release: `v0.6.1`** (2026-07-20). A pure **bug-fix/hardening** release closing
-  **issue #37** — a large mesh could OOM-kill the whole background worker, which then
-  crash-looped forever. Shipped as five changes, each `make verify`-green and live-proven on
-  this host:
-  - **#1 orphan-requeue retry cap** — `_recover_orphaned_jobs` (`backend/worker.py`) now re-queues
-    an orphaned idempotent job at most **3× within 6h** (counted by `payload.item_id` + recency
-    window), then marks it terminally `failed`. Kills the infinite loop.
-  - **#2 subprocess-isolate analyze** — `analyze_file` now runs in a spawned child via
-    **`backend/app/worker/analyze_subprocess.py`** (mirrors `render_subprocess.py`) with a
-    wall-clock timeout AND a per-child **`RLIMIT_AS` memory bound** (`ANALYZE_MEM_LIMIT_MB`,
-    default 4096) set BEFORE trimesh import. The RLIMIT is the crux — a bare subprocess isn't
-    enough because the container cgroup OOM-killer could pick the parent.
-  - **#4 triangle cap** — post-load `ANALYZE_MAX_TRIANGLES` (default 2,000,000) → cap-skip stub.
-  - **#3 per-item analyze dedup** — claim-time supersede (`mark_superseded` in `job_tracker.py`)
-    if another analyze for the same item is already `running`, + opt-in enqueue-time skip in
-    `_write_queued_row_and_enqueue`.
-  - **Pre-load 3MF size guard** — `_check_3mf_xml_size` in `mesh_analysis.py` reads the ZIP
-    central directory (no decompression), sums `3D/**/*.model` uncompressed bytes, and cap-skips
-    over `ANALYZE_MAX_3MF_XML_MB` (default 256) BEFORE trimesh. Over-cap files are stored as a
-    cached low-confidence `analysis_skipped:"too_large"` stub, so they never retry.
-  - **Live-proven:** re-analyzing item 11 ("Dahlia," a **140 MB / 1.09 GB-uncompressed** 3MF with
-    two ~505 MB geometry parts) now finishes in ~11s as a clean cap-skip stub, worker
-    `RestartCount=0`. Before: OOM crash-loop.
-- **Known finding (not a bug, not filed):** trimesh's own 3MF loader parses each
-  `3D/Objects/*.model` geometry XML into an lxml DOM; a ~500 MB part balloons **past 8 GB**, so
-  such files genuinely can't be geometry-analyzed under any sane memory bound. The pre-load size
-  guard is the intended answer (skip + flag, don't attempt). `_parse_3mf_colors` was NOT the
-  culprit (it's already guarded and its `3dmodel.model` is tiny). Only revisit if someone wants
-  partial analysis of giant 3MFs (would need streaming/decimation, not huge_tree).
-- **Config knobs added this release** (env, defaults in `backend/app/config.py` + `.env.example`):
-  `ANALYZE_TIMEOUT_S=300`, `ANALYZE_MEM_LIMIT_MB=4096`, `ANALYZE_MAX_TRIANGLES=2000000`,
-  `ANALYZE_MAX_3MF_XML_MB=256`.
+- **In-flight release `v0.7.0`** — a **single-feature** release: the **prinnit.com import
+  connector**. Three commits on `dev` since `v0.6.1` (`c89a1b6` feat, `44f4bda` docs README,
+  `c983898` chore(release) prep). Prep PR **#39** is open + CI-green; see the ⏭️ finish-the-release
+  box at the top. The prinnit feature was **owner-tested and confirmed working** before prep.
+- **What the prinnit connector does:** pasting a `prinnit.com/<Designer>/design/<id>` URL into the
+  import wizard now pre-fills real title, description (HTML→plain-text, with an appended plain-text
+  **Print details** block — time/difficulty/weight/bed size/filaments/video), creator, tags, and
+  gallery images. The gated `.3mf` is NOT downloaded — the user uploads the file they purchased.
+  - **Why a connector was needed:** prinnit is a client-rendered React SPA with **no OG tags** — the
+    generic scraper only saw a junk `ForgeCore Home` title. The connector instead reads prinnit's
+    **fully public, no-auth JSON API** (`api.prinnit.com`): `GET /designers` (find designer `sub` by
+    name, case-insensitive) → `GET /designs/<sub>` (whole ~1.2 MB catalog; scan for `designId`).
+    `robots.txt` allows all; images are public `images.prinnit.com` webp.
+  - **Where the code lives:** `backend/app/storage/prinnit_client.py` (`scrape_prinnit` — pure fn,
+    never raises, SSRF-guarded, returns an enriched `ScrapeResult | None`); a domain short-circuit in
+    `backend/app/worker/tasks/import_session.py` right after `_maybe_manyfold_import` (skips
+    `scrape_url`/`SiteCapability`/fallback on a prinnit URL); tests `backend/tests/test_prinnit.py`
+    (31, HTTP mocked). Design rationale in `docs/decisions.md` (newest entry).
+  - **Not configurable / no admin UI** — no auth or DB config; domain is hardcoded `prinnit.com`.
+    No migration. Rich fields beyond the Print-details block (individual filament colors, etc.) are
+    intentionally not modeled — only what the wizard consumes.
+- **Previous release `v0.6.1`** (issue #37 — worker analyze OOM crash-loop hardening: subprocess
+  isolation + `RLIMIT_AS`, retry cap, triangle/3MF size caps). Full detail in `CHANGELOG.md`; the
+  `ANALYZE_*` env knobs live in `backend/app/config.py` + `.env.example`. Item 11 in the dev DB
+  carries a `too_large` analysis stub from that live test.
 - **Prod deploy facts** (compose in `~/projects/docker-compose/apps/partfolder3d/` on this
   host, deployed elsewhere via Komodo): `:latest` images, Traefik ingress
   (`partfolder3d.crzynet.com`), NFS library, `user: 2000:66000`, worker capped
-  `cpus:2 / 6G` (matches `RENDER_CPU_THREADS=2`; `WORKER_MAX_JOBS=2`, `RENDER_CONCURRENCY=1`,
-  `ANALYZE_CONCURRENCY=2` defaults). Shared FlareSolverr in `~/projects/docker-compose/apps/flaresolverr/`.
-- **The dev docker stack on THIS host is UP.** The worker was bumped to **6 GiB**
-  (`WORKER_MEM_LIMIT=6g` in the gitignored `.env`) as a #37 *mitigation*; that mitigation is now
-  **superseded by the real fix** (analyze child is RLIMIT-bounded at 4 GiB), so the dev worker no
-  longer needs 6 GiB for analyze — the `.env` override is harmless and left in place. Bring
-  up/down with `docker compose -f docker-compose.dev.yml {up -d,stop}`. backend/frontend
-  hot-reload from the repo; the **worker does NOT** (`make worker-restart` after worker/task/
-  scraper edits). Dev DB has a configured Manyfold instance + committed test imports (items ~11,
-  25, 29–35); item 11 now carries a `too_large` analysis stub from the #37 live test.
+  `cpus:2 / 6G` (`WORKER_MAX_JOBS=2`, `RENDER_CONCURRENCY=1`, `ANALYZE_CONCURRENCY=2` defaults).
+  Shared FlareSolverr in `~/projects/docker-compose/apps/flaresolverr/`.
+- **The dev docker stack on THIS host is UP.** Bring up/down with
+  `docker compose -f docker-compose.dev.yml {up -d,stop}`. backend/frontend hot-reload from the
+  repo; the **worker does NOT** (`make worker-restart` after worker/task/scraper edits). Dev DB has
+  a configured Manyfold instance + committed test imports (items ~11, 25, 29–35).
+- **CI vs local gotcha (confirmed this session):** the local `verify-frontend`/vitest gate flaked
+  with nondeterministic `waitFor` 5s timeouts (a *different* unrelated test each run) while the host
+  was CPU-loaded from the build — **PR #39's CI Frontend + Test jobs are green.** CI on a clean
+  runner is authoritative; don't chase local frontend timeout flakes.
 
 ## Next phases (roadmap)
 
+- **Finish the `v0.7.0` release** (immediate) — merge PR #39 → wait for `:latest` publish →
+  `/release-cut 0.7.0`. See the ⏭️ box at the top.
 - **Bulk move-assets UI** (#25 follow-up) — last Phase 2 item. Backend bulk endpoint live +
   tested; catalog needs a **multi-select** affordance (real UX decision — discuss with owner
   before building).
 - **Unfiled candidates:** harden the creator-blind AgentQL fallback query (low priority, from the
   v0.6.0 MakerWorld thread — RESOLVED as a prod config issue, not code); opportunistic auto-fetch
   of model files on the scraper framework (login-gated on Printables/MakerWorld — deferred from
-  #27). Partial analysis of very large 3MFs (streaming/decimation) if ever wanted (see finding
-  above).
+  #27). Partial analysis of very large 3MFs (streaming/decimation) if ever wanted. Prinnit's
+  `/designs/<sub>` returns the designer's whole catalog (~1.2 MB) to get one design — fine today,
+  but if it ever gets slow, revisit for a lighter path (none is currently public).
 - Next release = `/release-prep <next>` when a batch is ready. Standing gotchas: CodeQL on big
   diffs surfaces pre-existing alerts (`sanitize_for_log` real ones; dismiss path-injection FPs with
   existing `resolve()`+`is_relative_to()` barriers); transient pip-download timeouts in the Image
