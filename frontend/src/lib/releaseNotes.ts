@@ -18,6 +18,16 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: Record<string, ReleaseNote> = {
+  '0.7.0': {
+    title: "What's New in v0.7.0",
+    bullets: [
+      'prinnit.com import — paste a prinnit.com design URL and the wizard pre-fills the real title, description, creator, tags, and gallery images',
+      'The description now carries an appended print-details block — print time, difficulty, weight, min bed size, filaments, and video link',
+      'prinnit design pages have no metadata for the built-in scraper to read, so a dedicated connector pulls the details from prinnit’s public API — no setup required',
+      'You still download the paid .3mf after purchase and upload it in the wizard; only the metadata and images are fetched automatically',
+    ],
+    githubReleaseUrl: 'https://github.com/crzykidd/partfolder3d/releases/tag/v0.7.0',
+  },
   '0.6.1': {
     title: "What's New in v0.6.1",
     bullets: [
