@@ -6,63 +6,72 @@ It is NOT a full reference: durable rules live in `CLAUDE.md`, the module map + 
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
 "Current state" + "Next phases" before every `/clear`.
 
-**Last updated:** 2026-07-19 — **`v0.6.0` RELEASED** (Manyfold import; PR #36 merged, tag `v0.6.0`
-cut, prod images publishing `:latest`/`:0.6.0`/`:0`). `dev` == `main`. **One open issue: #37**
-(worker crash-loops OOM-analyzing large meshes — see below). MakerWorld creator thread RESOLVED
-earlier (prod AgentQL misconfig).
+**Last updated:** 2026-07-20 — **`v0.7.0` RELEASE PREP IN FLIGHT.** Feature: the **prinnit.com
+import connector**. Prep PR **[#39](https://github.com/crzykidd/partfolder3d/pull/39)** (`dev` →
+`main`) is **OPEN, all CI green, mergeable** — **not yet merged, not yet tagged.** `dev` is **3
+commits ahead of `main`** (`v0.6.1`). **No open issues.** Previous release `v0.6.1` was the issue
+#37 worker-analyze crash-loop hardening.
+
+> **⏭️ TO FINISH THE RELEASE (do this first):** 1) merge PR #39 into `main`; 2) wait for the
+> push-to-`main` "Build and publish Docker images" workflow to publish `:latest`/`:0.7.0`/`:0`;
+> 3) run **`/release-cut 0.7.0`** to tag `v0.7.0` + publish the GitHub release (body = the
+> `[0.7.0]` CHANGELOG section, already in the PR description). Do **not** tag from `dev`; do
+> **not** re-tag. After the cut, refresh this file to "`v0.7.0` RELEASED / `dev` == `main`".
 
 ## Current state
 
-- **Latest release: `v0.6.0`** (2026-07-19, PR #36 — Manyfold import). Headline feature:
-  **import a model straight from a self-hosted Manyfold instance** via its OAuth2
-  (`client_credentials`) JSON-LD API — a *primary authenticated* source, NOT a scraper (bypasses
-  the scrape/fallback chain and downloads real 3D files). Admin config (`ManyfoldInstance`,
-  migrations `0023`/`0024`, `/api/admin/manyfold`, secret Fernet-encrypted & write-only), worker
-  branch `_maybe_manyfold_import` (`storage/manyfold_client.py`), `/admin/ai/manyfold` admin tab,
-  and a wizard **Assets** step (`import_session_files.selected`, files checked-by-default,
-  deselectable). Live-validated end-to-end against the real `manyfold.crzynet.com`. Two live-found
-  fixes baked in: rewrite Manyfold's internal-host `@id`/`contentUrl` onto the configured
-  `base_url`; scope the download SSRF guard so the trusted instance host (may be a private/LAN IP)
-  is exempt while cross-host redirects stay guarded; and derive a file extension from
-  `encodingFormat` when the Manyfold filename lacks one. What's-New modal + README updated (README
-  history collapsed to latest + CHANGELOG link; early-alpha warning softened to
-  active-development).
-- **OPEN — issue #37 (`bug`): worker crash-loops OOM-analyzing large meshes.** `analyze_item` runs
-  **inline in the worker** (not subprocess-isolated like render), so a huge mesh (repro: a 1.36M-
-  vertex / 37.9 MB `.3mf` needs ~4.7 GiB) OOM-kills the worker at its mem cap → SIGKILL (uncatchable)
-  → container restart → the `on_startup` orphan-recovery re-queues the 'running' job with **no
-  attempt cap** → infinite loop (saw 31 restarts). Prod (6 GiB cap) likely survives *this* file but
-  any bigger one loops the same way. Proposed fixes in #37: cap orphan re-queue → mark failed;
-  subprocess-isolate analyze; dedup concurrent analyze jobs per item; guard/decimate huge meshes.
-  **Dev mitigation already applied:** bumped the dev worker to 6 GiB (`WORKER_MEM_LIMIT=6g` in the
-  gitignored `.env`) and cleared the storm (cancelled the dup item-35 jobs, flushed the arq queue).
-- **RESOLVED — prod MakerWorld imports missing creator/tags:** root cause was a prod-side
-  AgentQL misconfiguration (not a code bug); owner corrected the config and imports now pull
-  creator info. No code change needed. (Latent candidate, low priority: the AgentQL fallback
-  query is still creator-blind by design — `{ title description images[] }` — so extending it
-  with creator fields would harden the fallback, but it's no longer the active problem.)
+- **In-flight release `v0.7.0`** — a **single-feature** release: the **prinnit.com import
+  connector**. Three commits on `dev` since `v0.6.1` (`c89a1b6` feat, `44f4bda` docs README,
+  `c983898` chore(release) prep). Prep PR **#39** is open + CI-green; see the ⏭️ finish-the-release
+  box at the top. The prinnit feature was **owner-tested and confirmed working** before prep.
+- **What the prinnit connector does:** pasting a `prinnit.com/<Designer>/design/<id>` URL into the
+  import wizard now pre-fills real title, description (HTML→plain-text, with an appended plain-text
+  **Print details** block — time/difficulty/weight/bed size/filaments/video), creator, tags, and
+  gallery images. The gated `.3mf` is NOT downloaded — the user uploads the file they purchased.
+  - **Why a connector was needed:** prinnit is a client-rendered React SPA with **no OG tags** — the
+    generic scraper only saw a junk `ForgeCore Home` title. The connector instead reads prinnit's
+    **fully public, no-auth JSON API** (`api.prinnit.com`): `GET /designers` (find designer `sub` by
+    name, case-insensitive) → `GET /designs/<sub>` (whole ~1.2 MB catalog; scan for `designId`).
+    `robots.txt` allows all; images are public `images.prinnit.com` webp.
+  - **Where the code lives:** `backend/app/storage/prinnit_client.py` (`scrape_prinnit` — pure fn,
+    never raises, SSRF-guarded, returns an enriched `ScrapeResult | None`); a domain short-circuit in
+    `backend/app/worker/tasks/import_session.py` right after `_maybe_manyfold_import` (skips
+    `scrape_url`/`SiteCapability`/fallback on a prinnit URL); tests `backend/tests/test_prinnit.py`
+    (31, HTTP mocked). Design rationale in `docs/decisions.md` (newest entry).
+  - **Not configurable / no admin UI** — no auth or DB config; domain is hardcoded `prinnit.com`.
+    No migration. Rich fields beyond the Print-details block (individual filament colors, etc.) are
+    intentionally not modeled — only what the wizard consumes.
+- **Previous release `v0.6.1`** (issue #37 — worker analyze OOM crash-loop hardening: subprocess
+  isolation + `RLIMIT_AS`, retry cap, triangle/3MF size caps). Full detail in `CHANGELOG.md`; the
+  `ANALYZE_*` env knobs live in `backend/app/config.py` + `.env.example`. Item 11 in the dev DB
+  carries a `too_large` analysis stub from that live test.
 - **Prod deploy facts** (compose in `~/projects/docker-compose/apps/partfolder3d/` on this
   host, deployed elsewhere via Komodo): `:latest` images, Traefik ingress
   (`partfolder3d.crzynet.com`), NFS library, `user: 2000:66000`, worker capped
-  `cpus:2 / 6G` (matches `RENDER_CPU_THREADS=2`; `WORKER_MAX_JOBS=2`, `RENDER_CONCURRENCY=1`
-  defaults). Shared FlareSolverr compose in `~/projects/docker-compose/apps/flaresolverr/`.
-- **The dev docker stack on THIS host is UP** (worker recreated at **6 GiB** via
-  `WORKER_MEM_LIMIT=6g` in `.env` — see #37). Bring up/down with
+  `cpus:2 / 6G` (`WORKER_MAX_JOBS=2`, `RENDER_CONCURRENCY=1`, `ANALYZE_CONCURRENCY=2` defaults).
+  Shared FlareSolverr in `~/projects/docker-compose/apps/flaresolverr/`.
+- **The dev docker stack on THIS host is UP.** Bring up/down with
   `docker compose -f docker-compose.dev.yml {up -d,stop}`. backend/frontend hot-reload from the
-  repo; the **worker does NOT** (restart after worker/task/scraper edits). The dev DB has a
-  **configured Manyfold instance** (`manyfold.crzynet.com`, "Live test", real creds encrypted) +
-  a few committed test imports (items ~30–35) from release testing.
+  repo; the **worker does NOT** (`make worker-restart` after worker/task/scraper edits). Dev DB has
+  a configured Manyfold instance + committed test imports (items ~11, 25, 29–35).
+- **CI vs local gotcha (confirmed this session):** the local `verify-frontend`/vitest gate flaked
+  with nondeterministic `waitFor` 5s timeouts (a *different* unrelated test each run) while the host
+  was CPU-loaded from the build — **PR #39's CI Frontend + Test jobs are green.** CI on a clean
+  runner is authoritative; don't chase local frontend timeout flakes.
 
 ## Next phases (roadmap)
 
+- **Finish the `v0.7.0` release** (immediate) — merge PR #39 → wait for `:latest` publish →
+  `/release-cut 0.7.0`. See the ⏭️ box at the top.
 - **Bulk move-assets UI** (#25 follow-up) — last Phase 2 item. Backend bulk endpoint live +
   tested; catalog needs a **multi-select** affordance (real UX decision — discuss with owner
   before building).
-- **Issue #37 (`bug`) — worker analyze crash-loop robustness** (see Current state). Good next pickup:
-  retry-cap the orphan re-queue + subprocess-isolate analyze. Not a release blocker.
-- **Unfiled candidates:** harden the creator-blind AgentQL fallback query (low priority — see
-  RESOLVED note); opportunistic auto-fetch of model files on the scraper framework (login-gated on
-  Printables/MakerWorld — deferred from #27).
+- **Unfiled candidates:** harden the creator-blind AgentQL fallback query (low priority, from the
+  v0.6.0 MakerWorld thread — RESOLVED as a prod config issue, not code); opportunistic auto-fetch
+  of model files on the scraper framework (login-gated on Printables/MakerWorld — deferred from
+  #27). Partial analysis of very large 3MFs (streaming/decimation) if ever wanted. Prinnit's
+  `/designs/<sub>` returns the designer's whole catalog (~1.2 MB) to get one design — fine today,
+  but if it ever gets slow, revisit for a lighter path (none is currently public).
 - Next release = `/release-prep <next>` when a batch is ready. Standing gotchas: CodeQL on big
   diffs surfaces pre-existing alerts (`sanitize_for_log` real ones; dismiss path-injection FPs with
   existing `resolve()`+`is_relative_to()` barriers); transient pip-download timeouts in the Image
@@ -74,22 +83,23 @@ earlier (prod AgentQL misconfig).
 - Central **Opus planning session**: plan, write handoff prompts in `prompts/`, dispatch **Sonnet
   subagents** to execute, report back. Owner doesn't babysit. Bigger than ~1–2 files → handoff prompt.
 - **Auto-commit on `dev`** with conventional prefixes; **`main` is PR-only, never direct-push.** Use
-  `closes #N` so issues auto-close. Every feat/fix commit updates `CHANGELOG.md [Unreleased]` same commit.
+  `closes #N` so issues auto-close on merge. Every feat/fix commit updates `CHANGELOG.md [Unreleased]`
+  same commit.
 - **During active build/test sessions the owner wants each verified item committed AND pushed to `dev`**
   (not just committed) so pushing rebuilds the `:dev` images and the owner's on-host stack + testers can
   pull. Gate each push on `make verify` (full backend suite + fresh frontend build/vitest).
-- **Flag genuine design forks** for the owner instead of guessing.
+- **Flag genuine design forks** for the owner instead of guessing. (This session: a first
+  lxml-`huge_tree` hypothesis was wrong — verify diagnoses on the live stack BEFORE building the fix.)
 - **Live-iteration caveat:** owner runs the vite dev server / the `:dev` stack on this repo; for bigger
   changes while they test, dispatch to an **isolated worktree** (Agent `isolation: worktree`).
 - **Verify + gotchas are NOT here.** Verify discipline: `CLAUDE.md` + `scripts/verify-*.sh` (`make verify`).
-  Load-bearing gotchas (render backend, 3MF, modals, worker-no-hot-reload, CI shape, merge-dup-symbols):
+  Load-bearing gotchas (render/analyze subprocess isolation, 3MF, modals, worker-no-hot-reload, CI shape):
   `docs/architecture.md`.
 
 ## Backlog (themes — `gh issue list` is the source of truth for what we build **now**, not the PRD)
 
-- **Open: #37** (worker analyze crash-loop robustness). Unfiled candidates: harden creator-blind
-  AgentQL fallback (low pri); auto-fetch model files.
-- **Needs owner decision:** bulk-move multi-select UX.
+- **No open issues.** Next pickup is a roadmap item, not an issue.
+- **Needs owner decision:** bulk-move multi-select UX (#25 follow-up).
 - Older PRD §18 notes: real slicing for filament estimates, trash-purge UI, `.bgcode`/multi-filament gcode.
 
 ## Session start order
@@ -103,16 +113,20 @@ earlier (prod AgentQL misconfig).
 ## Repo, remotes, environment (quick-start)
 
 - **Code:** GitHub [`crzykidd/partfolder3d`](https://github.com/crzykidd/partfolder3d). `main` protected
-  (PR-only, 6 required CI checks). Work on `dev`. `gh` authed as `crzykidd`.
+  (PR-only, required CI checks). Work on `dev`. `gh` authed as `crzykidd`.
 - **Dev stack on THIS host** (when up): `partfolder3d-{backend,worker,db,redis,nginx,frontend,flaresolverr}-1`
   on `:dev` images. `docker logs`/`exec` to diagnose; app DB via `docker exec partfolder3d-db-1 psql -U
   partfolder3d -d partfolder3d`. Separate ephemeral **test** pg: `pf3d-pg-v` on :5433 (pytest only).
   Dev scraper config in DB points at the **shared** FlareSolverr (`https://flaresolverr.crzynet.com/`).
+- **Stale-network recovery:** if `up` leaves containers stuck in `Created` with
+  `failed to set up container networking: network <id> not found`, run
+  `docker compose -f docker-compose.dev.yml down --remove-orphans` then `up -d` — always `down` before
+  `up`, never `up` onto a half-running stack.
 - **Run from scratch:** `cp .env.example .env` → `docker compose -f docker-compose.dev.yml up --build`
   (dev) or `docker compose up -d --build` (prod) → http://localhost:8973 first-run wizard. Migrations
   auto-run via the backend entrypoint. External port **8973** (nginx).
 - **No sandbox here** — bash may prompt unless auto-approve is on. **System Python is PEP-668** (pip
-  blocked); `backend/.venv` exists and runs repo code directly (used for the scrape repro).
+  blocked); `backend/.venv` exists and runs repo code directly.
 
 ## Before-`/clear` checklist
 

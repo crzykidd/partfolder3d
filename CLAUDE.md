@@ -7,9 +7,9 @@ anything the adopted standards govern (branching, commits, releases, handoff pro
 It is the in-repo source of truth for which engineering standards this project conforms
 to, and at which versions.
 
-> **Status:** alpha (v0.6.1) — see [`README.md`](README.md) and [`PRD.md`](PRD.md).
-> Full stack is built and shipping; v0.6.1 is the current release on `main`
-> (v0.1.1–v0.6.1 tagged), with `dev` == `main` between releases.
+> **Status:** alpha (v0.7.0) — see [`README.md`](README.md) and [`PRD.md`](PRD.md).
+> Full stack is built and shipping; v0.7.0 is the current release on `main`
+> (v0.1.1–v0.7.0 tagged), with `dev` == `main` between releases.
 
 ## Operating model (project-specific)
 

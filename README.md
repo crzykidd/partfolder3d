@@ -18,7 +18,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.6.1-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.7.0-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 
@@ -27,6 +27,16 @@
 ---
 
 ## What's New
+
+### v0.7.0 (2026-07-20)
+
+- **Added: prinnit.com import.** Paste a [prinnit.com](https://prinnit.com) design URL into
+  the import wizard and it now pre-fills the real title, description (with an appended
+  print-details block — print time, difficulty, weight, bed size, filaments, video), creator,
+  tags, and gallery images. prinnit's design pages are a client-rendered app with no metadata
+  for the built-in scraper to read, so a dedicated connector pulls the details from its public
+  API instead. No setup required. The paid `.3mf` is still downloaded after purchase and
+  uploaded in the wizard.
 
 ### v0.6.1 (2026-07-19)
 
@@ -68,7 +78,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.6.1) — see the
+> The full feature set below is **built and released** (v0.7.0) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -125,6 +135,11 @@ transfer, and resilience against database loss.
 - **Manyfold import** — connect self-hosted [Manyfold](https://manyfold.org) instances
   with OAuth credentials, then import a model straight from its URL: metadata, tags,
   images, and 3D files are pulled via Manyfold's API into the wizard for review.
+- **Prinnit import** — paste a [prinnit.com](https://prinnit.com) design URL and the
+  wizard pre-fills title, description (with print time / difficulty / weight / filaments),
+  creator, tags, and gallery images via prinnit's public API. No setup — the site's
+  static scraper sees only an empty SPA shell, so a dedicated connector reads the real
+  metadata. You download the paid `.3mf` after purchase and upload it in the wizard.
 - **Import from another instance's share link** — pull assets + metadata and
   reconcile against your library and canonical tags.
 - Wizard suggests an **editable title** before commit (becomes the on-disk name and
@@ -335,7 +350,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is in **active development** (v0.6.1).
+Honest snapshot — this project is in **active development** (v0.7.0).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -548,6 +563,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — v0.6.1 · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — v0.7.0 · built by <code>crzykidd</code></sub>
 
 </div>

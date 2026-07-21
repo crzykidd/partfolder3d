@@ -20,6 +20,17 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-07-20
+
+### Added
+
+- Importing a prinnit.com design URL now pre-fills the wizard with the real title,
+  description (plus an appended print-details block — time/difficulty/weight/bed
+  size/filaments/video), creator, tags, and gallery images, via prinnit's public
+  no-auth JSON API — instead of the garbage title the generic scraper produced on
+  prinnit's client-rendered, OG-tag-less SPA. The gated `.3mf` file is still
+  downloaded by the user after purchase and uploaded manually in the wizard.
+
 ## [0.6.1] — 2026-07-19
 
 ### Fixed
@@ -1178,7 +1189,8 @@ detail in this one file. (An earlier plan to archive closed minor series into
 <!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
      earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
 
-[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/crzykidd/partfolder3d/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/crzykidd/partfolder3d/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/crzykidd/partfolder3d/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/crzykidd/partfolder3d/compare/v0.5.0...v0.5.1
