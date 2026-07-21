@@ -2,6 +2,58 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-21 — Optional nginx TLS (`TLS_MODE`) + base-image bump to 1.30-alpine
+
+**Context:** issue #40 (nginx base image `1.27-alpine` in the vulnerable range for
+several 2026 CVEs, e.g. CVE-2026-42533; nginx.org recommends 1.30.4+) and the desire
+for a standalone self-hoster (no upstream Traefik/Caddy/nginx-proxy-manager) to get
+HTTPS without a second container. Both changes touch `nginx/`, bundled together.
+Full auto Let's Encrypt/ACME is a separate, larger effort — deferred to #41.
+
+- **Base image → `nginx:1.30-alpine` (stable), not `1.31-alpine` (mainline).**
+  Matches nginx.org's own guidance for 1.27.x users and keeps the existing
+  floating-minor pinning style (auto-picks the latest ≥1.30.4 patch). No concrete
+  blocker found for 1.30 — didn't need to escalate per the prompt's "stop if 1.30
+  won't work" instruction.
+- **Also bumped `docker-compose.dev.yml`'s stock `nginx:1.27-alpine` → `1.30-alpine`**,
+  even though issue #40 only named `nginx/Dockerfile`. It's the same nginx codebase /
+  CVE class, a one-line change, and zero behavior risk (dev stays plain-HTTP,
+  `nginx.dev.conf` unaffected) — judged in-scope as "trivially free" per the prompt's
+  own guidance for that file.
+- **Common-include refactor (`nginx/partfolder-common.conf`)**: everything inside the
+  old single `server { listen 80; ... }` except `listen`/`server_name` (headers, CSP,
+  `client_max_body_size`, all `location` blocks, `root`/`index`) moved into an
+  `include`-only file, shared verbatim by the baked `:80` server and the
+  runtime-generated `:443` server. Pure extraction — no header/CSP/location semantics
+  changed. **Consequence for the build-time `nginx -t` check:** the Dockerfile's
+  `backend:` → `127.0.0.1` sed patch had to be extended to also patch
+  `partfolder-common.conf` (that's now where the `proxy_pass http://backend:8000/...`
+  lines live) — missing this caused a build-time `nginx -t` failure (`host not found
+  in upstream "backend"`) the first time through; caught immediately by actually
+  running the build rather than assuming the refactor was cosmetically safe.
+- **Runtime assembly via `/docker-entrypoint.d/40-partfolder-tls.sh`** (stock nginx
+  image's own hook mechanism, POSIX `sh`, `set -e`): reads `TLS_MODE`
+  (`off`/`selfsigned`/`provided`), generates/verifies the cert pair in `$CERT_DIR`
+  (default `/etc/nginx/certs`), and writes `/etc/nginx/conf.d/tls.conf` — a
+  `listen 443 ssl;` server with `TLSv1.2`/`TLSv1.3` + a standard cipher/session-cache
+  set, `include`-ing the same common file. `provided` mode with a missing/empty cert
+  `exit 1`s — the script's `set -e` propagates through the stock entrypoint's own
+  `set -e`, so the container **fails to start** rather than silently falling back to
+  plain HTTP. Verified live: build + all four smoke-tests (`off`, `selfsigned` incl.
+  cert-persists-across-restart, `provided` with a mounted throwaway cert, `provided`
+  with the cert files absent → non-zero exit) all passed exactly as designed.
+- **`TLS_REDIRECT` caveat, as flagged in the prompt:** redirecting to a fixed
+  `https://$host:$server_port` gets the port math wrong behind a mapped host port
+  (`$server_port` inside the container is always `80`, not the operator's real
+  external `APP_HTTPS_PORT`). Went with the simpler `https://$host$request_uri`
+  (implicit default port 443) and documented the caveat in `docs/tls.md` rather than
+  trying to thread the real external port through to the container.
+- **Redirect implemented via a second runtime-generated include**
+  (`nginx/partfolder-redirect.conf`, baked empty by default, `include`d near the top
+  of the baked `:80` server), rather than templating `nginx.conf` itself — keeps the
+  same "bake the default, patch a well-known runtime file" pattern as `tls.conf`, and
+  means `nginx.conf` and `partfolder-common.conf` never need runtime rewriting.
+
 ## 2026-07-20 — prinnit.com connector: enriched ScrapeResult, not a Manyfold-shaped connector
 
 **Context:** prinnit.com design pages are a client-rendered React SPA with no Open Graph

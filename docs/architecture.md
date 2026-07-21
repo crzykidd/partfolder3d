@@ -110,3 +110,12 @@ image-only (invisible to local unit runs).
 - **Migration numbering is serialized.** Tasks creating an Alembic migration run
   one-at-a-time; the orchestrator assigns the next `00NN` in the handoff prompt.
   Parallel agents both creating `0023_*` collide. (Head is `0022` as of v0.3.0.)
+- **nginx: optional TLS is assembled at container start, not baked.**
+  `nginx/nginx.conf` only bakes the plain `:80` server; everything shared
+  (headers/CSP/locations) lives in `nginx/partfolder-common.conf`, `include`d by
+  both `:80` and the runtime-generated `:443`. `nginx/40-partfolder-tls.sh` (a
+  `/docker-entrypoint.d/` hook) reads `TLS_MODE` (`off`/`selfsigned`/`provided`)
+  and writes `/etc/nginx/conf.d/tls.conf` accordingly — `provided` with a
+  missing/empty cert makes the container **fail to start** rather than silently
+  serve plain HTTP. See [`docs/tls.md`](tls.md). Base image is `nginx:1.30-alpine`
+  (bumped from `1.27-alpine`, issue #40).

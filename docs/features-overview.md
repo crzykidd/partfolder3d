@@ -318,6 +318,22 @@ Access: **Jobs & Activity** → `/admin/activity/issues`.
 
 ---
 
+## Optional TLS/HTTPS at nginx
+
+Standalone self-hosters (no upstream Traefik/Caddy/nginx-proxy-manager) can serve
+HTTPS directly from the bundled nginx image via the `TLS_MODE` env var: `off`
+(default, unchanged plain-`:80` behavior), `selfsigned` (auto-generated cert, works
+immediately with a browser trust warning), or `provided` (mount your own real
+`fullchain.pem`/`privkey.pem`; missing files fail the container loudly instead of
+silently serving plain HTTP). `TLS_REDIRECT=true` adds a `:80` → HTTPS redirect.
+Full automatic Let's Encrypt/ACME issuance is a separate, deferred effort (#41) — put
+a real reverse proxy in front if you need that today.
+
+Configure: `.env` (`TLS_MODE`, `APP_HTTPS_PORT`, `TLS_REDIRECT`) + `docker-compose.yml`
+volume/port examples. Full guide: [`docs/tls.md`](tls.md).
+
+---
+
 ## Aurora UI: switchable nav, widget dashboard, Quick Start, and 5-section admin nav
 
 - **Switchable navigation** — each user can choose **top-bar** or **side navigation**

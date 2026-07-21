@@ -20,6 +20,20 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Added
+
+- Optional TLS/HTTPS termination at nginx for standalone self-hosters: `TLS_MODE=off`
+  (default, unchanged) / `selfsigned` (auto-generated cert, immediate HTTPS with a
+  browser trust warning) / `provided` (bring-your-own real cert; missing files fail
+  the container loudly instead of silently serving plain HTTP), plus an optional
+  `TLS_REDIRECT` `:80`→HTTPS redirect. Full automatic Let's Encrypt/ACME is deferred
+  to #41. See `docs/tls.md`.
+
+### Security
+
+- Bumped the nginx base image `nginx:1.27-alpine` → `nginx:1.30-alpine` (stable
+  branch; fixes several 2026 nginx CVEs incl. CVE-2026-42533), closes #40.
+
 ## [0.7.0] — 2026-07-20
 
 ### Added

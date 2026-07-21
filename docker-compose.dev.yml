@@ -176,8 +176,10 @@ services:
       - LOG_LEVEL=info
 
   # ── nginx reverse proxy: proxies / → Vite dev server, /api/ → backend ──
+  # Dev stays on plain HTTP (no TLS_MODE support here — dev doesn't need it),
+  # but the base image is bumped in lockstep with nginx/Dockerfile (issue #40).
   nginx:
-    image: nginx:1.27-alpine
+    image: nginx:1.30-alpine
     restart: unless-stopped
     ports:
       - "${APP_PORT:-8973}:80"

@@ -441,12 +441,15 @@ What happens on first `docker compose up -d`:
 > `chown` the `frontend_dist` volume to your `PUID:PGID`.
 
 > [!TIP]
-> **Custom nginx config** — if you need to adjust the nginx config (e.g. to add TLS
-> termination, change upload limits, or tune proxy timeouts), uncomment the bind-mount
-> line in the `nginx:` section of `docker-compose.yml` and supply your own
-> `./nginx/nginx.conf`. Watch release notes for **"⚠️ nginx config changed"** callouts
-> before upgrading — the callout means the baked default changed and you should reconcile
-> your custom copy.
+> **Built-in HTTPS** — no upstream reverse proxy? Set `TLS_MODE=selfsigned` or
+> `TLS_MODE=provided` (bring your own cert) to serve HTTPS directly from nginx — see
+> [`docs/tls.md`](docs/tls.md).
+>
+> **Custom nginx config** — if you need to change upload limits or tune proxy timeouts,
+> uncomment the bind-mount line in the `nginx:` section of `docker-compose.yml` and
+> supply your own `./nginx/nginx.conf`. Watch release notes for **"⚠️ nginx config
+> changed"** callouts before upgrading — the callout means the baked default changed
+> and you should reconcile your custom copy.
 
 **First-run wizard** — open **http://localhost:8973** and follow the prompts:
 
