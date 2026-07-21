@@ -20,6 +20,15 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Added
+
+- Importing a prinnit.com design URL now pre-fills the wizard with the real title,
+  description (plus an appended print-details block — time/difficulty/weight/bed
+  size/filaments/video), creator, tags, and gallery images, via prinnit's public
+  no-auth JSON API — instead of the garbage title the generic scraper produced on
+  prinnit's client-rendered, OG-tag-less SPA. The gated `.3mf` file is still
+  downloaded by the user after purchase and uploaded manually in the wizard.
+
 ## [0.6.1] — 2026-07-19
 
 ### Fixed

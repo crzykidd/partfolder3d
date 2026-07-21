@@ -2,6 +2,59 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-20 — prinnit.com connector: enriched ScrapeResult, not a Manyfold-shaped connector
+
+**Context:** prinnit.com design pages are a client-rendered React SPA with no Open Graph
+tags, so `scrape_url` only ever sees an empty shell and produces a garbage title. prinnit
+does expose a fully public (no-auth) JSON API, reverse-engineered by the orchestrator via a
+live capture (`GET /designers`, `GET /designs/<sub>`) — no official docs exist for it.
+
+- **Pure-function connector (`scrape_prinnit(url, ...) -> ScrapeResult | None`), NOT a
+  Manyfold-shaped full session-populating connector.** Unlike Manyfold, prinnit needs no
+  auth, no DB-backed instance config, and this connector never downloads files (the `.3mf`
+  stays gated; the user uploads it after purchase). An enriched `ScrapeResult` flowing
+  through the existing downstream population code (title/description/tags/creator/
+  image_urls in `process_import_session`) is the right shape — images land as normal
+  `is_url` rows via the SAME code path every other scraper backend uses, so there's no
+  duplicate image-download logic to maintain.
+- **Domain short-circuit skips the `SiteCapability` probe entirely on success** (mirrors
+  the Manyfold branch's bypass), since prinnit's connector will always "scrape"
+  successfully via its own API — probing/recording it as a generic scrape-capable domain
+  would be meaningless. On a `None` result (URL isn't a design page, or the designer/
+  design can't be resolved), the code falls through to the FULL normal path — including
+  the `SiteCapability` probe and `scrape_url` — same as any other domain, rather than
+  hard-failing; a `ScraperUsage(provider="prinnit", success=False)` row is still recorded
+  either way.
+- **Whole-designer-list fetch tradeoff, accepted as-is.** There is no per-design public
+  endpoint — every per-design shape tried (`/design/<id>`, `/v1/...`) returns an AWS
+  API-Gateway 403 `{"message": "Missing Authentication Token"}` (route-not-found, not an
+  auth error). The only public per-designer endpoint returns the designer's ENTIRE catalog
+  (~137 items / ~1.2 MB for the reference designer) — the prinnit web app itself loads the
+  whole list and indexes client-side. Fetched once per import through the SSRF-guarded
+  `guarded_fetch` with a generous byte cap (`_DESIGNS_MAX_BYTES` = 10 MB); acceptable cost
+  for a one-shot metadata fetch.
+- **`printTime` is assumed to be minutes, not seconds — unverified against prinnit's own
+  UI.** The reference fixture's `printTime: 2117` renders as "35h 17m" for a moderately
+  complex multi-color print, which reads as plausible; there is no unit field on the
+  design object and no public docs to confirm it. Flagged in a code comment at
+  `_format_print_time` (`app/storage/prinnit_client.py`) as the one place to fix if prinnit
+  ever clarifies/changes the unit.
+- **Print-details block appended to `description` is plain text, not HTML** — despite the
+  design object's `description` field itself being raw HTML (per the required field
+  mapping, stored as-is). Checked first: the frontend renders `session.description`
+  (wizard textarea, item page, public share page) as a plain text node everywhere — no
+  `dangerouslySetInnerHTML`/sanitizer exists anywhere in `frontend/src`. Appending an HTML
+  fragment for the print-details block would show up as literal `<ul><li>` tags rather
+  than formatted markup, directly working against the "compact, human-readable block"
+  requirement — so the appended block uses a plain `"Print details:\n- key: value"` list
+  instead. (The base HTML description's own literal-tags-in-a-textarea situation is a
+  pre-existing product limitation for any HTML-description source and is out of scope
+  here.)
+- **`creator_name` is taken verbatim from the URL's `<DesignerName>` segment, not the
+  API's canonical-cased `designerName`.** Matches the task's field-mapping spec literally
+  and keeps behavior predictable (whatever case the user pasted is what they see); the
+  lookup itself is still case-insensitive so resolution succeeds either way.
+
 ## 2026-07-19 — Pre-load 3MF geometry-XML size guard (issue #37 follow-up)
 
 **Context:** the four #37 fixes (retry cap, subprocess isolation, triangle cap, analyze

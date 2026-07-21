@@ -13,6 +13,7 @@ ScrapeResultT = object
 _BACKEND_LABELS: dict[str, str] = {
     "agentql": "AgentQL",
     "flaresolverr": "FlareSolverr",
+    "prinnit": "Prinnit",
 }
 
 # Default priority order (lower = tried first).  Overridden per-backend by the
@@ -698,19 +699,71 @@ async def process_import_session(ctx: dict, session_id: str) -> None:
 
                 domain = extract_domain(session.source_url)
 
-                # Check site capability
-                cap_result = await db.execute(
-                    sa.select(SiteCapability).where(SiteCapability.domain == domain)
-                )
-                cap = cap_result.scalar_one_or_none()
+                # Prinnit primary path: prinnit design pages are a
+                # client-rendered SPA with no Open Graph tags, so the generic
+                # scraper only ever sees an empty shell. On a domain match,
+                # try prinnit's public (no-auth) JSON API instead — it
+                # resolves the real title/description/creator/tags/gallery
+                # directly. A non-None result skips scrape_url AND the
+                # fallback chain (same shape as the Manyfold short-circuit,
+                # but working through an enriched ScrapeResult rather than
+                # hand-populating the session, since prinnit needs no auth/DB
+                # config and downloads no files itself — see
+                # docs/decisions.md). A None result (URL isn't a design page,
+                # or the designer/design couldn't be resolved) falls through
+                # to the normal scrape/capability-probe/fallback path below,
+                # same as any other domain.
+                prinnit_sr: ScrapeResultT | None = None
+                if domain == "prinnit.com":
+                    from app.models.scraper_usage import ScraperUsage  # noqa: PLC0415
+                    from app.storage.prinnit_client import scrape_prinnit  # noqa: PLC0415
 
-                should_scrape = True
-                if cap and cap.is_manual_only:
-                    should_scrape = False
-                    log.info(
-                        "process_import_session: %s is manual-only, skip scrape",
-                        domain,
+                    prinnit_sr = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: scrape_prinnit(
+                            session.source_url,
+                            timeout=_settings.SCRAPE_TIMEOUT,
+                            max_images=_settings.SCRAPE_MAX_IMAGES,
+                        ),
                     )
+                    db.add(  # type: ignore[union-attr]
+                        ScraperUsage(
+                            provider="prinnit",
+                            source_url=session.source_url,
+                            success=prinnit_sr is not None,
+                        )
+                    )
+
+                if prinnit_sr is not None and not prinnit_sr.blocked:  # type: ignore[attr-defined]
+                    scraped_title = prinnit_sr.title  # type: ignore[attr-defined]
+                    scraped_description = prinnit_sr.description  # type: ignore[attr-defined]
+                    scraped_creator = prinnit_sr.creator_name  # type: ignore[attr-defined]
+                    scraped_creator_url = prinnit_sr.creator_profile_url  # type: ignore[attr-defined]
+                    scraped_license = prinnit_sr.license  # type: ignore[attr-defined]
+                    scraped_source_site = prinnit_sr.source_site  # type: ignore[attr-defined]
+                    raw_tags = prinnit_sr.raw_tags  # type: ignore[attr-defined]
+                    image_urls = prinnit_sr.image_urls  # type: ignore[attr-defined]
+                    session.scrape_note = f"Fetched via {_BACKEND_LABELS['prinnit']}"
+                    log.info(
+                        "process_import_session: prinnit connector succeeded for %s "
+                        "(title=%r images=%d)",
+                        sanitize_for_log(session.source_url), scraped_title, len(image_urls),
+                    )
+                    should_scrape = False
+                else:
+                    # Check site capability
+                    cap_result = await db.execute(
+                        sa.select(SiteCapability).where(SiteCapability.domain == domain)
+                    )
+                    cap = cap_result.scalar_one_or_none()
+
+                    should_scrape = True
+                    if cap and cap.is_manual_only:
+                        should_scrape = False
+                        log.info(
+                            "process_import_session: %s is manual-only, skip scrape",
+                            domain,
+                        )
 
                 if should_scrape:
                     # Run blocking scrape in a thread
