@@ -28,6 +28,9 @@ prefix appears only on git tags and GitHub releases.
   the container loudly instead of silently serving plain HTTP), plus an optional
   `TLS_REDIRECT` `:80`→HTTPS redirect. Full automatic Let's Encrypt/ACME is deferred
   to #41. See `docs/tls.md`.
+- Admin Settings now shows an informational "HTTPS / TLS" card pointing to the
+  `TLS_MODE` / `COOKIE_SECURE` knobs and the full `docs/tls.md` guide, and the README
+  now walks through enabling built-in HTTPS during setup.
 
 ### Security
 

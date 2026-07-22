@@ -753,6 +753,46 @@ export function SettingsPage() {
           )}
         </div>
       )}
+
+      {/* HTTPS / TLS — informational only; TLS is deploy-level, not an app setting */}
+      {isAdmin && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--aurora-text)' }}>
+            HTTPS / TLS
+          </div>
+          <Card>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontSize: 12, color: 'var(--aurora-muted)', lineHeight: 1.6 }}>
+                HTTPS is configured at the <strong>deployment level</strong> — in{' '}
+                <code style={INLINE_CODE}>.env</code> and{' '}
+                <code style={INLINE_CODE}>docker-compose.yml</code> — not in this UI, because
+                nginx terminates TLS before requests ever reach the app.
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--aurora-muted)', lineHeight: 1.6 }}>
+                Set <code style={INLINE_CODE}>TLS_MODE</code> to{' '}
+                <code style={INLINE_CODE}>off</code> (default),{' '}
+                <code style={INLINE_CODE}>selfsigned</code>, or{' '}
+                <code style={INLINE_CODE}>provided</code>. Whenever TLS is on, also set{' '}
+                <code style={INLINE_CODE}>COOKIE_SECURE=true</code> — otherwise session
+                cookies won't be sent back over HTTPS and login breaks.
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--aurora-muted)', lineHeight: 1.6 }}>
+                Full guide:{' '}
+                <a
+                  href="https://github.com/crzykidd/partfolder3d/blob/main/docs/tls.md"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--aurora-accent)', textDecoration: 'none' }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'underline' }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.textDecoration = 'none' }}
+                >
+                  docs/tls.md
+                </a>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
     </AdminPage>
   )
 }

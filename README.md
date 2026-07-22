@@ -424,6 +424,8 @@ What happens on first `docker compose up -d`:
 - **nginx config is baked into the `partfolder3d-nginx` image** — the reverse proxy config
   (`client_max_body_size 1024m`, `/api/` proxy, SPA fallback, `/img/` logos) ships inside
   the image so no host config files are needed. The baked default is the supported path.
+  The same image also supports optional built-in TLS termination via `TLS_MODE` — see
+  [`docs/tls.md`](docs/tls.md).
 - **The `frontend` container runs once and exits — this is normal.** It copies the built UI
   into the shared `frontend_dist` volume and exits `0` (`restart: "no"`); nginx waits for it
   (`depends_on: service_completed_successfully`), then serves those files. A `frontend`
@@ -441,8 +443,10 @@ What happens on first `docker compose up -d`:
 > `chown` the `frontend_dist` volume to your `PUID:PGID`.
 
 > [!TIP]
-> **Built-in HTTPS** — no upstream reverse proxy? Set `TLS_MODE=selfsigned` or
-> `TLS_MODE=provided` (bring your own cert) to serve HTTPS directly from nginx — see
+> **Built-in HTTPS** — `TLS_MODE` in `.env` picks the mode: `off` (default, plain `:80`,
+> unchanged) / `selfsigned` (nginx auto-generates a cert, HTTPS immediately, browser trust
+> warning) / `provided` (bring your own real cert). No upstream reverse proxy? Set
+> `TLS_MODE=selfsigned` or `provided` to serve HTTPS directly from nginx — see
 > [`docs/tls.md`](docs/tls.md).
 >
 > **Custom nginx config** — if you need to change upload limits or tune proxy timeouts,
