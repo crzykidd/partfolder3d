@@ -6,24 +6,28 @@ It is NOT a full reference: durable rules live in `CLAUDE.md`, the module map + 
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
 "Current state" + "Next phases" before every `/clear`.
 
-**Last updated:** 2026-07-20 — **`v0.7.0` RELEASE PREP IN FLIGHT.** Feature: the **prinnit.com
-import connector**. Prep PR **[#39](https://github.com/crzykidd/partfolder3d/pull/39)** (`dev` →
-`main`) is **OPEN, all CI green, mergeable** — **not yet merged, not yet tagged.** `dev` is **3
-commits ahead of `main`** (`v0.6.1`). **No open issues.** Previous release `v0.6.1` was the issue
-#37 worker-analyze crash-loop hardening.
+**Last updated:** 2026-07-21 — **`v0.7.0` RELEASED.** Feature: the **prinnit.com import
+connector**. PR #39 merged, tag `v0.7.0` cut, the `release`-triggered "Build and publish Docker
+images" run **succeeded** — prod images publishing `:latest`/`:0.7.0`/`:0` for all three
+(backend/frontend/nginx). **`dev` == `main`.** Previous release `v0.6.1` was the issue #37
+worker-analyze crash-loop hardening.
 
-> **⏭️ TO FINISH THE RELEASE (do this first):** 1) merge PR #39 into `main`; 2) wait for the
-> push-to-`main` "Build and publish Docker images" workflow to publish `:latest`/`:0.7.0`/`:0`;
-> 3) run **`/release-cut 0.7.0`** to tag `v0.7.0` + publish the GitHub release (body = the
-> `[0.7.0]` CHANGELOG section, already in the PR description). Do **not** tag from `dev`; do
-> **not** re-tag. After the cut, refresh this file to "`v0.7.0` RELEASED / `dev` == `main`".
+> **⏭️ NEXT UP — open issue [#40](https://github.com/crzykidd/partfolder3d/issues/40): bump the
+> nginx base image off `1.27` (security).** `nginx/Dockerfile` builds from `nginx:1.27-alpine`,
+> which is in the vulnerable range for several **2026 nginx CVEs** (headline: CVE-2026-42533,
+> MAJOR, `map`+regex buffer overflow → possible RCE) and is **not** patched — the floating
+> `1.27-alpine` tag won't fix it; fixes are only in **1.30.4+ / 1.31.3+**. **Our real exposure is
+> LOW** (our `nginx.conf` uses regex `location`s but **no `map`**, no slice/ssi/http3/grpc — plain
+> port-80 reverse proxy), but bump anyway as hygiene. Proposed: `FROM nginx:1.30-alpine` (stable);
+> `1.31-alpine` (mainline) is the alternative — **owner decision**. One-line Dockerfile change +
+> CHANGELOG `security:` entry; trivial. Full detail in issue #40.
 
 ## Current state
 
-- **In-flight release `v0.7.0`** — a **single-feature** release: the **prinnit.com import
-  connector**. Three commits on `dev` since `v0.6.1` (`c89a1b6` feat, `44f4bda` docs README,
-  `c983898` chore(release) prep). Prep PR **#39** is open + CI-green; see the ⏭️ finish-the-release
-  box at the top. The prinnit feature was **owner-tested and confirmed working** before prep.
+- **Latest release `v0.7.0`** (2026-07-21) — a **single-feature** release: the **prinnit.com import
+  connector** (owner-tested and confirmed working). Shipped via PR #39; tag `v0.7.0` cut, prod
+  images published. `dev` == `main`. The immediate next task is the nginx security bump (issue #40)
+  — see the ⏭️ box at the top.
 - **What the prinnit connector does:** pasting a `prinnit.com/<Designer>/design/<id>` URL into the
   import wizard now pre-fills real title, description (HTML→plain-text, with an appended plain-text
   **Print details** block — time/difficulty/weight/bed size/filaments/video), creator, tags, and
@@ -61,8 +65,9 @@ commits ahead of `main`** (`v0.6.1`). **No open issues.** Previous release `v0.6
 
 ## Next phases (roadmap)
 
-- **Finish the `v0.7.0` release** (immediate) — merge PR #39 → wait for `:latest` publish →
-  `/release-cut 0.7.0`. See the ⏭️ box at the top.
+- **nginx security bump** (immediate — issue [#40](https://github.com/crzykidd/partfolder3d/issues/40)) —
+  `nginx/Dockerfile` off `1.27-alpine` → `1.30-alpine` (or `1.31`, owner's call). Low real
+  exposure, trivial fix; see the ⏭️ box at the top.
 - **Bulk move-assets UI** (#25 follow-up) — last Phase 2 item. Backend bulk endpoint live +
   tested; catalog needs a **multi-select** affordance (real UX decision — discuss with owner
   before building).
@@ -98,8 +103,9 @@ commits ahead of `main`** (`v0.6.1`). **No open issues.** Previous release `v0.6
 
 ## Backlog (themes — `gh issue list` is the source of truth for what we build **now**, not the PRD)
 
-- **No open issues.** Next pickup is a roadmap item, not an issue.
-- **Needs owner decision:** bulk-move multi-select UX (#25 follow-up).
+- **Open issue [#40](https://github.com/crzykidd/partfolder3d/issues/40)** — nginx base-image
+  security bump off `1.27` (immediate next pickup; owner decides 1.30 stable vs 1.31 mainline).
+- **Needs owner decision:** nginx target branch (#40); bulk-move multi-select UX (#25 follow-up).
 - Older PRD §18 notes: real slicing for filament estimates, trash-purge UI, `.bgcode`/multi-filament gcode.
 
 ## Session start order

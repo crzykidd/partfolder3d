@@ -18,7 +18,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.7.0-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.7.1-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 
@@ -27,6 +27,18 @@
 ---
 
 ## What's New
+
+### v0.7.1 (2026-07-21)
+
+- **Built-in HTTPS at nginx** — self-hosters without an upstream reverse proxy can now serve HTTPS
+  directly. Set `TLS_MODE=selfsigned` for an auto-generated cert (instant HTTPS, browser trust
+  warning) or `TLS_MODE=provided` to bring your own real cert; the default `off` is unchanged. See
+  [`docs/tls.md`](docs/tls.md), and the new **HTTPS / TLS** card in admin Settings points the way.
+- **Security:** nginx base image bumped `1.27-alpine` → `1.30-alpine`, fixing several 2026 nginx
+  CVEs (incl. CVE-2026-42533).
+- **Upgrading:** the default (plain-HTTP) setup needs **no changes** — TLS is opt-in and defaults
+  to `off`, so just `pull` and go. Only if you bind-mount a **custom** `nginx.conf` do you need to
+  reconcile it against this release (the config was refactored into includes) — see the CHANGELOG.
 
 ### v0.7.0 (2026-07-20)
 
@@ -78,7 +90,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.7.0) — see the
+> The full feature set below is **built and released** (v0.7.1) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -350,7 +362,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is in **active development** (v0.7.0).
+Honest snapshot — this project is in **active development** (v0.7.1).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -424,6 +436,8 @@ What happens on first `docker compose up -d`:
 - **nginx config is baked into the `partfolder3d-nginx` image** — the reverse proxy config
   (`client_max_body_size 1024m`, `/api/` proxy, SPA fallback, `/img/` logos) ships inside
   the image so no host config files are needed. The baked default is the supported path.
+  The same image also supports optional built-in TLS termination via `TLS_MODE` — see
+  [`docs/tls.md`](docs/tls.md).
 - **The `frontend` container runs once and exits — this is normal.** It copies the built UI
   into the shared `frontend_dist` volume and exits `0` (`restart: "no"`); nginx waits for it
   (`depends_on: service_completed_successfully`), then serves those files. A `frontend`
@@ -441,12 +455,17 @@ What happens on first `docker compose up -d`:
 > `chown` the `frontend_dist` volume to your `PUID:PGID`.
 
 > [!TIP]
-> **Custom nginx config** — if you need to adjust the nginx config (e.g. to add TLS
-> termination, change upload limits, or tune proxy timeouts), uncomment the bind-mount
-> line in the `nginx:` section of `docker-compose.yml` and supply your own
-> `./nginx/nginx.conf`. Watch release notes for **"⚠️ nginx config changed"** callouts
-> before upgrading — the callout means the baked default changed and you should reconcile
-> your custom copy.
+> **Built-in HTTPS** — `TLS_MODE` in `.env` picks the mode: `off` (default, plain `:80`,
+> unchanged) / `selfsigned` (nginx auto-generates a cert, HTTPS immediately, browser trust
+> warning) / `provided` (bring your own real cert). No upstream reverse proxy? Set
+> `TLS_MODE=selfsigned` or `provided` to serve HTTPS directly from nginx — see
+> [`docs/tls.md`](docs/tls.md).
+>
+> **Custom nginx config** — if you need to change upload limits or tune proxy timeouts,
+> uncomment the bind-mount line in the `nginx:` section of `docker-compose.yml` and
+> supply your own `./nginx/nginx.conf`. Watch release notes for **"⚠️ nginx config
+> changed"** callouts before upgrading — the callout means the baked default changed
+> and you should reconcile your custom copy.
 
 **First-run wizard** — open **http://localhost:8973** and follow the prompts:
 
@@ -563,6 +582,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — v0.7.0 · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — v0.7.1 · built by <code>crzykidd</code></sub>
 
 </div>

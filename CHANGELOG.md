@@ -20,6 +20,36 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-07-21
+
+> ✅ **Upgrading — the default (plain HTTP) setup needs NO changes.** TLS is
+> opt-in and defaults to `off`; just `pull` the new image and your existing
+> `docker-compose.yml` keeps serving `:80` exactly as before. You do **not** need
+> to add `TLS_MODE` or any environment/port lines to stay on HTTP.
+>
+> ⚠️ **Only if you bind-mount a *custom* nginx config** (the `./nginx/nginx.conf`
+> override in `docker-compose.yml`): the config changed — the shared server block
+> was factored into `nginx/partfolder-common.conf` (`include`d by both the `:80`
+> and the new optional `:443` server). Compare your copy against the updated
+> `nginx/nginx.conf` and reconcile before upgrading. See `docs/tls.md`.
+
+### Added
+
+- Optional TLS/HTTPS termination at nginx for standalone self-hosters: `TLS_MODE=off`
+  (default, unchanged) / `selfsigned` (auto-generated cert, immediate HTTPS with a
+  browser trust warning) / `provided` (bring-your-own real cert; missing files fail
+  the container loudly instead of silently serving plain HTTP), plus an optional
+  `TLS_REDIRECT` `:80`→HTTPS redirect. Full automatic Let's Encrypt/ACME is deferred
+  to #41. See `docs/tls.md`.
+- Admin Settings now shows an informational "HTTPS / TLS" card pointing to the
+  `TLS_MODE` / `COOKIE_SECURE` knobs and the full `docs/tls.md` guide, and the README
+  now walks through enabling built-in HTTPS during setup.
+
+### Security
+
+- Bumped the nginx base image `nginx:1.27-alpine` → `nginx:1.30-alpine` (stable
+  branch; fixes several 2026 nginx CVEs incl. CVE-2026-42533), closes #40.
+
 ## [0.7.0] — 2026-07-20
 
 ### Added
@@ -1189,7 +1219,8 @@ detail in this one file. (An earlier plan to archive closed minor series into
 <!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
      earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
 
-[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/crzykidd/partfolder3d/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/crzykidd/partfolder3d/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/crzykidd/partfolder3d/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/crzykidd/partfolder3d/compare/v0.5.1...v0.6.0

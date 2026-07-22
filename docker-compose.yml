@@ -180,15 +180,44 @@ services:
   nginx:
     image: ghcr.io/crzykidd/partfolder3d-nginx:latest   # pin a version: :0.1.1
     restart: unless-stopped
+    # ── Optional TLS/HTTPS termination at nginx (for standalone self-hosters
+    # with no upstream Traefik/Caddy/nginx-proxy-manager). Three TLS_MODE
+    # values — default `off` leaves this section fully inert (today's
+    # plain-:80 behavior, byte-for-byte unchanged):
+    #   off        (default) plain :80 only.
+    #   selfsigned auto-generates a self-signed cert on first start (browser
+    #              trust warning expected) — persist it via the nginx_certs
+    #              volume example below.
+    #   provided   mount your OWN real fullchain.pem/privkey.pem (BYO cert)
+    #              via the bind-mount example below.
+    # Full automatic Let's Encrypt/ACME is tracked separately (#41) — for an
+    # auto-renewing trusted cert today, put a real reverse proxy in front
+    # instead and leave TLS_MODE=off here.
+    # IMPORTANT: whenever TLS is on (either mode) set COOKIE_SECURE=true in
+    # .env — required for secure session cookies over HTTPS. See docs/tls.md.
+    environment:
+      - TLS_MODE=${TLS_MODE:-off}
+      - TLS_REDIRECT=${TLS_REDIRECT:-false}
     ports:
       - "${APP_PORT:-8973}:80"
+      # Uncomment to expose HTTPS (TLS_MODE=selfsigned or provided):
+      # - "${APP_HTTPS_PORT:-8443}:443"
     volumes:
       - frontend_dist:/usr/share/nginx/html:ro
       # Optional: override the baked nginx config with a custom one.
-      # Uncomment to supply your own default.conf (e.g. to add TLS termination,
-      # adjust upload limits, or change proxy timeouts). Watch release notes for
+      # Uncomment to supply your own default.conf (e.g. to adjust upload
+      # limits or change proxy timeouts). Watch release notes for
       # "nginx config changed" callouts before upgrading — reconcile your copy.
       # - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      #
+      # TLS_MODE=selfsigned — persist the auto-generated cert across restarts
+      # (also uncomment the matching `nginx_certs:` volume below):
+      # - nginx_certs:/etc/nginx/certs
+      #
+      # TLS_MODE=provided — bind-mount your own real cert files read-only
+      # (both required; see docs/tls.md):
+      # - ./certs/fullchain.pem:/etc/nginx/certs/fullchain.pem:ro
+      # - ./certs/privkey.pem:/etc/nginx/certs/privkey.pem:ro
     depends_on:
       frontend:
         condition: service_completed_successfully
@@ -202,3 +231,7 @@ volumes:
     driver: local
   frontend_dist:
     driver: local
+  # Uncomment when using TLS_MODE=selfsigned, to persist the auto-generated
+  # cert across container restarts (see the nginx service volumes above):
+  # nginx_certs:
+  #   driver: local
