@@ -22,12 +22,16 @@ prefix appears only on git tags and GitHub releases.
 
 ## [0.7.1] — 2026-07-21
 
-> ⚠️ **nginx config changed** — if you are running a custom nginx config
-> (the `./nginx/nginx.conf` bind-mount in `docker-compose.yml`), compare your
-> copy against the updated `nginx/nginx.conf` in this release and reconcile any
-> differences before upgrading. (The shared server config was factored into
-> `nginx/partfolder-common.conf`, `include`d by both the `:80` and the new
-> optional `:443` server — see `docs/tls.md`.)
+> ✅ **Upgrading — the default (plain HTTP) setup needs NO changes.** TLS is
+> opt-in and defaults to `off`; just `pull` the new image and your existing
+> `docker-compose.yml` keeps serving `:80` exactly as before. You do **not** need
+> to add `TLS_MODE` or any environment/port lines to stay on HTTP.
+>
+> ⚠️ **Only if you bind-mount a *custom* nginx config** (the `./nginx/nginx.conf`
+> override in `docker-compose.yml`): the config changed — the shared server block
+> was factored into `nginx/partfolder-common.conf` (`include`d by both the `:80`
+> and the new optional `:443` server). Compare your copy against the updated
+> `nginx/nginx.conf` and reconcile before upgrading. See `docs/tls.md`.
 
 ### Added
 

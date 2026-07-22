@@ -35,8 +35,10 @@
   warning) or `TLS_MODE=provided` to bring your own real cert; the default `off` is unchanged. See
   [`docs/tls.md`](docs/tls.md), and the new **HTTPS / TLS** card in admin Settings points the way.
 - **Security:** nginx base image bumped `1.27-alpine` → `1.30-alpine`, fixing several 2026 nginx
-  CVEs (incl. CVE-2026-42533). ⚠️ If you run a **custom** `nginx.conf` bind-mount, reconcile it
-  against this release before upgrading.
+  CVEs (incl. CVE-2026-42533).
+- **Upgrading:** the default (plain-HTTP) setup needs **no changes** — TLS is opt-in and defaults
+  to `off`, so just `pull` and go. Only if you bind-mount a **custom** `nginx.conf` do you need to
+  reconcile it against this release (the config was refactored into includes) — see the CHANGELOG.
 
 ### v0.7.0 (2026-07-20)
 
