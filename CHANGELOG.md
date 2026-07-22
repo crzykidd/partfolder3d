@@ -20,6 +20,14 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Fixed
+
+- The "Log a Print" dialog is now rendered through a portal to `document.body`, so
+  it always sits above the rest of the item page. Previously the modal was nested
+  inside the Print History card, whose `backdrop-filter` created a local stacking
+  context that trapped its `z-index` — letting the later "Share" card paint over the
+  dialog and hide the print-detail fields.
+
 ## [0.7.1] — 2026-07-21
 
 > ✅ **Upgrading — the default (plain HTTP) setup needs NO changes.** TLS is
