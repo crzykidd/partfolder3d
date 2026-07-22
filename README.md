@@ -18,7 +18,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.7.0-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.7.1-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 
@@ -27,6 +27,16 @@
 ---
 
 ## What's New
+
+### v0.7.1 (2026-07-21)
+
+- **Built-in HTTPS at nginx** — self-hosters without an upstream reverse proxy can now serve HTTPS
+  directly. Set `TLS_MODE=selfsigned` for an auto-generated cert (instant HTTPS, browser trust
+  warning) or `TLS_MODE=provided` to bring your own real cert; the default `off` is unchanged. See
+  [`docs/tls.md`](docs/tls.md), and the new **HTTPS / TLS** card in admin Settings points the way.
+- **Security:** nginx base image bumped `1.27-alpine` → `1.30-alpine`, fixing several 2026 nginx
+  CVEs (incl. CVE-2026-42533). ⚠️ If you run a **custom** `nginx.conf` bind-mount, reconcile it
+  against this release before upgrading.
 
 ### v0.7.0 (2026-07-20)
 
@@ -78,7 +88,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.7.0) — see the
+> The full feature set below is **built and released** (v0.7.1) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -350,7 +360,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is in **active development** (v0.7.0).
+Honest snapshot — this project is in **active development** (v0.7.1).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -570,6 +580,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — v0.7.0 · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — v0.7.1 · built by <code>crzykidd</code></sub>
 
 </div>

@@ -20,6 +20,15 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-07-21
+
+> ⚠️ **nginx config changed** — if you are running a custom nginx config
+> (the `./nginx/nginx.conf` bind-mount in `docker-compose.yml`), compare your
+> copy against the updated `nginx/nginx.conf` in this release and reconcile any
+> differences before upgrading. (The shared server config was factored into
+> `nginx/partfolder-common.conf`, `include`d by both the `:80` and the new
+> optional `:443` server — see `docs/tls.md`.)
+
 ### Added
 
 - Optional TLS/HTTPS termination at nginx for standalone self-hosters: `TLS_MODE=off`
@@ -1206,7 +1215,8 @@ detail in this one file. (An earlier plan to archive closed minor series into
 <!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
      earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
 
-[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/crzykidd/partfolder3d/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/crzykidd/partfolder3d/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/crzykidd/partfolder3d/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/crzykidd/partfolder3d/compare/v0.5.1...v0.6.0

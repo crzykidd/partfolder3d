@@ -18,6 +18,17 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: Record<string, ReleaseNote> = {
+  '0.7.1': {
+    title: "What's New in v0.7.1",
+    bullets: [
+      'Built-in HTTPS at nginx — self-hosters without an upstream reverse proxy can serve HTTPS directly',
+      'Set TLS_MODE=selfsigned for an auto-generated cert (instant HTTPS, browser trust warning), or TLS_MODE=provided to bring your own real cert; the default off is unchanged',
+      'A new "HTTPS / TLS" card in admin Settings points to the setup (configured in .env + docker-compose.yml — see docs/tls.md)',
+      'Security: nginx base image bumped 1.27-alpine → 1.30-alpine, fixing several 2026 nginx CVEs (incl. CVE-2026-42533)',
+      'Upgrade note: if you run a custom nginx.conf bind-mount, reconcile it against this release before upgrading',
+    ],
+    githubReleaseUrl: 'https://github.com/crzykidd/partfolder3d/releases/tag/v0.7.1',
+  },
   '0.7.0': {
     title: "What's New in v0.7.0",
     bullets: [
