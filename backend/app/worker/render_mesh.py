@@ -133,6 +133,83 @@ def _load_as_trimesh(path: Path) -> _trimesh.Trimesh:
 
 
 # ---------------------------------------------------------------------------
+# Structural validation (reconcile integrity check — corruption vs legit edit)
+# ---------------------------------------------------------------------------
+#
+# validate_model_file() answers a narrower question than render_mesh_file() or
+# mesh_analysis.analyze_file(): "is this file structurally readable at all?"
+# It deliberately does NOT require a render backend (VTK) and does NOT compute
+# geometry stats — it is meant to be cheap enough to run synchronously inside
+# the reconcile scan whenever a model file's hash no longer matches its stored
+# baseline, so a legitimate in-place slicer re-save can be told apart from a
+# truncated/corrupted write (see docs/decisions.md).
+
+
+def _validate_mesh_structure(path: Path) -> bool:
+    """Return True if *path* (STL/OBJ/PLY, one of MESH_EXTENSIONS) loads via trimesh.
+
+    Mirrors the parsing trimesh.load() already does for real renders
+    (``_load_as_trimesh``) without requiring a VTK backend or producing an
+    image. Any exception (including an empty/degenerate mesh) is treated as
+    "does not validate".
+
+    Size fail-open: unlike ``read_3mf`` this loads the full mesh into memory
+    in-process (the reconcile scan runs in the memory-capped worker, and this
+    validator is deliberately NOT subprocess/RLIMIT-isolated the way the real
+    render/analyze pipelines are). A file larger than ``RENDER_MAX_FILE_MB``
+    is one the render pipeline itself would ``RenderCapSkip`` anyway, so rather
+    than risk an OOM just to answer a corruption question we skip the load and
+    assume valid — mirroring the 3MF geometry-XML cap in
+    ``validate_3mf_structure``. A hostile oversized file is a concern the
+    already-guarded analyze/render paths own, not this cheap check.
+    """
+    from ..config import settings  # noqa: PLC0415
+
+    try:
+        size_mb = path.stat().st_size / (1024 * 1024)
+    except OSError as exc:
+        log.info("render_mesh: validate_model_file: %s stat failed: %s", path.name, exc)
+        return False
+    if size_mb > settings.RENDER_MAX_FILE_MB:
+        log.info(
+            "render_mesh: validate_model_file: %s is %.1f MB (> %d MB cap); "
+            "skipping load (assumed valid)",
+            path.name, size_mb, settings.RENDER_MAX_FILE_MB,
+        )
+        return True
+
+    try:
+        mesh = _load_as_trimesh(path)
+    except Exception as exc:
+        log.info("render_mesh: validate_model_file: %s failed to load: %s", path.name, exc)
+        return False
+    return bool(len(mesh.vertices)) and bool(len(mesh.faces))
+
+
+def validate_model_file(path: Path, *, max_3mf_xml_mb: int | None = None) -> bool:
+    """Return True if *path* is a structurally readable model/geometry file.
+
+    Dispatches by extension:
+      - ``.3mf``            → ``threemf.validate_3mf_structure`` (zip open +
+                               ``3D/3dmodel.model`` XML parse; respects the
+                               same geometry-size pre-load cap as mesh
+                               analysis via *max_3mf_xml_mb*).
+      - MESH_EXTENSIONS      → ``_validate_mesh_structure`` (trimesh load).
+      - anything else        → True (nothing this module knows how to
+                               validate; callers should not treat an unknown
+                               extension as unparseable).
+    """
+    suffix = path.suffix.lower()
+    if suffix == ".3mf":
+        from .threemf import validate_3mf_structure  # noqa: PLC0415
+
+        return validate_3mf_structure(path, max_xml_mb=max_3mf_xml_mb)
+    if suffix in MESH_EXTENSIONS:
+        return _validate_mesh_structure(path)
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Renderer: VTK
 # ---------------------------------------------------------------------------
 

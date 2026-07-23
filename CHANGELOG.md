@@ -22,6 +22,29 @@ prefix appears only on git tags and GitHub releases.
 
 ### Fixed
 
+- The reconcile scan no longer mislabels a legitimate in-place model-file edit
+  (e.g. opening a `.3mf` in a slicer and saving it back to the same path) as
+  `corruption`. The integrity check and the re-render check used to hash the
+  same changed file independently and could disagree — integrity always raised
+  a critical `corruption` Issue on any hash mismatch, re-render treated the
+  same mismatch as "file updated," and neither ever adopted the new hash as
+  the baseline, so the false alarm recurred on every subsequent scan. A hash
+  mismatch on a model/geometry file (STL/OBJ/PLY/3MF) is now classified by a
+  single check: a newer mtime **and** a file that still parses is a legitimate
+  edit — the new hash/mtime/size is adopted as the baseline (no Issue) and the
+  existing re-render path runs as before; a newer mtime with a file that fails
+  to parse, or a hash change with an unchanged/older mtime, is still reported
+  as `corruption`, with the detail distinguishing a failed-parse write from
+  silent bit-rot.
+
+### Changed
+
+- Added a lightweight model-file structural validator (`validate_model_file`)
+  used only by the reconcile integrity check — a `.3mf` is checked by opening
+  it as a ZIP and parsing its `3D/3dmodel.model` geometry part (respecting the
+  existing 3MF geometry-size cap), and STL/OBJ/PLY are checked via a trimesh
+  load, without requiring a render backend.
+
 - The "Log a Print" dialog is now rendered through a portal to `document.body`, so
   it always sits above the rest of the item page. Previously the modal was nested
   inside the Print History card, whose `backdrop-filter` created a local stacking

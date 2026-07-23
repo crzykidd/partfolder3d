@@ -388,3 +388,79 @@ def test_return_schema_completeness(tmp_path: Path) -> None:
         "total_filament_g", "filament", "plates",
     }
     assert required_keys == set(info.keys())
+
+
+# ---------------------------------------------------------------------------
+# validate_3mf_structure — used by the reconcile integrity check to tell a
+# legitimate in-place slicer re-save apart from a truncated/corrupted write
+# (see docs/decisions.md).
+# ---------------------------------------------------------------------------
+
+
+def test_validate_3mf_structure_valid_fixture(tmp_path: Path) -> None:
+    """A well-formed 3MF (valid ZIP + parseable 3D/3dmodel.model) validates."""
+    from app.worker.threemf import validate_3mf_structure
+
+    content = _make_3mf({"3D/3dmodel.model": _MINIMAL_3DMODEL})
+    p = tmp_path / "valid.3mf"
+    p.write_bytes(content)
+
+    assert validate_3mf_structure(p) is True
+
+
+def test_validate_3mf_structure_truncated_xml_fails(tmp_path: Path) -> None:
+    """A ZIP whose 3dmodel.model part is truncated (malformed XML) does not validate."""
+    from app.worker.threemf import validate_3mf_structure
+
+    content = _make_3mf({"3D/3dmodel.model": _MINIMAL_3DMODEL[:40]})
+    p = tmp_path / "truncated.3mf"
+    p.write_bytes(content)
+
+    assert validate_3mf_structure(p) is False
+
+
+def test_validate_3mf_structure_not_a_zip(tmp_path: Path) -> None:
+    """A file that isn't a ZIP at all (e.g. an interrupted write) does not validate."""
+    from app.worker.threemf import validate_3mf_structure
+
+    p = tmp_path / "notazip.3mf"
+    p.write_bytes(b"this is not a zip file")
+
+    assert validate_3mf_structure(p) is False
+
+
+def test_validate_3mf_structure_missing_geometry_part(tmp_path: Path) -> None:
+    """A ZIP without a 3D/3dmodel.model entry does not validate."""
+    from app.worker.threemf import validate_3mf_structure
+
+    content = _make_3mf({"foo.txt": b"hello"})
+    p = tmp_path / "missing_model.3mf"
+    p.write_bytes(content)
+
+    assert validate_3mf_structure(p) is False
+
+
+def test_validate_3mf_structure_missing_file_on_disk(tmp_path: Path) -> None:
+    """A path that doesn't exist at all does not validate (OSError -> False)."""
+    from app.worker.threemf import validate_3mf_structure
+
+    assert validate_3mf_structure(tmp_path / "does-not-exist.3mf") is False
+
+
+def test_validate_3mf_structure_size_cap_skips_parse(tmp_path: Path) -> None:
+    """Exceeding max_xml_mb skips the parse and returns True (benefit of the doubt).
+
+    This is the pre-load guard mirroring mesh_analysis._check_3mf_xml_size
+    (issue #37 follow-up) — we deliberately do not risk parsing a huge
+    geometry-XML part just to answer a corruption question.
+    """
+    from app.worker.threemf import validate_3mf_structure
+
+    content = _make_3mf({"3D/3dmodel.model": _MINIMAL_3DMODEL})
+    p = tmp_path / "capped.3mf"
+    p.write_bytes(content)
+
+    # max_xml_mb=0 -> any non-empty geometry part exceeds the cap.
+    assert validate_3mf_structure(p, max_xml_mb=0) is True
+    # No cap configured -> always parses normally.
+    assert validate_3mf_structure(p, max_xml_mb=None) is True
