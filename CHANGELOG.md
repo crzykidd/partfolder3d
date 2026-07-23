@@ -20,6 +20,16 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Added
+
+- Bulk approve/reject all pending reconcile reviews. New `POST
+  /api/reviews/approve-all` and `POST /api/reviews/reject-all` endpoints (admin +
+  CSRF guarded, idempotent) clear a large pending backlog in one call, mirroring
+  the existing tag `approve-all` precedent. `approve-all` replays each pending
+  item's `apply_review_item` job (real work), while `reject-all` is a pure status
+  flip. The Reviews page (`/admin/reviews`) gained matching **Approve all** /
+  **Reject all** buttons in the Pending tab header, each behind a confirm step.
+
 ### Fixed
 
 - The reconcile scan no longer mislabels a legitimate in-place model-file edit

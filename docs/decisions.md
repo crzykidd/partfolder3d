@@ -2,6 +2,44 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-23 — Reviews bulk approve/reject: single bulk `UPDATE ... RETURNING`, per-row enqueue
+
+**Context:** `prompts/2026-07-23-reviews-bulk-approve-reject.md` asked for
+`POST /api/reviews/approve-all` and `POST /api/reviews/reject-all`, cloning the
+tag-admin `approve-all` precedent (`backend/app/routers/tag_admin.py:133-156`).
+
+- **`approve-all` uses one `UPDATE ... WHERE status='pending' ... RETURNING id`**
+  rather than loading rows into Python first. This is both the cheapest way to get
+  an idempotent, race-safe count and, critically, the only way to get back exactly
+  the set of ids that transitioned in *this* call — needed because each transitioned
+  id must enqueue its own `apply_review_item` arq job (mirroring the singular
+  `approve_review` endpoint), and a normal `db.execute(update(...))` doesn't return
+  rows. `reject-all` doesn't need per-row ids (no enqueue), so it stays a plain
+  `UPDATE` + `result.rowcount`, exactly like the tag precedent.
+- **Enqueue failures are caught and logged per-row, not fatal to the request** —
+  same pattern as the singular endpoint's `try/except` around
+  `arq.enqueue_job(...)`. A Redis hiccup on job N shouldn't roll back the DB status
+  flip already committed for jobs 1..N-1, and the bulk approve already documents in
+  its docstring that this replays real per-row work (N jobs), unlike the pure
+  status-flip `reject-all`.
+- **Frontend confirm step is inline expand-in-place state** (`confirmApprove` /
+  `confirmReject` booleans → "Sure?" copy + Confirm/Cancel buttons), not a modal —
+  matches the existing per-row Reject confirm pattern in `TagAdminPage.tsx`'s
+  `PendingTagRow`, since this repo doesn't use a dialog/toast library. The
+  Approve-all confirm copy explicitly says "This applies each change to your
+  library" per the prompt's nuance that approve-all is real work while reject-all
+  is a safe flip (reject-all's confirm copy stays terse).
+- **Bulk buttons only render on the Pending tab**, sized off the already-fetched
+  `data.total` for that tab (no extra query) — since `GET /api/reviews` defaults to
+  `status=pending`, the Pending tab's existing list query already has the exact
+  pending count needed for the button label/enable state.
+- **Cache invalidation targets the real pending-count query keys**
+  (`['reviews-pending-count']`, used by `AppShell.tsx` / `SideNavShell.tsx` /
+  `TopNavShell.tsx` / `WidgetStatStrip.tsx`, and `['widget-pending-reviews-panel']`
+  used by the dashboard panel widget) in addition to `['reviews']` — there is no
+  single `['dashboard']` query key in this codebase, so invalidating that would have
+  been a no-op.
+
 ## 2026-07-23 — Reconcile: unify integrity vs re_render into one model-file classifier
 
 **Context:** owner's real workflow opens a model file (typically a `.3mf`) in a slicer

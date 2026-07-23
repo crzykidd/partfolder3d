@@ -294,6 +294,116 @@ const STATUS_TABS = [
 
 const COLUMNS = ['Behavior', 'Change type', 'Item', 'Summary', 'Created', 'Status', 'Actions']
 
+// ---------------------------------------------------------------------------
+// Bulk actions (Approve all / Reject all) — Pending tab only
+// ---------------------------------------------------------------------------
+
+function BulkActions({ pendingTotal }: { pendingTotal: number }) {
+  const queryClient = useQueryClient()
+  const [confirmApprove, setConfirmApprove] = useState(false)
+  const [confirmReject, setConfirmReject] = useState(false)
+  const [lastResult, setLastResult] = useState<string | null>(null)
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['reviews'] })
+    // Pending-review badges/widgets elsewhere in the shell + dashboard.
+    void queryClient.invalidateQueries({ queryKey: ['reviews-pending-count'] })
+    void queryClient.invalidateQueries({ queryKey: ['widget-pending-reviews-panel'] })
+  }
+
+  const approveAllMutation = useMutation({
+    mutationFn: api.approveAllReviews,
+    onSuccess: (data) => {
+      setLastResult(`Approved ${data.approved} pending item${data.approved === 1 ? '' : 's'}.`)
+      setConfirmApprove(false)
+      invalidate()
+    },
+  })
+
+  const rejectAllMutation = useMutation({
+    mutationFn: api.rejectAllReviews,
+    onSuccess: (data) => {
+      setLastResult(`Rejected ${data.rejected} pending item${data.rejected === 1 ? '' : 's'}.`)
+      setConfirmReject(false)
+      invalidate()
+    },
+  })
+
+  const busy = approveAllMutation.isPending || rejectAllMutation.isPending
+  const disabled = pendingTotal === 0 || busy
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {confirmApprove ? (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>
+              Approve all {pendingTotal} pending? This applies each change to your library.
+            </span>
+            <Button
+              size="sm"
+              disabled={approveAllMutation.isPending}
+              onClick={() => approveAllMutation.mutate()}
+              extraStyle={{ background: 'rgba(22,163,74,0.1)', border: '1px solid rgba(22,163,74,0.3)', color: '#16A34A' }}
+            >
+              {approveAllMutation.isPending ? 'Approving…' : 'Confirm approve all'}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setConfirmApprove(false)}>
+              Cancel
+            </Button>
+          </span>
+        ) : (
+          <Button
+            size="sm"
+            disabled={disabled}
+            onClick={() => { setConfirmReject(false); setLastResult(null); setConfirmApprove(true) }}
+            extraStyle={{ background: 'rgba(22,163,74,0.1)', border: '1px solid rgba(22,163,74,0.3)', color: '#16A34A' }}
+          >
+            Approve all{pendingTotal > 0 ? ` (${pendingTotal})` : ''}
+          </Button>
+        )}
+
+        {confirmReject ? (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>
+              Reject all {pendingTotal} pending?
+            </span>
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={rejectAllMutation.isPending}
+              onClick={() => rejectAllMutation.mutate()}
+            >
+              {rejectAllMutation.isPending ? 'Rejecting…' : 'Confirm reject all'}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setConfirmReject(false)}>
+              Cancel
+            </Button>
+          </span>
+        ) : (
+          <Button
+            variant="danger"
+            size="sm"
+            disabled={disabled}
+            onClick={() => { setConfirmApprove(false); setLastResult(null); setConfirmReject(true) }}
+          >
+            Reject all{pendingTotal > 0 ? ` (${pendingTotal})` : ''}
+          </Button>
+        )}
+      </div>
+
+      {(approveAllMutation.isError || rejectAllMutation.isError) && (
+        <span style={{ fontSize: 11, color: 'var(--aurora-danger)' }}>
+          Bulk action failed.
+        </span>
+      )}
+      {lastResult && !approveAllMutation.isError && !rejectAllMutation.isError && (
+        <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>{lastResult}</span>
+      )}
+    </div>
+  )
+}
+
 export function ReviewsPage() {
   const [statusFilter, setStatusFilter] = useState('pending')
   const [page, setPage] = useState(1)
@@ -322,22 +432,28 @@ export function ReviewsPage() {
 
       {/* Queue section */}
       <section style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {/* View tabs */}
-        <div className="flex items-center gap-2">
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            View
-          </span>
-          <div className="flex gap-1.5">
-            {STATUS_TABS.map((t) => (
-              <FilterPill
-                key={t.value || 'all'}
-                active={statusFilter === t.value}
-                onClick={() => { setStatusFilter(t.value); setPage(1) }}
-              >
-                {t.label}
-              </FilterPill>
-            ))}
+        {/* View tabs + bulk actions */}
+        <div className="flex items-center justify-between" style={{ flexWrap: 'wrap', gap: 12 }}>
+          <div className="flex items-center gap-2">
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--aurora-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              View
+            </span>
+            <div className="flex gap-1.5">
+              {STATUS_TABS.map((t) => (
+                <FilterPill
+                  key={t.value || 'all'}
+                  active={statusFilter === t.value}
+                  onClick={() => { setStatusFilter(t.value); setPage(1) }}
+                >
+                  {t.label}
+                </FilterPill>
+              ))}
+            </div>
           </div>
+
+          {statusFilter === 'pending' && (
+            <BulkActions pendingTotal={data?.total ?? 0} />
+          )}
         </div>
 
         {isError && (

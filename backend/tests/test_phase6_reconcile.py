@@ -398,6 +398,142 @@ async def test_reject_already_rejected_review(
     assert resp.status_code == 409
 
 
+# ---------------------------------------------------------------------------
+# Reviews — bulk approve-all / reject-all (2026-07-23-reviews-bulk-approve-reject)
+# ---------------------------------------------------------------------------
+
+
+async def _make_review(
+    db_session: AsyncSession,
+    *,
+    status: str = ReviewStatus.pending,
+    item_id: int = 1,
+) -> ReviewItem:
+    rv = ReviewItem(
+        behavior="sidecar_sync",
+        change_type="sidecar_pulled_to_db",
+        summary="Pending sidecar pull",
+        proposed_action={
+            "behavior": "sidecar_sync",
+            "action": "pull_sidecar_to_db",
+            "item_id": item_id,
+        },
+        status=status,
+    )
+    db_session.add(rv)
+    await db_session.flush()
+    return rv
+
+
+@pytest.mark.asyncio
+async def test_reviews_approve_all(
+    client: AsyncClient, db_session: AsyncSession, arq_pool: Any
+) -> None:
+    """POST /api/reviews/approve-all approves every pending item and enqueues one
+    apply_review_item job per item; already-resolved items are left untouched."""
+    rv1 = await _make_review(db_session, item_id=1)
+    rv2 = await _make_review(db_session, item_id=2)
+    already_rejected = await _make_review(db_session, status=ReviewStatus.rejected, item_id=3)
+
+    csrf = await _setup_and_login(client)
+    resp = await client.post("/api/reviews/approve-all", headers={"x-csrf-token": csrf})
+    assert resp.status_code == 200
+    assert resp.json()["approved"] == 2
+
+    result = await db_session.execute(
+        select(ReviewItem).where(ReviewItem.status == ReviewStatus.pending)
+    )
+    assert result.scalars().all() == []
+
+    for rv in (rv1, rv2):
+        await db_session.refresh(rv)
+        assert rv.status == ReviewStatus.approved
+        assert rv.resolved_at is not None
+        assert rv.resolved_by_id is not None
+
+    await db_session.refresh(already_rejected)
+    assert already_rejected.status == ReviewStatus.rejected
+
+    assert arq_pool.enqueue_job.await_count == 2
+    enqueued_ids = {call.args[1] for call in arq_pool.enqueue_job.await_args_list}
+    assert enqueued_ids == {rv1.id, rv2.id}
+    for call in arq_pool.enqueue_job.await_args_list:
+        assert call.args[0] == "apply_review_item"
+
+
+@pytest.mark.asyncio
+async def test_reviews_approve_all_idempotent(
+    client: AsyncClient, db_session: AsyncSession, arq_pool: Any
+) -> None:
+    """approve-all with zero pending review items returns 200 with approved: 0
+    and enqueues nothing."""
+    await _make_review(db_session, status=ReviewStatus.approved, item_id=1)
+
+    csrf = await _setup_and_login(client)
+    resp = await client.post("/api/reviews/approve-all", headers={"x-csrf-token": csrf})
+    assert resp.status_code == 200
+    assert resp.json()["approved"] == 0
+    arq_pool.enqueue_job.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reviews_reject_all(
+    client: AsyncClient, db_session: AsyncSession, arq_pool: Any
+) -> None:
+    """POST /api/reviews/reject-all rejects every pending item as a pure status
+    flip — no apply job is enqueued (unlike approve-all)."""
+    rv1 = await _make_review(db_session, item_id=1)
+    rv2 = await _make_review(db_session, item_id=2)
+    already_approved = await _make_review(db_session, status=ReviewStatus.approved, item_id=3)
+
+    csrf = await _setup_and_login(client)
+    resp = await client.post("/api/reviews/reject-all", headers={"x-csrf-token": csrf})
+    assert resp.status_code == 200
+    assert resp.json()["rejected"] == 2
+
+    for rv in (rv1, rv2):
+        await db_session.refresh(rv)
+        assert rv.status == ReviewStatus.rejected
+        assert rv.resolved_at is not None
+
+    await db_session.refresh(already_approved)
+    assert already_approved.status == ReviewStatus.approved
+
+    arq_pool.enqueue_job.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reviews_reject_all_idempotent(client: AsyncClient) -> None:
+    """reject-all with zero pending review items returns 200 with rejected: 0."""
+    csrf = await _setup_and_login(client)
+    resp = await client.post("/api/reviews/reject-all", headers={"x-csrf-token": csrf})
+    assert resp.status_code == 200
+    assert resp.json()["rejected"] == 0
+
+
+@pytest.mark.asyncio
+async def test_reviews_bulk_endpoints_require_auth(client: AsyncClient) -> None:
+    """approve-all / reject-all reject unauthenticated callers with 401."""
+    resp = await client.post("/api/reviews/approve-all", headers={"x-csrf-token": "fake"})
+    assert resp.status_code == 401
+
+    resp2 = await client.post("/api/reviews/reject-all", headers={"x-csrf-token": "fake"})
+    assert resp2.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_reviews_bulk_endpoints_require_csrf(client: AsyncClient) -> None:
+    """approve-all / reject-all reject cookie-authenticated calls missing the
+    X-CSRF-Token header with 403."""
+    await _setup_and_login(client)
+
+    resp = await client.post("/api/reviews/approve-all")
+    assert resp.status_code == 403
+
+    resp2 = await client.post("/api/reviews/reject-all")
+    assert resp2.status_code == 403
+
+
 @pytest.mark.asyncio
 async def test_list_issues_filter_by_status(client: AsyncClient, db_session: AsyncSession) -> None:
     """GET /api/issues?status=open returns only open issues."""

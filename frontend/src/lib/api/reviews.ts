@@ -43,3 +43,17 @@ export const approveReview = (id: number): Promise<ReviewItemOut> =>
 
 export const rejectReview = (id: number): Promise<ReviewItemOut> =>
   apiFetch<ReviewItemOut>(`/api/reviews/${id}/reject`, { method: 'POST' })
+
+export interface ApproveAllReviewsResponse {
+  approved: number
+}
+
+export interface RejectAllReviewsResponse {
+  rejected: number
+}
+
+export const approveAllReviews = (): Promise<ApproveAllReviewsResponse> =>
+  apiFetch<ApproveAllReviewsResponse>('/api/reviews/approve-all', { method: 'POST' })
+
+export const rejectAllReviews = (): Promise<RejectAllReviewsResponse> =>
+  apiFetch<RejectAllReviewsResponse>('/api/reviews/reject-all', { method: 'POST' })
