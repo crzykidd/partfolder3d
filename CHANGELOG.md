@@ -27,6 +27,8 @@ prefix appears only on git tags and GitHub releases.
   inside the Print History card, whose `backdrop-filter` created a local stacking
   context that trapped its `z-index` — letting the later "Share" card paint over the
   dialog and hide the print-detail fields.
+- The "Add asset" / import dialog is likewise portaled to `document.body`, hardening
+  it against the same stacking-context trap.
 
 ## [0.7.1] — 2026-07-21
 
