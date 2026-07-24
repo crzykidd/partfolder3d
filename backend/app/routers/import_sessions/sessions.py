@@ -107,6 +107,28 @@ def _scraped_image_ext(url: str, content_type: str) -> str:
     return ".jpg"
 
 
+def sniff_image_ext(data: bytes) -> str | None:
+    """Return the file extension for *data* if it begins with a known image
+    magic number, else ``None``.
+
+    Trust the bytes, not the Content-Type header: some CDNs mislabel valid
+    images (e.g. MakerWorld's ``bblmw.com`` serves PNGs as
+    ``application/octet-stream``), so the header-based allowlist in
+    ``guarded_fetch`` would otherwise reject a perfectly good image. This lets
+    the commit path accept an octet-stream response only when the payload is
+    demonstrably an image, and derive the correct extension from the content.
+    """
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if data[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    return None
+
+
 @router.post(
     "/api/import-sessions",
     response_model=ImportSessionOut,
