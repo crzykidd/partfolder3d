@@ -185,10 +185,15 @@ transfer, and resilience against database loss.
 
 ### 🔄 Reconciliation / scan engine
 - Bidirectional **sidecar ⇄ DB sync**; conflicts raised as Issues.
-- Detect **new / removed / extra** files; re-render on file change.
-- **Orphans, dead links & integrity** checks (hash verification).
+- Detect **new / removed / extra** files; re-render on file change (STL / OBJ / PLY
+  **and 3MF** — a `.3mf` re-saved in place by a slicer is now recognized and re-rendered).
+- **Orphans, dead links & integrity** checks — a changed model file that still parses is
+  treated as a **legitimate in-place edit** (its new hash is adopted, no alarm); only an
+  unparseable/interrupted write or an unchanged-mtime hash change (silent bit-rot) is
+  flagged as **corruption**.
 - Per-behavior **Auto** vs. **Review** modes, a **Change Log**, an **Issues** page,
-  and a live **job/queue monitor**.
+  and a live **job/queue monitor**. Pending reconcile reviews can be resolved one at a
+  time or cleared in bulk with **Approve all** / **Reject all**.
 - **Atomic, all-or-nothing** directory operations with crash-safe rollback.
 - Per-item **"Rescan disk"** button for on-demand reconciliation.
 - **Per-type issue resolution** — the Issues page (`/admin/activity/issues`) offers

@@ -305,7 +305,7 @@ issue type and whether an item DB row exists:
 | `orphan` (DB row, directory gone) | `delete_item` — removes the DB item record · `ignore` |
 | `conflict` | `keep_db` — rewrites sidecar from DB state · `keep_sidecar` — applies on-disk sidecar fields to DB · `ignore` |
 | `dead_link` | `clear_source` — clears `item.source_url` · `ignore` |
-| `corruption` | `accept` — recomputes SHA-256 from disk and accepts the new hash · `ignore` |
+| `corruption` | `accept` — recomputes SHA-256 from disk and accepts the new hash · `ignore` (raised only for genuine bad writes / bit-rot — see note below) |
 | `missing_file` | `remove_record` — deletes the `File` DB row · `ignore` |
 | `sidecar_error` | `retry` — re-runs reconcile for the item; resolves if clean · `ignore` |
 
@@ -315,6 +315,41 @@ Resolved and ignored issues **stick**: the reconciliation scanner deduplicates b
 navigates directly into the import wizard.
 
 Access: **Jobs & Activity** → `/admin/activity/issues`.
+
+### Corruption vs. legitimate in-place edits
+
+A changed model/geometry file (`.stl` / `.obj` / `.ply` / `.3mf`) is no longer treated
+as `corruption` just because its hash no longer matches the stored baseline. The scan
+runs a lightweight structural validation (`validate_model_file`: a 3MF is opened as a ZIP
+and its `3D/3dmodel.model` part is parsed; STL/OBJ/PLY are loaded via trimesh) and
+classifies the change:
+
+- **Legitimate edit** — the file's mtime is newer **and** it still parses (e.g. you opened
+  a `.3mf` in a slicer and saved it back to the same path). The new hash/mtime/size is
+  **adopted as the baseline** and the item is re-rendered; **no Issue** is raised.
+- **Corruption (bad write)** — the mtime is newer but the file **fails to parse** — a
+  truncated or interrupted write. Raised as a `corruption` Issue whose detail names it as
+  a failed parse.
+- **Corruption (bit-rot)** — the hash changed with an **unchanged/older mtime** — content
+  drifted with no legitimate write. Raised as a `corruption` Issue.
+
+This is why `.3mf` re-saves that used to spam critical corruption alerts now flow through
+silently as re-renders.
+
+### Bulk review actions
+
+Pending reconcile **reviews** (proposed changes queued when a behavior's mode is
+**Review** rather than **Auto**) can be cleared in one action from the Reviews page
+(`/admin/reviews`), Pending tab:
+
+- **Approve all** — approves every pending review and replays each one's apply job
+  (real mutations against the library; the confirm step warns you). `POST /api/reviews/approve-all`.
+- **Reject all** — a pure status flip that discards every pending review with no side
+  effects. `POST /api/reviews/reject-all`.
+
+Both are admin-only, CSRF-guarded, and idempotent (zero pending → a `0` count). To clear a
+large backlog while leaving the reconcile modes on **Auto**, **Reject all** is the cheap
+choice — the next scan re-detects the still-present drift and auto-applies it.
 
 ---
 
