@@ -18,6 +18,16 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: Record<string, ReleaseNote> = {
+  '0.7.2': {
+    title: "What's New in v0.7.2",
+    bullets: [
+      'Editing a model file in place no longer triggers a false "corruption" alert — open a .3mf in your slicer, save it back, and the scan adopts the new version and re-renders instead of flagging it',
+      'A corruption Issue is now raised only for a genuinely bad write (a file that no longer parses) or silent bit-rot (content changed with no newer timestamp)',
+      'Reviews page: new Approve all / Reject all buttons clear a large pending-review backlog in one click (Reject-all discards; Approve-all replays every change, with a confirm)',
+      'Fixed: the Log a Print and Add asset dialogs no longer let the Share card or other page panels cover them',
+    ],
+    githubReleaseUrl: 'https://github.com/crzykidd/partfolder3d/releases/tag/v0.7.2',
+  },
   '0.7.1': {
     title: "What's New in v0.7.1",
     bullets: [

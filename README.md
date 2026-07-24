@@ -18,7 +18,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.7.1-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.7.2-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 
@@ -27,6 +27,20 @@
 ---
 
 ## What's New
+
+### v0.7.2 (2026-07-23)
+
+- **No more false "corruption" alerts on files you edit yourself** — open a `.3mf` in your
+  slicer, tweak it, and save it back in place, and the reconcile scan now recognizes it as a
+  legitimate edit: it adopts the new hash and re-renders instead of raising a critical
+  corruption Issue. A `corruption` Issue is now reserved for a genuinely bad write (a file
+  that no longer parses) or silent bit-rot (content changed with no newer timestamp).
+- **Clear a review backlog in one click** — the Reviews page (`/admin/reviews`) gained
+  **Approve all** and **Reject all** buttons for pending reconcile reviews. Reject-all is a
+  cheap discard; Approve-all replays every queued change (with a confirm step).
+- **Fixed:** the **Log a Print** and **Add asset** dialogs no longer let the page's Share
+  card (or other panels) paint on top of them — both are now portaled so they always sit
+  above the page.
 
 ### v0.7.1 (2026-07-21)
 
@@ -90,7 +104,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.7.1) — see the
+> The full feature set below is **built and released** (v0.7.2) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -367,7 +381,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is in **active development** (v0.7.1).
+Honest snapshot — this project is in **active development** (v0.7.2).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -587,6 +601,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — v0.7.1 · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — v0.7.2 · built by <code>crzykidd</code></sub>
 
 </div>
