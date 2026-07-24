@@ -6,40 +6,53 @@ It is NOT a full reference: durable rules live in `CLAUDE.md`, the module map + 
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
 "Current state" + "Next phases" before every `/clear`.
 
-**Last updated:** 2026-07-22 — **`v0.7.1` RELEASED.** Feature: **optional built-in HTTPS/TLS at
-nginx** (opt-in, off by default) + the **nginx base-image security bump** `1.27→1.30-alpine`
-(closed #40). PR #42 merged, tag `v0.7.1` cut, the `release`-triggered "Build and publish Docker
-images" run fired — prod images publishing `:latest`/`:0.7.1`/`:0` for all three
-(backend/frontend/nginx). **`dev` == `main`.** Previous release `v0.7.0` was the prinnit.com import
-connector.
+**Last updated:** 2026-07-23 — **`v0.7.2` RELEASE IN FLIGHT.** Prep committed on `dev`
+(`chore(release): prepare v0.7.2`, `ba52a85`) and **PR [#43](https://github.com/crzykidd/partfolder3d/pull/43)
+`dev`→`main` is OPEN** — NOT yet merged/tagged. This release bundles: a **reconcile
+corruption-vs-legit-edit fix** (in-place `.3mf`/mesh re-saves no longer flagged as `corruption`;
+`.3mf` newly covered by the re-render/hash-adoption path), **bulk Approve-all/Reject-all for
+pending reviews**, and **two modal-portal UI fixes** (Log-a-Print + Add-asset dialogs no longer
+covered by the Share card). Previous release `v0.7.1` was the optional nginx TLS + base-image bump.
 
-> **⏭️ NO RELEASE IN FLIGHT, no forced next task.** Next pickup is a roadmap **choice**, not an
-> issue-driven must-do — see "Next phases". The two live options: (a) **bulk move-assets UI**
-> (#25 follow-up, needs an owner UX call), or (b) **automatic Let's Encrypt/ACME** at nginx
-> ([#41](https://github.com/crzykidd/partfolder3d/issues/41) — the deferred follow-up to the v0.7.1
-> BYO/self-signed TLS work).
+> **⏳ RELEASE IN FLIGHT — finish the cut before new work.** Next action is the human's:
+> **(1)** wait for PR #43 CI green → **(2)** merge to `main` → **(3)** wait for the push-to-`main`
+> "Build and publish Docker images" run to publish `:latest`/`:0.7.2`/`:0` → **(4)** run
+> `/release-cut 0.7.2` to tag + publish the GitHub release. Until the cut, **`dev` is AHEAD of
+> `main`** by the 0.7.2 commits. After the cut, next pickup is a roadmap **choice** (see "Next
+> phases"): (a) **automatic Let's Encrypt/ACME** ([#41](https://github.com/crzykidd/partfolder3d/issues/41)),
+> or (b) **bulk move-assets UI** (#25 follow-up) — both need an owner call.
 
 ## Current state
 
-- **Latest release `v0.7.1`** (2026-07-22) — **optional built-in HTTPS/TLS at nginx** + the nginx
-  base-image security bump. `dev` == `main`. Live-verified: the new image with **no** TLS env serves
-  plain `:80` unchanged (owner confirmed on a rebuild; also proven standalone).
-  - **What shipped:** a `TLS_MODE` env on the `partfolder3d-nginx` image — `off` (default, plain
-    `:80`, byte-for-byte unchanged) / `selfsigned` (entrypoint auto-generates a cert, immediate HTTPS
-    w/ browser warning) / `provided` (BYO real cert mounted; missing files exit 1, never a silent
-    HTTP downgrade). Plus opt-in `TLS_REDIRECT`, an opt-in `:443` port + `nginx_certs` volume in
-    `docker-compose.yml`, a `COOKIE_SECURE=true` tie-in, an **admin Settings "HTTPS / TLS" info
-    card** (signpost only — TLS is deploy-level, not a stored setting), and README/`docs/tls.md`.
-  - **Where the code lives:** `nginx/Dockerfile` (`FROM nginx:1.30-alpine`, `apk add openssl`,
-    build-time `nginx -t` patches both configs), `nginx/40-partfolder-tls.sh` (POSIX
-    `/docker-entrypoint.d/` script assembling `:443` at start), `nginx/partfolder-common.conf`
-    (shared server block `include`d by both `:80` and `:443` — the refactor that triggered the
-    "nginx config changed" callout), `nginx/partfolder-redirect.conf`, `docs/tls.md`, the Settings
-    card in `frontend/src/pages/settings/SettingsPage.tsx`. Decisions in `docs/decisions.md`.
-  - **Upgrade note (already documented):** default HTTP users need **no** compose change; only
-    **custom-`nginx.conf` bind-mounters** must reconcile against the refactored config.
-  - **Deferred → issue [#41](https://github.com/crzykidd/partfolder3d/issues/41):** full automatic
-    Let's Encrypt/ACME (certbot companion or Caddy edge). This release is BYO/self-signed only.
+- **`v0.7.2` IN FLIGHT** (PR #43 open, `dev` ahead of `main`) — three things, all merged onto `dev`
+  and verified (`make verify`: backend 926 pass, frontend build clean):
+  - **Reconcile corruption-vs-legit-edit fix** (`fix:` `0b4882c`). `_behavior_re_render` is now the
+    single classifier for a changed model file: **newer mtime + still parses → legitimate edit**
+    (adopt new hash/mtime/size baseline, re-render, NO Issue); **newer mtime + unparseable →
+    `corruption`** (bad/interrupted write); **hash changed + unchanged/older mtime → `corruption`**
+    (silent bit-rot). `_behavior_integrity` now skips model files the validator understands. New
+    `render_mesh.validate_model_file` (dispatches to `threemf.validate_3mf_structure` / a trimesh
+    load; **fails open above `RENDER_MAX_FILE_MB`** so the capped worker never loads a giant mesh
+    in-process). **`.3mf` is now covered by the re-render/adoption path for the first time** (owner's
+    real workflow: edit a `.3mf` in a slicer in place). Full rationale in `docs/decisions.md`
+    (2026-07-23 entry).
+    - **Two noted follow-ups (not built):** a `.3mf` re-render does NOT refresh the embedded slicer
+      thumbnail (would need `_enqueue_analyze`); the mesh validator is size-bounded but NOT
+      subprocess/RLIMIT-isolated like analyze/render (acceptable — only fires on an already-detected
+      within-cap mismatch). Both in `docs/decisions.md`.
+  - **Bulk Approve-all / Reject-all for pending reviews** (`feat:` `072f690`). New
+    `POST /api/reviews/{approve-all,reject-all}` (admin+CSRF, idempotent, cloned from the tag
+    `approve-all` precedent) + buttons on `ReviewsPage.tsx` Pending tab. **Reject-all** = cheap
+    status flip; **Approve-all** = replays every `apply_review_item` (real work, confirm-gated).
+    Solves the owner's **405 pending prod reviews** — recommended clear once 0.7.2 is deployed:
+    **Reject all** (auto modes re-apply the still-present drift on next scan).
+  - **Two modal-portal UI fixes** (`4e9d2ac`, `e4036d2`). Log-a-Print + Add-asset dialogs are now
+    `createPortal(..., document.body)` so a sibling card's `backdrop-filter` stacking context can't
+    trap their `z-index` (the Share card was painting over the Log-a-Print modal).
+- **`v0.7.1`** (2026-07-22, on `main`) — **optional built-in HTTPS/TLS at nginx** (`TLS_MODE`
+  off/selfsigned/provided, opt-in `TLS_REDIRECT`/`:443`/`nginx_certs`, admin Settings info card) +
+  nginx base-image bump `1.27→1.30-alpine` (closed #40). Code in `nginx/*` + `docs/tls.md`. Full
+  automatic Let's Encrypt/ACME deferred → [#41](https://github.com/crzykidd/partfolder3d/issues/41).
 - **`v0.7.0`** — the **prinnit.com import connector** (`backend/app/storage/prinnit_client.py` +
   a domain short-circuit in `tasks/import_session.py`; reads prinnit's public no-auth JSON API).
   Full detail in `CHANGELOG.md` / `docs/decisions.md`.
@@ -67,13 +80,17 @@ connector.
 - **Bulk move-assets UI** (#25 follow-up) — last Phase 2 item. Backend bulk endpoint live +
   tested; catalog needs a **multi-select** affordance (real UX decision — discuss with owner
   before building).
-- **Unfiled candidates:** harden the creator-blind AgentQL fallback query (low priority, from the
-  v0.6.0 MakerWorld thread — RESOLVED as a prod config issue, not code); opportunistic auto-fetch
-  of model files on the scraper framework (login-gated on Printables/MakerWorld — deferred from
-  #27). Partial analysis of very large 3MFs (streaming/decimation) if ever wanted. Prinnit's
-  `/designs/<sub>` returns the designer's whole catalog (~1.2 MB) to get one design — fine today,
-  but if it ever gets slow, revisit for a lighter path (none is currently public).
-- Next release = `/release-prep <next>` when a batch is ready. Standing gotchas: CodeQL on big
+- **Unfiled candidates:** (NEW, from the v0.7.2 corruption work) refresh a `.3mf`'s embedded slicer
+  thumbnail on in-place edit (route the re-render through `_enqueue_analyze`, not just render);
+  optionally give `validate_model_file`'s STL/OBJ/PLY path the same subprocess/RLIMIT isolation as
+  analyze/render (currently size-bounded only). Older: harden the creator-blind AgentQL fallback
+  query (low priority, v0.6.0 MakerWorld thread — RESOLVED as a prod config issue, not code);
+  opportunistic auto-fetch of model files on the scraper framework (login-gated on
+  Printables/MakerWorld — deferred from #27). Partial analysis of very large 3MFs
+  (streaming/decimation) if ever wanted. Prinnit's `/designs/<sub>` returns the designer's whole
+  catalog (~1.2 MB) to get one design — fine today, but revisit for a lighter path if it ever slows.
+- **Next release: v0.7.2 is mid-cut** — finish PR #43 → merge → publish → `/release-cut 0.7.2`
+  (see the in-flight banner up top) BEFORE starting a new `/release-prep`. Standing gotchas: CodeQL on big
   diffs surfaces pre-existing alerts (`sanitize_for_log` real ones; dismiss path-injection FPs with
   existing `resolve()`+`is_relative_to()` barriers); transient pip-download timeouts in the Image
   build check — just re-run the failed job; the local `verify-frontend` gate can flake (waitFor
@@ -102,6 +119,9 @@ connector.
 - **Open issue [#41](https://github.com/crzykidd/partfolder3d/issues/41)** — automatic Let's
   Encrypt/ACME at nginx (deferred follow-up to v0.7.1 TLS; not started). (#40 nginx bump: **closed**
   in v0.7.1.)
+- **Owner op (post-0.7.2-deploy):** clear the **405 pending reviews** in prod via the new
+  **Reject all** button on `/admin/reviews` (reconcile modes are already on Auto, so the next scan
+  re-applies the legit drift). This is why the bulk-review feature was built this cycle.
 - **Needs owner decision:** Let's Encrypt approach (#41); bulk-move multi-select UX (#25 follow-up).
 - Older PRD §18 notes: real slicing for filament estimates, trash-purge UI, `.bgcode`/multi-filament gcode.
 
