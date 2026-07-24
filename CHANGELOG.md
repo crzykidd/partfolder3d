@@ -20,6 +20,8 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.7.4] — 2026-07-23
+
 ### Fixed
 
 - Scraped images that a CDN serves with a generic `application/octet-stream`
@@ -1290,7 +1292,8 @@ detail in this one file. (An earlier plan to archive closed minor series into
 <!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
      earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
 
-[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/crzykidd/partfolder3d/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/crzykidd/partfolder3d/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/crzykidd/partfolder3d/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/crzykidd/partfolder3d/compare/v0.7.0...v0.7.1
