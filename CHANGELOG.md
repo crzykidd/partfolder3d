@@ -20,6 +20,17 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Changed
+
+- Import commit now logs per-image diagnostics when saving scraped images: a
+  start line (how many URLs will be fetched), the concrete failure reason +
+  exception type for any image that can't be downloaded or written (previously
+  a bare "failed to download image" that swallowed the cause), a warning when a
+  local/staged session image is missing, and a completion summary (saved /
+  failed / elapsed). Makes it possible to diagnose why a scraped image doesn't
+  land on the committed item (e.g. egress block, HTTP error, filesystem write)
+  directly from the backend logs.
+
 ## [0.7.2] — 2026-07-23
 
 ### Added
