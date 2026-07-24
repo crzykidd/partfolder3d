@@ -935,6 +935,32 @@ def test_scraped_image_ext_fallback_to_jpg() -> None:
 
 
 # ---------------------------------------------------------------------------
+# sniff_image_ext — trust the bytes when a CDN mislabels the Content-Type
+# (e.g. MakerWorld's bblmw.com serves PNGs as application/octet-stream)
+# ---------------------------------------------------------------------------
+
+
+def test_sniff_image_ext_recognises_magic_numbers() -> None:
+    from app.routers.import_sessions.sessions import sniff_image_ext  # noqa: PLC0415
+
+    assert sniff_image_ext(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16) == ".png"
+    assert sniff_image_ext(b"\xff\xd8\xff\xe0" + b"\x00" * 16) == ".jpg"
+    assert sniff_image_ext(b"GIF89a" + b"\x00" * 16) == ".gif"
+    assert sniff_image_ext(b"GIF87a" + b"\x00" * 16) == ".gif"
+    assert sniff_image_ext(b"RIFF\x00\x00\x00\x00WEBP" + b"\x00" * 8) == ".webp"
+
+
+def test_sniff_image_ext_rejects_non_images() -> None:
+    from app.routers.import_sessions.sessions import sniff_image_ext  # noqa: PLC0415
+
+    assert sniff_image_ext(b"<!DOCTYPE html><html>") is None
+    assert sniff_image_ext(b"") is None
+    assert sniff_image_ext(b"not an image at all") is None
+    # RIFF container that is not WEBP (e.g. a WAV) must not be treated as an image.
+    assert sniff_image_ext(b"RIFF\x00\x00\x00\x00WAVE" + b"\x00" * 8) is None
+
+
+# ---------------------------------------------------------------------------
 # Commit: scraped URL images get collision-free filenames
 # ---------------------------------------------------------------------------
 
@@ -1090,3 +1116,160 @@ async def test_commit_scraped_images_unique_filenames(
     assert job_res.scalars().first() is not None, (
         "commit did not enqueue an analyze job for the item"
     )
+
+
+async def _pending_session_with_url_image(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+    csrf: str,
+    image_url: str,
+):
+    """Create a pending_wizard session carrying a single scraped URL image and a
+    fresh library, ready to commit. Returns the session id."""
+    import uuid as _uuid  # noqa: PLC0415
+
+    from sqlalchemy import select as _select  # noqa: PLC0415
+
+    from app.models.import_session import (  # noqa: PLC0415
+        ImportSession,
+        ImportSessionImage,
+        ImportSessionStatus,
+    )
+
+    lib_path = tmp_path / f"lib-{_uuid.uuid4().hex[:8]}"
+    lib_path.mkdir()
+    lib_resp = await client.post(
+        "/api/libraries",
+        json={"name": f"OctetLib {lib_path.name}", "mount_path": str(lib_path)},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert lib_resp.status_code == 201
+    library_id = lib_resp.json()["id"]
+
+    create_resp = await client.post(
+        "/api/import-sessions",
+        json={"source_type": "upload"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert create_resp.status_code == 201
+    session_id = _uuid.UUID(create_resp.json()["id"])
+
+    res = await db_session.execute(
+        _select(ImportSession).where(ImportSession.id == session_id)
+    )
+    sess = res.scalar_one()
+    sess.status = ImportSessionStatus.pending_wizard
+    sess.confirmed_title = f"Octet Item {lib_path.name}"
+    sess.library_id = library_id
+    db_session.add(
+        ImportSessionImage(
+            session_id=session_id,
+            path=image_url,
+            is_url=True,
+            source="scrape",
+            order=0,
+            is_default=True,
+        )
+    )
+    await db_session.flush()
+    return session_id
+
+
+@pytest.mark.asyncio
+async def test_commit_accepts_octet_stream_image(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+) -> None:
+    """A CDN that mislabels a PNG as application/octet-stream (MakerWorld's
+    bblmw.com) must still have its image saved — the commit path trusts the
+    magic bytes and derives the .png extension from them."""
+    from sqlalchemy import select as _select  # noqa: PLC0415
+
+    from app.models.image import Image  # noqa: PLC0415
+    from app.models.item import Item  # noqa: PLC0415
+    from app.storage.ssrf_guard import GuardedResponse  # noqa: PLC0415
+
+    csrf = await _setup_and_login(client, tmp_path)
+    session_id = await _pending_session_with_url_image(
+        client, db_session, tmp_path, csrf,
+        "https://makerworld.bblmw.com/makerworld/model/US1/design/2025-08-16_abc.png",
+    )
+
+    png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+
+    def _fake_fetch(url: str, **kwargs: object) -> GuardedResponse:
+        return GuardedResponse(
+            status_code=200,
+            headers={"content-type": "application/octet-stream"},
+            content=png_bytes,
+            final_url=url,
+        )
+
+    with patch(
+        "app.routers.import_sessions.sessions.guarded_fetch", _fake_fetch
+    ):
+        commit_resp = await client.post(
+            f"/api/import-sessions/{session_id}/commit",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert commit_resp.status_code == 200, commit_resp.text
+    item_id = commit_resp.json()["item_id"]
+
+    imgs = (
+        await db_session.execute(_select(Image).where(Image.item_id == item_id))
+    ).scalars().all()
+    assert len(imgs) == 1, f"octet-stream PNG should be saved; got {len(imgs)}"
+    assert imgs[0].path.endswith(".png"), imgs[0].path
+
+    item_row = (
+        await db_session.execute(_select(Item).where(Item.id == item_id))
+    ).scalar_one()
+    assert (Path(item_row.dir_path) / imgs[0].path).exists()
+
+
+@pytest.mark.asyncio
+async def test_commit_skips_octet_stream_non_image(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+) -> None:
+    """An octet-stream payload that is NOT an image (fails magic-byte sniffing)
+    must be skipped, not written to disk as a fake image — the commit still
+    succeeds with zero images."""
+    from sqlalchemy import select as _select  # noqa: PLC0415
+
+    from app.models.image import Image  # noqa: PLC0415
+    from app.storage.ssrf_guard import GuardedResponse  # noqa: PLC0415
+
+    csrf = await _setup_and_login(client, tmp_path)
+    session_id = await _pending_session_with_url_image(
+        client, db_session, tmp_path, csrf,
+        "https://evil.example.com/model/design/notreally.png",
+    )
+
+    def _fake_fetch(url: str, **kwargs: object) -> GuardedResponse:
+        return GuardedResponse(
+            status_code=200,
+            headers={"content-type": "application/octet-stream"},
+            content=b"<!DOCTYPE html><html>not an image</html>",
+            final_url=url,
+        )
+
+    with patch(
+        "app.routers.import_sessions.sessions.guarded_fetch", _fake_fetch
+    ):
+        commit_resp = await client.post(
+            f"/api/import-sessions/{session_id}/commit",
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    assert commit_resp.status_code == 200, commit_resp.text
+    item_id = commit_resp.json()["item_id"]
+
+    imgs = (
+        await db_session.execute(_select(Image).where(Image.item_id == item_id))
+    ).scalars().all()
+    assert len(imgs) == 0, f"non-image octet-stream must be skipped; got {len(imgs)}"
