@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -237,6 +238,14 @@ async def _commit_session_inner(
             sorted_imgs[0].is_default = True
 
     img_order = 0
+    n_img_ok = 0
+    n_img_fail = 0
+    _img_t0 = time.monotonic()
+    n_url_imgs = sum(1 for si in session.images if si.is_url)
+    log.info(
+        "commit: saving images for item %s — %d total (%d scraped URLs to fetch)",
+        item.id, len(session.images), n_url_imgs,
+    )
     for si in session.images:
         if si.is_url:
             _safe_img_url = sanitize_for_log(si.path)
@@ -268,17 +277,30 @@ async def _commit_session_inner(
                     )
                     db.add(img_obj)
                     img_order += 1
+                    n_img_ok += 1
+                    log.debug(
+                        "commit: saved scraped image %s (%d bytes) for item %s",
+                        img_name, len(r.content), item.id,
+                    )
                 else:
+                    n_img_fail += 1
                     log.warning(
                         "commit: image fetch returned HTTP %s for %s",
                         r.status_code, _safe_img_url,
                     )
             except (SSRFBlockedError, GuardedFetchError) as exc:
+                n_img_fail += 1
                 log.warning(
-                    "commit: blocked/failed image %s: %s", _safe_img_url, exc
+                    "commit: blocked/failed image %s: %s: %s",
+                    _safe_img_url, type(exc).__name__, exc,
                 )
-            except Exception:
-                log.warning("commit: failed to download image %s", _safe_img_url)
+            except Exception as exc:
+                n_img_fail += 1
+                log.warning(
+                    "commit: failed to download/write image %s: %s: %s",
+                    _safe_img_url, type(exc).__name__, exc,
+                    exc_info=True,
+                )
         else:
             # Local (is_url=False) session image — e.g. a wizard viewport
             # capture (#26), or a Manyfold model image downloaded straight to
@@ -317,6 +339,18 @@ async def _commit_session_inner(
                 )
                 db.add(img_obj)
                 img_order += 1
+                n_img_ok += 1
+            else:
+                n_img_fail += 1
+                log.warning(
+                    "commit: local session image not found in staging or item "
+                    "dir, skipping: %s", sanitize_for_log(si.path),
+                )
+
+    log.info(
+        "commit: image save complete for item %s — %d saved, %d failed, %.1fs",
+        item.id, n_img_ok, n_img_fail, time.monotonic() - _img_t0,
+    )
 
     await db.flush()
 

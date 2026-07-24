@@ -18,7 +18,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.7.2-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.7.3-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 
@@ -27,6 +27,15 @@
 ---
 
 ## What's New
+
+### v0.7.3 (2026-07-23)
+
+- **Clearer diagnostics when a scraped image doesn't save on import** — if an image shown in
+  the import wizard fails to download or write when you finalize the import, the backend log
+  now records the exact reason (the HTTP error, a blocked/failed fetch with its exception
+  type, or a missing staged file) plus a per-import summary of how many images were saved vs.
+  failed and how long it took. Previously such a failure was logged with no cause, making it
+  impossible to tell why the image didn't land on the item.
 
 ### v0.7.2 (2026-07-23)
 
@@ -104,7 +113,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.7.2) — see the
+> The full feature set below is **built and released** (v0.7.3) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -381,7 +390,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is in **active development** (v0.7.2).
+Honest snapshot — this project is in **active development** (v0.7.3).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -601,6 +610,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — v0.7.2 · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — v0.7.3 · built by <code>crzykidd</code></sub>
 
 </div>

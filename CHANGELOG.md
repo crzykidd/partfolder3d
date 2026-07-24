@@ -20,6 +20,19 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.7.3] — 2026-07-23
+
+### Changed
+
+- Import commit now logs per-image diagnostics when saving scraped images: a
+  start line (how many URLs will be fetched), the concrete failure reason +
+  exception type for any image that can't be downloaded or written (previously
+  a bare "failed to download image" that swallowed the cause), a warning when a
+  local/staged session image is missing, and a completion summary (saved /
+  failed / elapsed). Makes it possible to diagnose why a scraped image doesn't
+  land on the committed item (e.g. egress block, HTTP error, filesystem write)
+  directly from the backend logs.
+
 ## [0.7.2] — 2026-07-23
 
 ### Added
@@ -1263,7 +1276,8 @@ detail in this one file. (An earlier plan to archive closed minor series into
 <!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
      earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
 
-[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/crzykidd/partfolder3d/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/crzykidd/partfolder3d/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/crzykidd/partfolder3d/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/crzykidd/partfolder3d/compare/v0.6.1...v0.7.0

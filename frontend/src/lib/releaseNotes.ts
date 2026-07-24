@@ -18,6 +18,15 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: Record<string, ReleaseNote> = {
+  '0.7.3': {
+    title: "What's New in v0.7.3",
+    bullets: [
+      'Better diagnostics for imports: if an image shown in the import wizard fails to save when you finalize the import, the backend log now records the exact reason instead of a cause-less "failed to download image"',
+      'Each import commit now logs a summary of how many scraped images were saved vs. failed and how long it took, making a slow or blocked image download easy to spot',
+      'A missing staged image at commit is now logged with a clear warning',
+    ],
+    githubReleaseUrl: 'https://github.com/crzykidd/partfolder3d/releases/tag/v0.7.3',
+  },
   '0.7.2': {
     title: "What's New in v0.7.2",
     bullets: [
