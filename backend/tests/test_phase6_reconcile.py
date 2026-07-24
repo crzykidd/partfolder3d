@@ -7,9 +7,14 @@ Pure-unit tests (no DB) run first; DB tests use the conftest fixtures.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import io
 import json
+import os
+import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from httpx import AsyncClient
@@ -393,6 +398,142 @@ async def test_reject_already_rejected_review(
     assert resp.status_code == 409
 
 
+# ---------------------------------------------------------------------------
+# Reviews — bulk approve-all / reject-all (2026-07-23-reviews-bulk-approve-reject)
+# ---------------------------------------------------------------------------
+
+
+async def _make_review(
+    db_session: AsyncSession,
+    *,
+    status: str = ReviewStatus.pending,
+    item_id: int = 1,
+) -> ReviewItem:
+    rv = ReviewItem(
+        behavior="sidecar_sync",
+        change_type="sidecar_pulled_to_db",
+        summary="Pending sidecar pull",
+        proposed_action={
+            "behavior": "sidecar_sync",
+            "action": "pull_sidecar_to_db",
+            "item_id": item_id,
+        },
+        status=status,
+    )
+    db_session.add(rv)
+    await db_session.flush()
+    return rv
+
+
+@pytest.mark.asyncio
+async def test_reviews_approve_all(
+    client: AsyncClient, db_session: AsyncSession, arq_pool: Any
+) -> None:
+    """POST /api/reviews/approve-all approves every pending item and enqueues one
+    apply_review_item job per item; already-resolved items are left untouched."""
+    rv1 = await _make_review(db_session, item_id=1)
+    rv2 = await _make_review(db_session, item_id=2)
+    already_rejected = await _make_review(db_session, status=ReviewStatus.rejected, item_id=3)
+
+    csrf = await _setup_and_login(client)
+    resp = await client.post("/api/reviews/approve-all", headers={"x-csrf-token": csrf})
+    assert resp.status_code == 200
+    assert resp.json()["approved"] == 2
+
+    result = await db_session.execute(
+        select(ReviewItem).where(ReviewItem.status == ReviewStatus.pending)
+    )
+    assert result.scalars().all() == []
+
+    for rv in (rv1, rv2):
+        await db_session.refresh(rv)
+        assert rv.status == ReviewStatus.approved
+        assert rv.resolved_at is not None
+        assert rv.resolved_by_id is not None
+
+    await db_session.refresh(already_rejected)
+    assert already_rejected.status == ReviewStatus.rejected
+
+    assert arq_pool.enqueue_job.await_count == 2
+    enqueued_ids = {call.args[1] for call in arq_pool.enqueue_job.await_args_list}
+    assert enqueued_ids == {rv1.id, rv2.id}
+    for call in arq_pool.enqueue_job.await_args_list:
+        assert call.args[0] == "apply_review_item"
+
+
+@pytest.mark.asyncio
+async def test_reviews_approve_all_idempotent(
+    client: AsyncClient, db_session: AsyncSession, arq_pool: Any
+) -> None:
+    """approve-all with zero pending review items returns 200 with approved: 0
+    and enqueues nothing."""
+    await _make_review(db_session, status=ReviewStatus.approved, item_id=1)
+
+    csrf = await _setup_and_login(client)
+    resp = await client.post("/api/reviews/approve-all", headers={"x-csrf-token": csrf})
+    assert resp.status_code == 200
+    assert resp.json()["approved"] == 0
+    arq_pool.enqueue_job.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reviews_reject_all(
+    client: AsyncClient, db_session: AsyncSession, arq_pool: Any
+) -> None:
+    """POST /api/reviews/reject-all rejects every pending item as a pure status
+    flip — no apply job is enqueued (unlike approve-all)."""
+    rv1 = await _make_review(db_session, item_id=1)
+    rv2 = await _make_review(db_session, item_id=2)
+    already_approved = await _make_review(db_session, status=ReviewStatus.approved, item_id=3)
+
+    csrf = await _setup_and_login(client)
+    resp = await client.post("/api/reviews/reject-all", headers={"x-csrf-token": csrf})
+    assert resp.status_code == 200
+    assert resp.json()["rejected"] == 2
+
+    for rv in (rv1, rv2):
+        await db_session.refresh(rv)
+        assert rv.status == ReviewStatus.rejected
+        assert rv.resolved_at is not None
+
+    await db_session.refresh(already_approved)
+    assert already_approved.status == ReviewStatus.approved
+
+    arq_pool.enqueue_job.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reviews_reject_all_idempotent(client: AsyncClient) -> None:
+    """reject-all with zero pending review items returns 200 with rejected: 0."""
+    csrf = await _setup_and_login(client)
+    resp = await client.post("/api/reviews/reject-all", headers={"x-csrf-token": csrf})
+    assert resp.status_code == 200
+    assert resp.json()["rejected"] == 0
+
+
+@pytest.mark.asyncio
+async def test_reviews_bulk_endpoints_require_auth(client: AsyncClient) -> None:
+    """approve-all / reject-all reject unauthenticated callers with 401."""
+    resp = await client.post("/api/reviews/approve-all", headers={"x-csrf-token": "fake"})
+    assert resp.status_code == 401
+
+    resp2 = await client.post("/api/reviews/reject-all", headers={"x-csrf-token": "fake"})
+    assert resp2.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_reviews_bulk_endpoints_require_csrf(client: AsyncClient) -> None:
+    """approve-all / reject-all reject cookie-authenticated calls missing the
+    X-CSRF-Token header with 403."""
+    await _setup_and_login(client)
+
+    resp = await client.post("/api/reviews/approve-all")
+    assert resp.status_code == 403
+
+    resp2 = await client.post("/api/reviews/reject-all")
+    assert resp2.status_code == 403
+
+
 @pytest.mark.asyncio
 async def test_list_issues_filter_by_status(client: AsyncClient, db_session: AsyncSession) -> None:
     """GET /api/issues?status=open returns only open issues."""
@@ -647,3 +788,363 @@ async def test_reconcile_url_validator_not_called_when_none(
     )
     dead_links = issues_result.scalars().all()
     assert len(dead_links) == 0
+
+
+# ---------------------------------------------------------------------------
+# Corruption vs legitimate in-place edit (docs/decisions.md)
+#
+# Before this fix, `_behavior_integrity` flagged ANY hash mismatch on a model
+# file as `corruption` regardless of mtime, while `_behavior_re_render`
+# independently reached "file updated -> re-render" for the same mismatch,
+# and neither adopted the new hash as the baseline. These tests exercise the
+# unified classifier in `_behavior_re_render` that replaced both.
+# ---------------------------------------------------------------------------
+
+_VALID_STL_V1 = b"""solid v1
+facet normal 0 0 1
+  outer loop
+    vertex 0 0 0
+    vertex 1 0 0
+    vertex 0 1 0
+  endloop
+endfacet
+endsolid v1
+"""
+
+_VALID_STL_V2 = b"""solid v2
+facet normal 0 0 1
+  outer loop
+    vertex 0 0 0
+    vertex 2 0 0
+    vertex 0 2 0
+  endloop
+endfacet
+endsolid v2
+"""
+
+
+async def _make_model_item(
+    db: AsyncSession,
+    tmp_path: Path,
+    *,
+    lib_name: str,
+    key: str,
+    file_bytes: bytes,
+    baseline_mtime: datetime,
+) -> tuple[Any, Any]:
+    """Create a Library + Item + one model.stl File row with a fixed baseline.
+
+    Writes *file_bytes* to disk and stamps its mtime to *baseline_mtime* so
+    the File row's stored sha256/size/mtime exactly match what's on disk —
+    the starting "in sync" state each test then perturbs.
+    """
+    from app.models.file import File, FileRole  # noqa: PLC0415
+    from app.models.item import Item  # noqa: PLC0415
+    from app.models.library import Library  # noqa: PLC0415
+
+    item_dir = tmp_path / lib_name / "ab" / f"model-{key}"
+    item_dir.mkdir(parents=True)
+    stl_path = item_dir / "model.stl"
+    stl_path.write_bytes(file_bytes)
+    ts = baseline_mtime.timestamp()
+    os.utime(stl_path, (ts, ts))
+
+    lib = Library(name=lib_name, mount_path=str(tmp_path / lib_name), enabled=True)
+    db.add(lib)
+    await db.flush()
+
+    item = Item(
+        key=key,
+        title=f"Model {key}",
+        slug=f"model-{key}",
+        library_id=lib.id,
+        dir_path=str(item_dir),
+        schema_version=1,
+        updated_at=baseline_mtime,
+    )
+    db.add(item)
+    await db.flush()
+
+    sha = hashlib.sha256(file_bytes).hexdigest()
+    f = File(
+        item_id=item.id,
+        path="model.stl",
+        role=FileRole.model,
+        size=len(file_bytes),
+        sha256=sha,
+        mtime=baseline_mtime,
+        last_seen_size=len(file_bytes),
+        last_seen_mtime=baseline_mtime,
+    )
+    db.add(f)
+    await db.flush()
+
+    return item, f
+
+
+def _patch_no_redis(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make create_arq_pool() raise so the re_render enqueue try/except is
+    exercised without needing a real Redis in the test environment — the
+    ChangeLog write happens regardless (fire-and-forget, per #20)."""
+    async def _raise(*_a: object, **_kw: object) -> None:
+        raise RuntimeError("no redis in tests")
+
+    monkeypatch.setattr("app.worker.arq_pool.create_arq_pool", _raise)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_legit_edit_adopts_baseline_no_corruption(
+    db_session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Newer mtime + still-valid file -> baseline adopted, no corruption Issue,
+    render enqueued; re-running the scan is a no-op (the core of the bug)."""
+    from app.worker.reconcile import reconcile_one_item  # noqa: PLC0415
+
+    _patch_no_redis(monkeypatch)
+
+    baseline_time = datetime.now(UTC) - timedelta(minutes=5)
+    item, f = await _make_model_item(
+        db_session, tmp_path,
+        lib_name="legit_edit", key="aaa1111",
+        file_bytes=_VALID_STL_V1, baseline_mtime=baseline_time,
+    )
+
+    # Simulate "opened in a slicer, saved over the same path": new content,
+    # newer mtime (well beyond the 1s tolerance).
+    stl_path = Path(item.dir_path) / "model.stl"
+    stl_path.write_bytes(_VALID_STL_V2)
+    new_mtime = datetime.now(UTC)
+    os.utime(stl_path, (new_mtime.timestamp(), new_mtime.timestamp()))
+
+    result = await reconcile_one_item(
+        db_session, item,
+        mode_settings={"sidecar_sync": "review", "re_render": "auto", "file_changes": "review"},
+    )
+
+    # No corruption issue.
+    issues = (await db_session.execute(
+        select(Issue).where(Issue.item_id == item.id, Issue.issue_type == IssueType.corruption)
+    )).scalars().all()
+    assert issues == []
+
+    # Baseline adopted + render enqueued ChangeLog entries present.
+    changes = (await db_session.execute(
+        select(ChangeLog).where(ChangeLog.item_id == item.id)
+    )).scalars().all()
+    change_types = {c.change_type for c in changes}
+    assert "baseline_adopted" in change_types
+    assert "render_enqueued" in change_types
+
+    # File row updated to the new hash/mtime/size.
+    await db_session.refresh(f)
+    assert f.sha256 == hashlib.sha256(_VALID_STL_V2).hexdigest()
+    assert f.last_seen_size == len(_VALID_STL_V2)
+
+    assert len(result.changes_applied) >= 2  # baseline_adopted + render_enqueued
+
+    # Re-running the scan must be a no-op: no new issues/changes.
+    changes_before = len(changes)
+    result2 = await reconcile_one_item(
+        db_session, item,
+        mode_settings={"sidecar_sync": "review", "re_render": "auto", "file_changes": "review"},
+    )
+    changes_after = (await db_session.execute(
+        select(ChangeLog).where(ChangeLog.item_id == item.id)
+    )).scalars().all()
+    assert len(changes_after) == changes_before
+    assert result2.issues_created == []
+    issues_after = (await db_session.execute(
+        select(Issue).where(Issue.item_id == item.id, Issue.issue_type == IssueType.corruption)
+    )).scalars().all()
+    assert issues_after == []
+
+
+@pytest.mark.asyncio
+async def test_reconcile_newer_mtime_unparseable_file_is_corruption(
+    db_session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Newer mtime + a file that fails to parse -> corruption Issue with a
+    detail distinguishing it from silent bit-rot."""
+    from app.worker.reconcile import reconcile_one_item  # noqa: PLC0415
+
+    _patch_no_redis(monkeypatch)
+
+    baseline_time = datetime.now(UTC) - timedelta(minutes=5)
+    item, _f = await _make_model_item(
+        db_session, tmp_path,
+        lib_name="bad_write", key="bbb2222",
+        file_bytes=_VALID_STL_V1, baseline_mtime=baseline_time,
+    )
+
+    # Simulate an interrupted/incomplete write: truncated content, newer mtime.
+    stl_path = Path(item.dir_path) / "model.stl"
+    stl_path.write_bytes(_VALID_STL_V1[:20])
+    new_mtime = datetime.now(UTC)
+    os.utime(stl_path, (new_mtime.timestamp(), new_mtime.timestamp()))
+
+    result = await reconcile_one_item(
+        db_session, item,
+        mode_settings={"sidecar_sync": "review", "re_render": "auto", "file_changes": "review"},
+    )
+
+    assert len(result.issues_created) == 1
+    issue = await db_session.get(Issue, result.issues_created[0])
+    assert issue is not None
+    assert issue.issue_type == IssueType.corruption
+    assert issue.severity == IssueSeverity.critical
+    assert "failed to parse" in issue.detail
+    assert "incomplete/interrupted write" in issue.detail
+
+    # No baseline-adopted / render-enqueued ChangeLog for this file.
+    changes = (await db_session.execute(
+        select(ChangeLog).where(ChangeLog.item_id == item.id)
+    )).scalars().all()
+    assert {c.change_type for c in changes} == set()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_hash_change_mtime_unchanged_is_bitrot_corruption(
+    db_session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hash changed but mtime NOT newer than the baseline -> corruption Issue
+    (silent bit-rot), with the plain "hash mismatch" detail (no parse claim)."""
+    from app.worker.reconcile import reconcile_one_item  # noqa: PLC0415
+
+    _patch_no_redis(monkeypatch)
+
+    baseline_time = datetime.now(UTC) - timedelta(minutes=5)
+    item, _f = await _make_model_item(
+        db_session, tmp_path,
+        lib_name="bitrot", key="ccc3333",
+        file_bytes=_VALID_STL_V1, baseline_mtime=baseline_time,
+    )
+
+    # Simulate silent on-disk corruption: content changes (different size, so
+    # the cheap-first size+mtime drift check can't short-circuit the hash
+    # comparison), but the mtime is forced back to the original baseline (no
+    # legitimate write occurred).
+    stl_path = Path(item.dir_path) / "model.stl"
+    stl_path.write_bytes(_VALID_STL_V1 + b"\x00garbage-bit-rot-tail\x00")
+    ts = baseline_time.timestamp()
+    os.utime(stl_path, (ts, ts))
+
+    result = await reconcile_one_item(
+        db_session, item,
+        mode_settings={"sidecar_sync": "review", "re_render": "auto", "file_changes": "review"},
+    )
+
+    assert len(result.issues_created) == 1
+    issue = await db_session.get(Issue, result.issues_created[0])
+    assert issue is not None
+    assert issue.issue_type == IssueType.corruption
+    assert "hash mismatch" in issue.detail
+    assert "failed to parse" not in issue.detail
+
+
+@pytest.mark.asyncio
+async def test_reconcile_no_hash_change_is_a_noop(
+    db_session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hash unchanged -> nothing (no Issue, no ChangeLog, no render)."""
+    from app.worker.reconcile import reconcile_one_item  # noqa: PLC0415
+
+    _patch_no_redis(monkeypatch)
+
+    baseline_time = datetime.now(UTC) - timedelta(minutes=5)
+    item, _f = await _make_model_item(
+        db_session, tmp_path,
+        lib_name="nochange", key="ddd4444",
+        file_bytes=_VALID_STL_V1, baseline_mtime=baseline_time,
+    )
+
+    result = await reconcile_one_item(
+        db_session, item,
+        mode_settings={"sidecar_sync": "review", "re_render": "auto", "file_changes": "review"},
+    )
+
+    assert result.issues_created == []
+    assert result.changes_applied == []
+
+
+@pytest.mark.asyncio
+async def test_reconcile_legit_3mf_edit_no_false_corruption(
+    db_session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The motivating case: a .3mf opened in a slicer and saved over the same
+    path is a legitimate edit, not corruption."""
+    from app.models.file import File, FileRole  # noqa: PLC0415
+    from app.models.item import Item  # noqa: PLC0415
+    from app.models.library import Library  # noqa: PLC0415
+    from app.worker.reconcile import reconcile_one_item  # noqa: PLC0415
+
+    _patch_no_redis(monkeypatch)
+
+    def make_3mf(vertex_x: str) -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr(
+                "3D/3dmodel.model",
+                (
+                    '<?xml version="1.0"?>'
+                    '<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">'
+                    "<resources>"
+                    '<object id="1" type="model"><mesh>'
+                    "<vertices>"
+                    '<vertex x="0" y="0" z="0"/>'
+                    f'<vertex x="{vertex_x}" y="0" z="0"/>'
+                    '<vertex x="0" y="1" z="0"/>'
+                    "</vertices>"
+                    '<triangles><triangle v1="0" v2="1" v3="2"/></triangles>'
+                    "</mesh></object>"
+                    "</resources><build/></model>"
+                ).encode(),
+            )
+        return buf.getvalue()
+
+    v1 = make_3mf("1")
+    baseline_time = datetime.now(UTC) - timedelta(minutes=5)
+
+    item_dir = tmp_path / "threemf_lib" / "ab" / "model-eee5555"
+    item_dir.mkdir(parents=True)
+    model_path = item_dir / "model.3mf"
+    model_path.write_bytes(v1)
+    ts = baseline_time.timestamp()
+    os.utime(model_path, (ts, ts))
+
+    lib = Library(name="threemf_lib", mount_path=str(tmp_path / "threemf_lib"), enabled=True)
+    db_session.add(lib)
+    await db_session.flush()
+
+    item = Item(
+        key="eee5555", title="Model eee5555", slug="model-eee5555",
+        library_id=lib.id, dir_path=str(item_dir), schema_version=1,
+        updated_at=baseline_time,
+    )
+    db_session.add(item)
+    await db_session.flush()
+
+    f = File(
+        item_id=item.id, path="model.3mf", role=FileRole.model,
+        size=len(v1), sha256=hashlib.sha256(v1).hexdigest(), mtime=baseline_time,
+        last_seen_size=len(v1), last_seen_mtime=baseline_time,
+    )
+    db_session.add(f)
+    await db_session.flush()
+
+    # Re-save in the slicer: geometry changes, newer mtime.
+    v2 = make_3mf("2")
+    model_path.write_bytes(v2)
+    new_mtime = datetime.now(UTC)
+    os.utime(model_path, (new_mtime.timestamp(), new_mtime.timestamp()))
+
+    result = await reconcile_one_item(
+        db_session, item,
+        mode_settings={"sidecar_sync": "review", "re_render": "auto", "file_changes": "review"},
+    )
+
+    assert result.issues_created == []
+    change_types = {c.get("change_type") for c in result.changes_applied}
+    assert "baseline_adopted" in change_types
+
+    await db_session.refresh(f)
+    assert f.sha256 == hashlib.sha256(v2).hexdigest()

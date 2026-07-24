@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { X as XIcon } from 'lucide-react'
 
@@ -77,7 +78,7 @@ function PrintRecordForm({ itemKey, existing, onClose, onSaved }: PrintRecordFor
     marginBottom: 5,
   }
 
-  return (
+  return createPortal(
     <div
       style={{
         position: 'fixed',
@@ -327,7 +328,8 @@ function PrintRecordForm({ itemKey, existing, onClose, onSaved }: PrintRecordFor
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

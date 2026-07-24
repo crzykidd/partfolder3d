@@ -4,6 +4,8 @@ Admin:
   GET  /api/reviews               → list review items (pending by default)
   POST /api/reviews/{id}/approve  → approve → apply via worker
   POST /api/reviews/{id}/reject   → reject (no action taken)
+  POST /api/reviews/approve-all   → approve every pending item → apply via worker (N jobs)
+  POST /api/reviews/reject-all    → reject every pending item (pure status flip)
 """
 
 from __future__ import annotations
@@ -53,6 +55,14 @@ class PaginatedReviews(BaseModel):
     items: list[ReviewItemOut]
 
 
+class ApproveAllReviewsResponse(BaseModel):
+    approved: int
+
+
+class RejectAllReviewsResponse(BaseModel):
+    rejected: int
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -91,6 +101,81 @@ async def list_reviews(
         per_page=per_page,
         items=[ReviewItemOut.model_validate(r) for r in rows],
     )
+
+
+@router.post(
+    "/approve-all",
+    response_model=ApproveAllReviewsResponse,
+    summary="Approve all pending review items",
+)
+async def approve_all_reviews(
+    admin: Annotated[User, Depends(require_admin)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    arq: Annotated[ArqRedis, Depends(get_arq_pool)],
+) -> ApproveAllReviewsResponse:
+    """Approve every ``pending`` review item and enqueue its apply job.
+
+    Unlike ``reject-all`` this replays real work: each approved row enqueues
+    the same ``apply_review_item`` arq task the singular approve endpoint
+    uses, so N pending items means N applied mutations against the library.
+    Idempotent: with zero pending items this returns 200 with ``approved: 0``.
+    """
+    now = datetime.now(UTC)
+    result = await db.execute(
+        sa.update(ReviewItem)
+        .where(ReviewItem.status == ReviewStatus.pending)
+        .values(
+            status=ReviewStatus.approved,
+            resolved_at=now,
+            resolved_by_id=admin.id,
+            updated_at=now,
+        )
+        .returning(ReviewItem.id)
+    )
+    review_ids = [row[0] for row in result.all()]
+    await db.flush()
+
+    for review_id in review_ids:
+        try:
+            await arq.enqueue_job("apply_review_item", review_id)
+        except Exception:
+            import logging  # noqa: PLC0415
+            logging.getLogger(__name__).exception(
+                "approve_all_reviews: failed to enqueue apply_review_item for rv %s", review_id
+            )
+
+    return ApproveAllReviewsResponse(approved=len(review_ids))
+
+
+@router.post(
+    "/reject-all",
+    response_model=RejectAllReviewsResponse,
+    summary="Reject all pending review items",
+)
+async def reject_all_reviews(
+    admin: Annotated[User, Depends(require_admin)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> RejectAllReviewsResponse:
+    """Reject every ``pending`` review item — a pure status flip, no action taken.
+
+    Idempotent: with zero pending items this returns 200 with ``rejected: 0``.
+    """
+    now = datetime.now(UTC)
+    result = await db.execute(
+        sa.update(ReviewItem)
+        .where(ReviewItem.status == ReviewStatus.pending)
+        .values(
+            status=ReviewStatus.rejected,
+            resolved_at=now,
+            resolved_by_id=admin.id,
+            updated_at=now,
+        )
+    )
+    rejected = result.rowcount or 0
+    await db.flush()
+    return RejectAllReviewsResponse(rejected=rejected)
 
 
 @router.post("/{review_id}/approve", response_model=ReviewItemOut)

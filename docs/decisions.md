@@ -2,6 +2,135 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-23 — Reviews bulk approve/reject: single bulk `UPDATE ... RETURNING`, per-row enqueue
+
+**Context:** `prompts/2026-07-23-reviews-bulk-approve-reject.md` asked for
+`POST /api/reviews/approve-all` and `POST /api/reviews/reject-all`, cloning the
+tag-admin `approve-all` precedent (`backend/app/routers/tag_admin.py:133-156`).
+
+- **`approve-all` uses one `UPDATE ... WHERE status='pending' ... RETURNING id`**
+  rather than loading rows into Python first. This is both the cheapest way to get
+  an idempotent, race-safe count and, critically, the only way to get back exactly
+  the set of ids that transitioned in *this* call — needed because each transitioned
+  id must enqueue its own `apply_review_item` arq job (mirroring the singular
+  `approve_review` endpoint), and a normal `db.execute(update(...))` doesn't return
+  rows. `reject-all` doesn't need per-row ids (no enqueue), so it stays a plain
+  `UPDATE` + `result.rowcount`, exactly like the tag precedent.
+- **Enqueue failures are caught and logged per-row, not fatal to the request** —
+  same pattern as the singular endpoint's `try/except` around
+  `arq.enqueue_job(...)`. A Redis hiccup on job N shouldn't roll back the DB status
+  flip already committed for jobs 1..N-1, and the bulk approve already documents in
+  its docstring that this replays real per-row work (N jobs), unlike the pure
+  status-flip `reject-all`.
+- **Frontend confirm step is inline expand-in-place state** (`confirmApprove` /
+  `confirmReject` booleans → "Sure?" copy + Confirm/Cancel buttons), not a modal —
+  matches the existing per-row Reject confirm pattern in `TagAdminPage.tsx`'s
+  `PendingTagRow`, since this repo doesn't use a dialog/toast library. The
+  Approve-all confirm copy explicitly says "This applies each change to your
+  library" per the prompt's nuance that approve-all is real work while reject-all
+  is a safe flip (reject-all's confirm copy stays terse).
+- **Bulk buttons only render on the Pending tab**, sized off the already-fetched
+  `data.total` for that tab (no extra query) — since `GET /api/reviews` defaults to
+  `status=pending`, the Pending tab's existing list query already has the exact
+  pending count needed for the button label/enable state.
+- **Cache invalidation targets the real pending-count query keys**
+  (`['reviews-pending-count']`, used by `AppShell.tsx` / `SideNavShell.tsx` /
+  `TopNavShell.tsx` / `WidgetStatStrip.tsx`, and `['widget-pending-reviews-panel']`
+  used by the dashboard panel widget) in addition to `['reviews']` — there is no
+  single `['dashboard']` query key in this codebase, so invalidating that would have
+  been a no-op.
+
+## 2026-07-23 — Reconcile: unify integrity vs re_render into one model-file classifier
+
+**Context:** owner's real workflow opens a model file (typically a `.3mf`) in a slicer
+and saves it back over the same path. `_behavior_integrity` (`backend/app/worker/
+reconcile.py`) flagged ANY hash mismatch on ANY file with a stored `sha256` as a
+critical `corruption` Issue, with no regard for mtime. `_behavior_re_render`
+independently hashed the same model files (but only `.stl`/`.obj`/`.ply` —
+`render_mesh.MESH_EXTENSIONS` never included `.3mf`) and treated a mismatch as
+"file updated -> re-render." Neither ever adopted the new hash as the baseline, so
+a legitimate in-place edit tripped a false alarm that recurred on every scan.
+
+- **Single unified classifier, not two independently-hashing checks.**
+  `_behavior_re_render` (kept its name; header comment now documents the merger) is
+  now the ONLY place that hashes a model/geometry file whose extension
+  `validate_model_file` can structurally validate (`render_mesh.MESH_EXTENSIONS` ∪
+  `{.3mf}`). It classifies a hash mismatch into legit-edit / bad-write-corruption /
+  bit-rot-corruption / no-change, in that order, and only then (legit edit) adopts
+  the baseline and routes through the existing re-render enqueue/review path.
+  `_behavior_integrity`'s per-file loop now explicitly skips any `role=model` file
+  whose extension is in that same validatable set — it still owns the simple
+  "any mismatch = corruption" check unconditionally for everything else: images,
+  gcode, other roles, dead-link checking, AND model-role files with an extension the
+  validator does NOT understand (`.step`, `.blend`, `.fcstd`, `.amf`, `.dae`,
+  `.stp` — `storage/inventory.MODEL_EXTENSIONS` minus the validatable subset), since
+  there's no way to structurally validate those and no legit-edit exception should
+  be made for them.
+- **Extended re-render/adoption to `.3mf` for the first time.** Previously only
+  STL/OBJ/PLY were even considered by `_behavior_re_render` (3MF was excluded
+  because it has no VTK render path — embedded slicer thumbnails are used instead).
+  The classifier now includes `.3mf` because the owner's primary real-world scenario
+  IS a `.3mf` re-save; it still routes through the unchanged `_enqueue_render` /
+  `render_item` mechanism, which itself already no-ops for 3MF files internally (no
+  VTK render). **Known gap, left as-is / a candidate follow-up:** this does NOT
+  trigger `_enqueue_analyze`, so a 3MF's embedded slicer thumbnail is not
+  automatically refreshed by this path — only the corruption-misclassification bug
+  was in scope here.
+- **Validator: `render_mesh.validate_model_file(path, *, max_3mf_xml_mb=None)`**
+  dispatches by extension. `.3mf` → `threemf.validate_3mf_structure` (new function):
+  opens the ZIP, requires a `3D/3dmodel.model` entry, and parses it with the
+  module's existing hardened lxml parser — checking only that the root element is a
+  well-formed 3MF `model` element, NOT full geometry/triangle validation (that's
+  `mesh_analysis.analyze_file`'s job, which is not reused here — it's built for
+  volume/color estimation, not a cheap parses-or-not check, and would pull in the
+  wrong failure semantics, e.g. `MeshTooLargeError` treated as skip-not-fail).
+  MESH_EXTENSIONS (STL/OBJ/PLY) → a new `_validate_mesh_structure` calling the
+  existing private `_load_as_trimesh` directly (no VTK backend requirement, unlike
+  `render_mesh_file`, so it works in environments without a render backend and in
+  tests). Any other extension → `True` (nothing this module knows how to validate;
+  never treated as unparseable by default).
+- **3MF geometry-size cap: fail OPEN, not closed.** `validate_3mf_structure` mirrors
+  `mesh_analysis._check_3mf_xml_size`'s pre-load byte-size guard (issue #37
+  follow-up — an oversized geometry-XML part can balloon ~15-20x once parsed into an
+  lxml DOM) but, when the cap is exceeded, returns `True` (skip the parse, assume
+  valid) rather than `False`. Rationale: a legitimately huge model shouldn't be
+  reported as `corruption` just because this cheap check declined to risk parsing
+  it — the expensive analyze/render pipelines already have their own independent
+  cap-skip handling for oversized files. **STL/OBJ/PLY now also fail open above a
+  pre-load byte cap** (orchestrator hardening on top of the agent's first pass):
+  `_validate_mesh_structure` stats the file and, if it exceeds `RENDER_MAX_FILE_MB`
+  (the same cap the render task enforces before it would `RenderCapSkip`), returns
+  `True` without loading — so the memory-capped worker never pulls a giant mesh into
+  memory just to answer a corruption question. This bounds the in-process load to
+  ≤ `RENDER_MAX_FILE_MB`; it is still NOT subprocess/`RLIMIT_AS`-isolated the way the
+  full analyze/render pipelines (`analyze_subprocess.py` / `render_subprocess.py`)
+  are, which was judged acceptable for this narrower, rarer path (only triggered by
+  an already-detected hash mismatch on a within-cap file, not on every scan) rather
+  than adding subprocess-spawn plumbing to a synchronous validator. The residual
+  risk (a crafted small-but-pathological within-cap mesh) is the one noted open item
+  if it ever needs full isolation.
+- **mtime tolerance: reused the existing constant value (1.0s), not a new knob.**
+  `_MTIME_DRIFT_TOLERANCE_SECONDS = 1.0` in `reconcile.py` mirrors the
+  pre-existing cheap-first drift check's inline `< 1.0` comparison (previously not
+  named) — used both for "is this file even changed" (cheap check) and "is the new
+  mtime strictly newer than baseline" (legit-edit vs bit-rot decision). Same value,
+  now named for reuse and clarity.
+- **Baseline adoption updates exactly the four fields the prompt named** (`sha256`,
+  `last_seen_size`, `last_seen_mtime`, `mtime`) and nothing else — does NOT bump
+  `item.updated_at` and does NOT force an immediate sidecar rewrite. The sidecar's
+  file-list entries are rebuilt from live `File` row state whenever
+  `_write_sidecar_for_item` next runs for any other reason, so the corrected hash
+  will eventually surface there; forcing it immediately was out of scope and would
+  have coupled a file-content edit to the sidecar_sync behavior's own DB/sidecar
+  conflict logic.
+- **Defensive `f.sha256 is None` skip retained** in the new classifier, mirroring
+  the old integrity check's own guard — `inventory_item` always hashes a file at
+  creation, so this is not expected to trigger in practice, but skipping (no Issue,
+  no render) is safer than the alternative of always treating a never-hashed file
+  as a mismatch (which the old `_behavior_re_render` did, and which would otherwise
+  now spuriously read as "corruption" under the new classification since such a
+  file's mtime is rarely newer than its own creation-time baseline).
+
 ## 2026-07-21 — Optional nginx TLS (`TLS_MODE`) + base-image bump to 1.30-alpine
 
 **Context:** issue #40 (nginx base image `1.27-alpine` in the vulnerable range for

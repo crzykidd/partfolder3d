@@ -483,8 +483,51 @@ async def _behavior_file_changes(
 
 
 # ---------------------------------------------------------------------------
-# Behavior (b): Re-render on file change
+# Behavior (b) + model-file half of (d): unified model-file change classifier
 # ---------------------------------------------------------------------------
+#
+# A hash mismatch on a model/geometry file used to be decided TWICE,
+# independently, by two behaviors that could disagree: `_behavior_integrity`
+# flagged ANY hash mismatch as `corruption` regardless of mtime, while this
+# behavior treated the same mismatch as "file updated -> re-render", and
+# neither ever adopted the new hash as the baseline -- so a legitimate
+# in-place slicer re-save (open a .3mf, save over the same path) tripped a
+# false critical `corruption` Issue that reappeared on every subsequent scan.
+# See docs/decisions.md for the fix.
+#
+# This behavior is now the single place that hashes a model file and decides
+# what a mismatch means, for every extension `validate_model_file` (issue
+# tracked in docs/decisions.md) knows how to structurally validate --
+# `render_mesh.MESH_EXTENSIONS` (STL/OBJ/PLY, via trimesh) plus `.3mf` (via
+# threemf.py's zip + geometry-XML parse). For each such file whose current
+# hash differs from the stored `sha256`:
+#
+#   - mtime strictly newer (beyond `_MTIME_DRIFT_TOLERANCE_SECONDS`) AND the
+#     file still validates -> LEGITIMATE EDIT: adopt the new hash/mtime/size
+#     as the baseline (so the condition doesn't re-fire), write a ChangeLog
+#     entry, and route through the existing re-render enqueue/review path.
+#     No corruption Issue.
+#   - mtime strictly newer but the file does NOT validate -> CORRUPTION (bad
+#     write): raise the `corruption` Issue with a detail that names it as a
+#     failed parse / possible interrupted write.
+#   - mtime NOT newer (unchanged or older) -> CORRUPTION (silent bit-rot):
+#     raise the `corruption` Issue exactly as before.
+#
+# Model-file extensions `validate_model_file` does NOT understand (e.g.
+# .step, .blend -- see `storage/inventory.MODEL_EXTENSIONS`) are left to
+# `_behavior_integrity`'s unconditional hash check, same as any non-model
+# file -- there is no way to structurally validate them, so no legit-edit
+# exception is made for them.
+
+_MTIME_DRIFT_TOLERANCE_SECONDS = 1.0
+
+
+def _validatable_model_extensions() -> frozenset[str]:
+    """Extensions `validate_model_file` can structurally validate."""
+    from ..worker.render_mesh import MESH_EXTENSIONS  # noqa: PLC0415
+
+    return MESH_EXTENSIONS | {".3mf"}
+
 
 async def _behavior_re_render(
     db: AsyncSession,
@@ -496,19 +539,22 @@ async def _behavior_re_render(
     result: ReconcileResult,
     source: str,
 ) -> None:
+    from ..config import settings  # noqa: PLC0415
     from ..models.change_log import ChangeLog  # noqa: I001,PLC0415
     from ..models.file import FileRole  # noqa: PLC0415
+    from ..models.issue import Issue, IssueSeverity, IssueStatus, IssueType  # noqa: PLC0415
     from ..models.review_item import ReviewItem  # noqa: PLC0415
     from ..storage.inventory import _mtime_utc, hash_file_sha256  # noqa: PLC0415
-    from ..worker.render_mesh import MESH_EXTENSIONS  # noqa: PLC0415
+    from ..worker.render_mesh import validate_model_file  # noqa: PLC0415
 
     if not item_dir.exists():
         return
 
+    validatable_extensions = _validatable_model_extensions()
     model_files = [
         f for f in db_files
         if f.role == FileRole.model
-        and Path(f.path).suffix.lower() in MESH_EXTENSIONS
+        and Path(f.path).suffix.lower() in validatable_extensions
     ]
     if not model_files:
         return
@@ -517,6 +563,12 @@ async def _behavior_re_render(
     changed_files: list[str] = []
 
     for f in model_files:
+        if f.sha256 is None:
+            # Never hashed (defensive -- inventory_item always hashes new
+            # files, so this is not expected in practice). Nothing to compare
+            # against; mirrors the old integrity check's own guard.
+            continue
+
         abs_path = item_dir / f.path
         if not abs_path.exists():
             continue
@@ -530,16 +582,87 @@ async def _behavior_re_render(
             prev_mtime = f.last_seen_mtime or f.mtime
             if (
                 current_size == prev_size
-                and abs((current_mtime - prev_mtime).total_seconds()) < 1.0
-                and f.sha256 is not None
+                and abs((current_mtime - prev_mtime).total_seconds())
+                < _MTIME_DRIFT_TOLERANCE_SECONDS
             ):
                 # No change
                 continue
 
             current_hash = hash_file_sha256(abs_path)
-            if current_hash != f.sha256:
+            if current_hash == f.sha256:
+                # Content unchanged (e.g. mtime touched without a real edit).
+                continue
+
+            mtime_is_newer = (
+                (current_mtime - prev_mtime).total_seconds()
+                > _MTIME_DRIFT_TOLERANCE_SECONDS
+            )
+
+            if mtime_is_newer and validate_model_file(
+                abs_path, max_3mf_xml_mb=settings.ANALYZE_MAX_3MF_XML_MB
+            ):
+                # Legitimate in-place edit: adopt the new baseline, no Issue.
+                old_hash_prefix = f.sha256[:12]
+                f.sha256 = current_hash
+                f.last_seen_size = current_size
+                f.last_seen_mtime = current_mtime
+                f.mtime = current_mtime
+                await db.flush()
+
+                cl = ChangeLog(
+                    behavior="integrity",
+                    change_type="baseline_adopted",
+                    item_id=item.id,
+                    summary=(
+                        f"File {f.path!r} changed in place for item {item.key!r} "
+                        "and still validates; adopted as the new baseline "
+                        "(not corruption)."
+                    ),
+                    before_state={"sha256": old_hash_prefix},
+                    after_state={"sha256": current_hash[:12]},
+                    source=source,
+                )
+                db.add(cl)
+                await db.flush()
+                result.changes_applied.append({
+                    "behavior": "integrity",
+                    "change_type": "baseline_adopted",
+                    "path": f.path,
+                })
+
                 needs_render = True
                 changed_files.append(f.path)
+                continue
+
+            # Hash mismatch that is NOT a validated legitimate edit -> corruption.
+            _tp = str(abs_path)
+            if await _issue_exists(db, IssueType.corruption, _tp):
+                continue
+
+            if mtime_is_newer:
+                detail = (
+                    f"File {f.path!r} changed but failed to parse — possible "
+                    "incomplete/interrupted write "
+                    f"(stored={f.sha256[:12]}…, actual={current_hash[:12]}…)"
+                )
+            else:
+                detail = (
+                    f"File hash mismatch for {f.path!r}: "
+                    f"stored={f.sha256[:12]}…, actual={current_hash[:12]}…"
+                )
+
+            issue = Issue(
+                issue_type=IssueType.corruption,
+                severity=IssueSeverity.critical,
+                status=IssueStatus.open,
+                item_id=item.id,
+                target_path=_tp,
+                detail=detail,
+                suggested_action="Verify file integrity; restore from backup if corrupted.",
+            )
+            db.add(issue)
+            await db.flush()
+            result.issues_created.append(issue.id)
         except OSError:
             continue
 
@@ -609,15 +732,26 @@ async def _behavior_integrity(
     url_validator: Callable[[str], Awaitable[bool]] | None,
     result: ReconcileResult,
 ) -> None:
+    from ..models.file import FileRole  # noqa: PLC0415
     from ..models.issue import Issue, IssueSeverity, IssueStatus, IssueType  # noqa: PLC0415
     from ..storage.inventory import hash_file_sha256  # noqa: PLC0415
 
     if not item_dir.exists():
         return
 
+    # Model files that `validate_model_file` can structurally validate are
+    # classified by `_behavior_re_render` instead (legit edit vs corruption
+    # vs bit-rot — see that function's docstring). Everything else (images,
+    # gcode, other roles, and model-role files with an extension the
+    # validator doesn't understand, e.g. .step/.blend) keeps the simple
+    # unconditional "any hash mismatch = corruption" check below.
+    validatable_extensions = _validatable_model_extensions()
+
     # Check for file hash corruption
     for f in db_files:
         if f.sha256 is None:
+            continue
+        if f.role == FileRole.model and Path(f.path).suffix.lower() in validatable_extensions:
             continue
         abs_path = item_dir / f.path
         if not abs_path.exists():

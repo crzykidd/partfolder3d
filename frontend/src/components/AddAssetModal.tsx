@@ -16,6 +16,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { X as XIcon } from 'lucide-react'
@@ -527,7 +528,7 @@ export function AddAssetModal({ open, onClose }: AddAssetModalProps) {
     ['url', 'From URL'],
   ]
 
-  return (
+  return createPortal(
     /* Backdrop — aurora dark blur */
     <div
       style={{
@@ -675,6 +676,7 @@ export function AddAssetModal({ open, onClose }: AddAssetModalProps) {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

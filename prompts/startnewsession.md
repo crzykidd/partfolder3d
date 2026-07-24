@@ -6,49 +6,45 @@ It is NOT a full reference: durable rules live in `CLAUDE.md`, the module map + 
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
 "Current state" + "Next phases" before every `/clear`.
 
-**Last updated:** 2026-07-21 — **`v0.7.0` RELEASED.** Feature: the **prinnit.com import
-connector**. PR #39 merged, tag `v0.7.0` cut, the `release`-triggered "Build and publish Docker
-images" run **succeeded** — prod images publishing `:latest`/`:0.7.0`/`:0` for all three
-(backend/frontend/nginx). **`dev` == `main`.** Previous release `v0.6.1` was the issue #37
-worker-analyze crash-loop hardening.
+**Last updated:** 2026-07-22 — **`v0.7.1` RELEASED.** Feature: **optional built-in HTTPS/TLS at
+nginx** (opt-in, off by default) + the **nginx base-image security bump** `1.27→1.30-alpine`
+(closed #40). PR #42 merged, tag `v0.7.1` cut, the `release`-triggered "Build and publish Docker
+images" run fired — prod images publishing `:latest`/`:0.7.1`/`:0` for all three
+(backend/frontend/nginx). **`dev` == `main`.** Previous release `v0.7.0` was the prinnit.com import
+connector.
 
-> **⏭️ NEXT UP — open issue [#40](https://github.com/crzykidd/partfolder3d/issues/40): bump the
-> nginx base image off `1.27` (security).** `nginx/Dockerfile` builds from `nginx:1.27-alpine`,
-> which is in the vulnerable range for several **2026 nginx CVEs** (headline: CVE-2026-42533,
-> MAJOR, `map`+regex buffer overflow → possible RCE) and is **not** patched — the floating
-> `1.27-alpine` tag won't fix it; fixes are only in **1.30.4+ / 1.31.3+**. **Our real exposure is
-> LOW** (our `nginx.conf` uses regex `location`s but **no `map`**, no slice/ssi/http3/grpc — plain
-> port-80 reverse proxy), but bump anyway as hygiene. Proposed: `FROM nginx:1.30-alpine` (stable);
-> `1.31-alpine` (mainline) is the alternative — **owner decision**. One-line Dockerfile change +
-> CHANGELOG `security:` entry; trivial. Full detail in issue #40.
+> **⏭️ NO RELEASE IN FLIGHT, no forced next task.** Next pickup is a roadmap **choice**, not an
+> issue-driven must-do — see "Next phases". The two live options: (a) **bulk move-assets UI**
+> (#25 follow-up, needs an owner UX call), or (b) **automatic Let's Encrypt/ACME** at nginx
+> ([#41](https://github.com/crzykidd/partfolder3d/issues/41) — the deferred follow-up to the v0.7.1
+> BYO/self-signed TLS work).
 
 ## Current state
 
-- **Latest release `v0.7.0`** (2026-07-21) — a **single-feature** release: the **prinnit.com import
-  connector** (owner-tested and confirmed working). Shipped via PR #39; tag `v0.7.0` cut, prod
-  images published. `dev` == `main`. The immediate next task is the nginx security bump (issue #40)
-  — see the ⏭️ box at the top.
-- **What the prinnit connector does:** pasting a `prinnit.com/<Designer>/design/<id>` URL into the
-  import wizard now pre-fills real title, description (HTML→plain-text, with an appended plain-text
-  **Print details** block — time/difficulty/weight/bed size/filaments/video), creator, tags, and
-  gallery images. The gated `.3mf` is NOT downloaded — the user uploads the file they purchased.
-  - **Why a connector was needed:** prinnit is a client-rendered React SPA with **no OG tags** — the
-    generic scraper only saw a junk `ForgeCore Home` title. The connector instead reads prinnit's
-    **fully public, no-auth JSON API** (`api.prinnit.com`): `GET /designers` (find designer `sub` by
-    name, case-insensitive) → `GET /designs/<sub>` (whole ~1.2 MB catalog; scan for `designId`).
-    `robots.txt` allows all; images are public `images.prinnit.com` webp.
-  - **Where the code lives:** `backend/app/storage/prinnit_client.py` (`scrape_prinnit` — pure fn,
-    never raises, SSRF-guarded, returns an enriched `ScrapeResult | None`); a domain short-circuit in
-    `backend/app/worker/tasks/import_session.py` right after `_maybe_manyfold_import` (skips
-    `scrape_url`/`SiteCapability`/fallback on a prinnit URL); tests `backend/tests/test_prinnit.py`
-    (31, HTTP mocked). Design rationale in `docs/decisions.md` (newest entry).
-  - **Not configurable / no admin UI** — no auth or DB config; domain is hardcoded `prinnit.com`.
-    No migration. Rich fields beyond the Print-details block (individual filament colors, etc.) are
-    intentionally not modeled — only what the wizard consumes.
-- **Previous release `v0.6.1`** (issue #37 — worker analyze OOM crash-loop hardening: subprocess
-  isolation + `RLIMIT_AS`, retry cap, triangle/3MF size caps). Full detail in `CHANGELOG.md`; the
-  `ANALYZE_*` env knobs live in `backend/app/config.py` + `.env.example`. Item 11 in the dev DB
-  carries a `too_large` analysis stub from that live test.
+- **Latest release `v0.7.1`** (2026-07-22) — **optional built-in HTTPS/TLS at nginx** + the nginx
+  base-image security bump. `dev` == `main`. Live-verified: the new image with **no** TLS env serves
+  plain `:80` unchanged (owner confirmed on a rebuild; also proven standalone).
+  - **What shipped:** a `TLS_MODE` env on the `partfolder3d-nginx` image — `off` (default, plain
+    `:80`, byte-for-byte unchanged) / `selfsigned` (entrypoint auto-generates a cert, immediate HTTPS
+    w/ browser warning) / `provided` (BYO real cert mounted; missing files exit 1, never a silent
+    HTTP downgrade). Plus opt-in `TLS_REDIRECT`, an opt-in `:443` port + `nginx_certs` volume in
+    `docker-compose.yml`, a `COOKIE_SECURE=true` tie-in, an **admin Settings "HTTPS / TLS" info
+    card** (signpost only — TLS is deploy-level, not a stored setting), and README/`docs/tls.md`.
+  - **Where the code lives:** `nginx/Dockerfile` (`FROM nginx:1.30-alpine`, `apk add openssl`,
+    build-time `nginx -t` patches both configs), `nginx/40-partfolder-tls.sh` (POSIX
+    `/docker-entrypoint.d/` script assembling `:443` at start), `nginx/partfolder-common.conf`
+    (shared server block `include`d by both `:80` and `:443` — the refactor that triggered the
+    "nginx config changed" callout), `nginx/partfolder-redirect.conf`, `docs/tls.md`, the Settings
+    card in `frontend/src/pages/settings/SettingsPage.tsx`. Decisions in `docs/decisions.md`.
+  - **Upgrade note (already documented):** default HTTP users need **no** compose change; only
+    **custom-`nginx.conf` bind-mounters** must reconcile against the refactored config.
+  - **Deferred → issue [#41](https://github.com/crzykidd/partfolder3d/issues/41):** full automatic
+    Let's Encrypt/ACME (certbot companion or Caddy edge). This release is BYO/self-signed only.
+- **`v0.7.0`** — the **prinnit.com import connector** (`backend/app/storage/prinnit_client.py` +
+  a domain short-circuit in `tasks/import_session.py`; reads prinnit's public no-auth JSON API).
+  Full detail in `CHANGELOG.md` / `docs/decisions.md`.
+- **`v0.6.1`** — issue #37 worker-analyze OOM crash-loop hardening (`ANALYZE_*` knobs in
+  `backend/app/config.py`). Dev DB item 11 carries a `too_large` analysis stub from that test.
 - **Prod deploy facts** (compose in `~/projects/docker-compose/apps/partfolder3d/` on this
   host, deployed elsewhere via Komodo): `:latest` images, Traefik ingress
   (`partfolder3d.crzynet.com`), NFS library, `user: 2000:66000`, worker capped
@@ -65,9 +61,9 @@ worker-analyze crash-loop hardening.
 
 ## Next phases (roadmap)
 
-- **nginx security bump** (immediate — issue [#40](https://github.com/crzykidd/partfolder3d/issues/40)) —
-  `nginx/Dockerfile` off `1.27-alpine` → `1.30-alpine` (or `1.31`, owner's call). Low real
-  exposure, trivial fix; see the ⏭️ box at the top.
+- **Automatic Let's Encrypt/ACME at nginx** (issue [#41](https://github.com/crzykidd/partfolder3d/issues/41)) —
+  the deferred follow-up to v0.7.1's BYO/self-signed TLS. Bigger lift (certbot companion or Caddy
+  edge; needs public 80/443 + DNS + renewal). Not started; owner decides approach at build time.
 - **Bulk move-assets UI** (#25 follow-up) — last Phase 2 item. Backend bulk endpoint live +
   tested; catalog needs a **multi-select** affordance (real UX decision — discuss with owner
   before building).
@@ -103,9 +99,10 @@ worker-analyze crash-loop hardening.
 
 ## Backlog (themes — `gh issue list` is the source of truth for what we build **now**, not the PRD)
 
-- **Open issue [#40](https://github.com/crzykidd/partfolder3d/issues/40)** — nginx base-image
-  security bump off `1.27` (immediate next pickup; owner decides 1.30 stable vs 1.31 mainline).
-- **Needs owner decision:** nginx target branch (#40); bulk-move multi-select UX (#25 follow-up).
+- **Open issue [#41](https://github.com/crzykidd/partfolder3d/issues/41)** — automatic Let's
+  Encrypt/ACME at nginx (deferred follow-up to v0.7.1 TLS; not started). (#40 nginx bump: **closed**
+  in v0.7.1.)
+- **Needs owner decision:** Let's Encrypt approach (#41); bulk-move multi-select UX (#25 follow-up).
 - Older PRD §18 notes: real slicing for filament estimates, trash-purge UI, `.bgcode`/multi-filament gcode.
 
 ## Session start order

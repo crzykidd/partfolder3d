@@ -262,6 +262,93 @@ def test_render_mesh_backend_detection() -> None:
     assert b in ("egl", "osmesa", "vtk", "none")
 
 
+# ---------------------------------------------------------------------------
+# validate_model_file — used by the reconcile integrity check to tell a
+# legitimate in-place edit apart from a truncated/corrupted write.
+# ---------------------------------------------------------------------------
+
+_VALID_ASCII_STL = b"""solid test
+facet normal 0 0 1
+  outer loop
+    vertex 0 0 0
+    vertex 1 0 0
+    vertex 0 1 0
+  endloop
+endfacet
+endsolid test
+"""
+
+
+def test_validate_model_file_valid_stl(tmp_path: Path) -> None:
+    """A well-formed ASCII STL validates (no VTK backend required)."""
+    from app.worker.render_mesh import validate_model_file  # noqa: PLC0415
+
+    p = tmp_path / "model.stl"
+    p.write_bytes(_VALID_ASCII_STL)
+    assert validate_model_file(p) is True
+
+
+def test_validate_model_file_truncated_stl_fails(tmp_path: Path) -> None:
+    """A truncated STL (interrupted write) does not validate."""
+    from app.worker.render_mesh import validate_model_file  # noqa: PLC0415
+
+    p = tmp_path / "model.stl"
+    p.write_bytes(_VALID_ASCII_STL[:20])
+    assert validate_model_file(p) is False
+
+
+def test_validate_model_file_oversized_mesh_fails_open(tmp_path: Path, monkeypatch) -> None:
+    """A mesh larger than RENDER_MAX_FILE_MB is assumed valid (never loaded).
+
+    The validator runs in the memory-capped worker without the subprocess/RLIMIT
+    isolation the real render path uses, so an oversized file must NOT be loaded
+    in-process just to answer the corruption question — it fails open.
+    """
+    from app.config import settings  # noqa: PLC0415
+    from app.worker.render_mesh import validate_model_file  # noqa: PLC0415
+
+    monkeypatch.setattr(settings, "RENDER_MAX_FILE_MB", 0)
+    p = tmp_path / "big.stl"
+    # Even a truncated (unparseable) body must be assumed valid once over the cap,
+    # proving the load is skipped rather than attempted.
+    p.write_bytes(_VALID_ASCII_STL[:20])
+    assert validate_model_file(p) is True
+
+
+def test_validate_model_file_unsupported_extension_defaults_true(tmp_path: Path) -> None:
+    """An extension the validator doesn't understand (e.g. .step) is not flagged."""
+    from app.worker.render_mesh import validate_model_file  # noqa: PLC0415
+
+    p = tmp_path / "model.step"
+    p.write_bytes(b"not validated by this module")
+    assert validate_model_file(p) is True
+
+
+def test_validate_model_file_dispatches_3mf(tmp_path: Path) -> None:
+    """A .3mf path is dispatched to threemf.validate_3mf_structure."""
+    import io  # noqa: PLC0415
+    import zipfile  # noqa: PLC0415
+
+    from app.worker.render_mesh import validate_model_file  # noqa: PLC0415
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(
+            "3D/3dmodel.model",
+            b'<?xml version="1.0"?>'
+            b'<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">'
+            b"<resources/><build/></model>",
+        )
+    p = tmp_path / "model.3mf"
+    p.write_bytes(buf.getvalue())
+    assert validate_model_file(p) is True
+
+    # Not a zip at all -> dispatched to the 3MF validator -> False.
+    p2 = tmp_path / "broken.3mf"
+    p2.write_bytes(b"not a zip")
+    assert validate_model_file(p2) is False
+
+
 def test_worker_settings_builds_a_worker() -> None:
     """Regression: `python worker.py` crashed with "'type' object is not
     iterable" because main() called Worker(WorkerSettings) — arq's Worker takes

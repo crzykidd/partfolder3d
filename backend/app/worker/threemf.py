@@ -381,6 +381,82 @@ def _enrich_filaments_from_project(
 
 
 # ---------------------------------------------------------------------------
+# Structural validation (reconcile integrity check — corruption vs legit edit)
+# ---------------------------------------------------------------------------
+
+
+def validate_3mf_structure(path: Path, max_xml_mb: int | None = None) -> bool:
+    """Return True if *path* is a structurally valid 3MF.
+
+    Unlike ``read_3mf`` (which never raises and always returns a best-effort
+    default dict — it is used for optional metadata extraction), this is a
+    strict structural check used by the reconcile integrity behavior
+    (``worker/reconcile.py``) to tell a legitimate in-place slicer re-save
+    (still parses) apart from a truncated/interrupted write (does not parse).
+    See docs/decisions.md for the false-corruption bug this closes.
+
+    Checks, in order:
+      1. The file opens as a ZIP (``zipfile.BadZipFile`` → False).
+      2. It contains a ``3D/3dmodel.model`` entry (missing → False).
+      3. That entry's uncompressed size is within *max_xml_mb* (mirrors the
+         pre-load guard in ``mesh_analysis._check_3mf_xml_size`` — issue #37
+         follow-up: a huge geometry-XML part can balloon ~15-20x once parsed
+         into an lxml DOM). When the cap is exceeded, parsing is skipped and
+         this returns True — we deliberately do not risk ballooning memory
+         just to answer a corruption question; a hostile/huge file is a
+         separate, already-guarded concern for the actual analyze/render
+         pipelines, not something this cheap check should attempt itself.
+      4. The entry parses as well-formed XML (via the same hardened parser
+         used elsewhere in this module) with a ``model`` root element in the
+         3MF core namespace.
+
+    A no-op cap (``max_xml_mb=None``) always parses (used by callers, e.g.
+    unit tests, that don't have a configured limit).
+    """
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return False
+
+    try:
+        with zipfile.ZipFile(BytesIO(raw)) as zf:
+            names_lower = {n.lower(): n for n in zf.namelist()}
+            entry = names_lower.get("3d/3dmodel.model")
+            if entry is None:
+                return False
+
+            info = zf.getinfo(entry)
+            if max_xml_mb is not None and info.file_size > max_xml_mb * 1024 * 1024:
+                log.info(
+                    "threemf.validate_3mf_structure: %s geometry part exceeds "
+                    "%d MB cap; skipping parse (assumed valid)",
+                    path.name, max_xml_mb,
+                )
+                return True
+
+            try:
+                from lxml import etree  # noqa: PLC0415
+            except ImportError:
+                # lxml unavailable — fall back to "zip opens + part present".
+                log.warning(
+                    "threemf.validate_3mf_structure: lxml not available; "
+                    "%s validated by ZIP structure only",
+                    path.name,
+                )
+                return True
+
+            data = zf.read(entry)
+            root = etree.fromstring(data, _hardened_parser(etree))  # type: ignore[attr-defined]
+            return bool(root.tag == f"{{{_NS_3MF}}}model")
+    except zipfile.BadZipFile as exc:
+        log.info("threemf.validate_3mf_structure: %s is not a valid ZIP: %s", path.name, exc)
+        return False
+    except Exception as exc:
+        log.warning("threemf.validate_3mf_structure: %s failed to parse: %s", path.name, exc)
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 

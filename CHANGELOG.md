@@ -20,6 +20,50 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.7.2] — 2026-07-23
+
+### Added
+
+- Bulk approve/reject all pending reconcile reviews. New `POST
+  /api/reviews/approve-all` and `POST /api/reviews/reject-all` endpoints (admin +
+  CSRF guarded, idempotent) clear a large pending backlog in one call, mirroring
+  the existing tag `approve-all` precedent. `approve-all` replays each pending
+  item's `apply_review_item` job (real work), while `reject-all` is a pure status
+  flip. The Reviews page (`/admin/reviews`) gained matching **Approve all** /
+  **Reject all** buttons in the Pending tab header, each behind a confirm step.
+
+### Fixed
+
+- The reconcile scan no longer mislabels a legitimate in-place model-file edit
+  (e.g. opening a `.3mf` in a slicer and saving it back to the same path) as
+  `corruption`. The integrity check and the re-render check used to hash the
+  same changed file independently and could disagree — integrity always raised
+  a critical `corruption` Issue on any hash mismatch, re-render treated the
+  same mismatch as "file updated," and neither ever adopted the new hash as
+  the baseline, so the false alarm recurred on every subsequent scan. A hash
+  mismatch on a model/geometry file (STL/OBJ/PLY/3MF) is now classified by a
+  single check: a newer mtime **and** a file that still parses is a legitimate
+  edit — the new hash/mtime/size is adopted as the baseline (no Issue) and the
+  existing re-render path runs as before; a newer mtime with a file that fails
+  to parse, or a hash change with an unchanged/older mtime, is still reported
+  as `corruption`, with the detail distinguishing a failed-parse write from
+  silent bit-rot.
+- The "Log a Print" dialog is now rendered through a portal to `document.body`, so
+  it always sits above the rest of the item page. Previously the modal was nested
+  inside the Print History card, whose `backdrop-filter` created a local stacking
+  context that trapped its `z-index` — letting the later "Share" card paint over the
+  dialog and hide the print-detail fields.
+- The "Add asset" / import dialog is likewise portaled to `document.body`, hardening
+  it against the same stacking-context trap.
+
+### Changed
+
+- Added a lightweight model-file structural validator (`validate_model_file`)
+  used only by the reconcile integrity check — a `.3mf` is checked by opening
+  it as a ZIP and parsing its `3D/3dmodel.model` geometry part (respecting the
+  existing 3MF geometry-size cap), and STL/OBJ/PLY are checked via a trimesh
+  load, without requiring a render backend.
+
 ## [0.7.1] — 2026-07-21
 
 > ✅ **Upgrading — the default (plain HTTP) setup needs NO changes.** TLS is
@@ -1219,7 +1263,8 @@ detail in this one file. (An earlier plan to archive closed minor series into
 <!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
      earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
 
-[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/crzykidd/partfolder3d/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/crzykidd/partfolder3d/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/crzykidd/partfolder3d/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/crzykidd/partfolder3d/compare/v0.6.0...v0.6.1

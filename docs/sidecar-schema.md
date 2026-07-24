@@ -78,6 +78,12 @@ updated_at: 2026-06-27T18:40:00Z
   match the sidecar. Only **re-compute SHA-256 when size or mtime changed** (or on an
   explicit integrity pass / per-item Rescan). This keeps full hashing off the hot scan
   path even for very large (10GB+) libraries.
+- **Legit-edit vs. corruption:** when a model file's recomputed hash differs from the
+  baseline, the reconcile scan uses the **mtime direction** to disambiguate — a *newer*
+  mtime on a file that still parses is a legitimate in-place edit (adopt the new hash,
+  re-render, no Issue), while an *unchanged/older* mtime, or a newer mtime on an
+  unparseable file, is flagged as `corruption`. See
+  [`features-overview.md`](features-overview.md#corruption-vs-legitimate-in-place-edits).
 
 ### Sidecar ⇄ DB conflict resolution
 
