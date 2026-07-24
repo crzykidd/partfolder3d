@@ -6,26 +6,26 @@ It is NOT a full reference: durable rules live in `CLAUDE.md`, the module map + 
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
 "Current state" + "Next phases" before every `/clear`.
 
-**Last updated:** 2026-07-23 — **`v0.7.2` RELEASE IN FLIGHT.** Prep committed on `dev`
-(`chore(release): prepare v0.7.2`, `ba52a85`) and **PR [#43](https://github.com/crzykidd/partfolder3d/pull/43)
-`dev`→`main` is OPEN** — NOT yet merged/tagged. This release bundles: a **reconcile
-corruption-vs-legit-edit fix** (in-place `.3mf`/mesh re-saves no longer flagged as `corruption`;
-`.3mf` newly covered by the re-render/hash-adoption path), **bulk Approve-all/Reject-all for
-pending reviews**, and **two modal-portal UI fixes** (Log-a-Print + Add-asset dialogs no longer
-covered by the Share card). Previous release `v0.7.1` was the optional nginx TLS + base-image bump.
+**Last updated:** 2026-07-23 — **`v0.7.2` RELEASED.** PR [#43](https://github.com/crzykidd/partfolder3d/pull/43)
+merged to `main`, tag `v0.7.2` cut, GitHub release published, and the `release`-triggered "Build and
+publish Docker images" run fired — prod images publishing `:latest`/`:0.7.2`/`:0` for all three
+(backend/frontend/nginx). This release bundled: a **reconcile corruption-vs-legit-edit fix**
+(in-place `.3mf`/mesh re-saves no longer flagged as `corruption`; `.3mf` newly covered by the
+re-render/hash-adoption path), **bulk Approve-all/Reject-all for pending reviews**, and **two
+modal-portal UI fixes** (Log-a-Print + Add-asset dialogs no longer covered by the Share card).
+Previous release `v0.7.1` was the optional nginx TLS + base-image bump.
 
-> **⏳ RELEASE IN FLIGHT — finish the cut before new work.** Next action is the human's:
-> **(1)** wait for PR #43 CI green → **(2)** merge to `main` → **(3)** wait for the push-to-`main`
-> "Build and publish Docker images" run to publish `:latest`/`:0.7.2`/`:0` → **(4)** run
-> `/release-cut 0.7.2` to tag + publish the GitHub release. Until the cut, **`dev` is AHEAD of
-> `main`** by the 0.7.2 commits. After the cut, next pickup is a roadmap **choice** (see "Next
-> phases"): (a) **automatic Let's Encrypt/ACME** ([#41](https://github.com/crzykidd/partfolder3d/issues/41)),
-> or (b) **bulk move-assets UI** (#25 follow-up) — both need an owner call.
+> **⏭️ NO RELEASE IN FLIGHT, no forced next task.** `dev` is ahead of `main` only by this
+> startnewsession refresh (rides the next PR). **Owner op pending:** once prod pulls `:latest`, clear
+> the **405 pending reviews** via the new **Reject all** button on `/admin/reviews`. Next build pickup
+> is a roadmap **choice** (see "Next phases"): (a) **automatic Let's Encrypt/ACME**
+> ([#41](https://github.com/crzykidd/partfolder3d/issues/41)), or (b) **bulk move-assets UI**
+> (#25 follow-up) — both need an owner call.
 
 ## Current state
 
-- **`v0.7.2` IN FLIGHT** (PR #43 open, `dev` ahead of `main`) — three things, all merged onto `dev`
-  and verified (`make verify`: backend 926 pass, frontend build clean):
+- **Latest release `v0.7.2`** (2026-07-23, on `main`; `:latest`/`:0.7.2`/`:0` published) — three
+  things, verified (`make verify`: backend 926 pass, frontend build clean):
   - **Reconcile corruption-vs-legit-edit fix** (`fix:` `0b4882c`). `_behavior_re_render` is now the
     single classifier for a changed model file: **newer mtime + still parses → legitimate edit**
     (adopt new hash/mtime/size baseline, re-render, NO Issue); **newer mtime + unparseable →
@@ -89,8 +89,7 @@ covered by the Share card). Previous release `v0.7.1` was the optional nginx TLS
   Printables/MakerWorld — deferred from #27). Partial analysis of very large 3MFs
   (streaming/decimation) if ever wanted. Prinnit's `/designs/<sub>` returns the designer's whole
   catalog (~1.2 MB) to get one design — fine today, but revisit for a lighter path if it ever slows.
-- **Next release: v0.7.2 is mid-cut** — finish PR #43 → merge → publish → `/release-cut 0.7.2`
-  (see the in-flight banner up top) BEFORE starting a new `/release-prep`. Standing gotchas: CodeQL on big
+- **Next release = `/release-prep <next>` when a batch is ready** (v0.7.2 is fully cut). Standing gotchas: CodeQL on big
   diffs surfaces pre-existing alerts (`sanitize_for_log` real ones; dismiss path-injection FPs with
   existing `resolve()`+`is_relative_to()` barriers); transient pip-download timeouts in the Image
   build check — just re-run the failed job; the local `verify-frontend` gate can flake (waitFor
