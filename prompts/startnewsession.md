@@ -6,25 +6,42 @@ It is NOT a full reference: durable rules live in `CLAUDE.md`, the module map + 
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
 "Current state" + "Next phases" before every `/clear`.
 
-**Last updated:** 2026-07-23 — **`v0.7.2` RELEASED.** PR [#43](https://github.com/crzykidd/partfolder3d/pull/43)
-merged to `main`, tag `v0.7.2` cut, GitHub release published, and the `release`-triggered "Build and
-publish Docker images" run fired — prod images publishing `:latest`/`:0.7.2`/`:0` for all three
-(backend/frontend/nginx). This release bundled: a **reconcile corruption-vs-legit-edit fix**
-(in-place `.3mf`/mesh re-saves no longer flagged as `corruption`; `.3mf` newly covered by the
-re-render/hash-adoption path), **bulk Approve-all/Reject-all for pending reviews**, and **two
-modal-portal UI fixes** (Log-a-Print + Add-asset dialogs no longer covered by the Share card).
-Previous release `v0.7.1` was the optional nginx TLS + base-image bump.
+**Last updated:** 2026-07-24 — **`v0.7.4` RELEASED.** Tag `v0.7.4` cut on `main`, GitHub release
+published, `release`-triggered "Build and publish Docker images" green — prod images
+`:latest`/`:0.7.4`/`:0` for all three (backend/frontend/nginx). **v0.7.4 fixes the "MakerWorld
+import shows images in the wizard but the committed item saves none" bug:** the `bblmw.com` CDN now
+serves some gallery PNGs as `application/octet-stream`, which the commit-time image download rejected
+(`image/*`-only) — fix trusts the payload's magic bytes (`sniff_image_ext`). **`v0.7.3`** (cut just
+before) was the diagnostic logging that found it. **NOTE:** v0.7.3's PR merged but it was **never
+tagged** — `main` advanced to 0.7.4 before the cut, so only `v0.7.4` is a tag/release (the `[0.7.3]`
+CHANGELOG compare link won't resolve — harmless; optional one-line doc fix outstanding).
 
-> **⏭️ NO RELEASE IN FLIGHT, no forced next task.** `dev` is ahead of `main` only by this
-> startnewsession refresh (rides the next PR). **Owner op pending:** once prod pulls `:latest`, clear
-> the **405 pending reviews** via the new **Reject all** button on `/admin/reviews`. Next build pickup
-> is a roadmap **choice** (see "Next phases"): (a) **automatic Let's Encrypt/ACME**
-> ([#41](https://github.com/crzykidd/partfolder3d/issues/41)), or (b) **bulk move-assets UI**
-> (#25 follow-up) — both need an owner call.
+> **⏭️ NO RELEASE IN FLIGHT, no forced next task.** `dev` == `main` apart from this startnewsession
+> refresh (rides the next PR). Next build pickup is a roadmap **choice** (see "Next phases"):
+> (a) **automatic Let's Encrypt/ACME** ([#41](https://github.com/crzykidd/partfolder3d/issues/41)),
+> or (b) **bulk move-assets UI** (#25 follow-up) — both need an owner call. Optional tidy-up:
+> repoint the `[0.7.4]` CHANGELOG compare link to `v0.7.2...v0.7.4` (since v0.7.3 is untagged).
 
 ## Current state
 
-- **Latest release `v0.7.2`** (2026-07-23, on `main`; `:latest`/`:0.7.2`/`:0` published) — three
+- **Latest release `v0.7.4`** (2026-07-24, on `main`; `:latest`/`:0.7.4`/`:0` published) —
+  **fix: scraped images served as `application/octet-stream` are now saved** (`fix:` `acef0c9`;
+  `make verify-backend` 930 pass). MakerWorld's `bblmw.com` CDN began returning some gallery PNGs
+  (dated filenames, e.g. `design/2025-08-16_*.png`) with a generic octet-stream Content-Type; the
+  import-commit download (`_commit_session_inner`, `routers/import_sessions/commit.py`) enforced an
+  `image/*`-only content-type via `guarded_fetch` and rejected every one → the wizard showed the
+  images (the browser renders by content, ignoring the header) but the committed item had none. New
+  `sniff_image_ext` (`routers/import_sessions/sessions.py`) recognizes PNG/JPEG/GIF/WEBP magic
+  numbers; commit now allows octet-stream through the guard but only writes when the bytes are a
+  real image — non-images are skipped. Fixes prinnit + any mislabeling CDN too. NOT egress/NFS/the
+  prinnit code (all earlier hypotheses, disproven on the live stack).
+- **`v0.7.3`** (2026-07-24; PR [#44](https://github.com/crzykidd/partfolder3d/pull/44) merged but
+  **never tagged** — `main` advanced to v0.7.4 before the cut, so only v0.7.4 is a tag/release) —
+  **per-image commit diagnostic logging** (`feat:` `c295834`) that pinpointed the octet-stream cause
+  from prod backend logs: a start line, the concrete per-image failure reason + exception type
+  (previously a bare "failed to download image" that swallowed the cause), a missing-staged-file
+  warning, and a saved/failed/elapsed summary.
+- **`v0.7.2`** (2026-07-23, on `main`; `:latest`/`:0.7.2`/`:0` published) — three
   things, verified (`make verify`: backend 926 pass, frontend build clean):
   - **Reconcile corruption-vs-legit-edit fix** (`fix:` `0b4882c`). `_behavior_re_render` is now the
     single classifier for a changed model file: **newer mtime + still parses → legitimate edit**
