@@ -2,6 +2,43 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-25 — `.scad` header prefill: keep the title line verbatim; gate the AI action on both a staged source file and provider availability
+
+**Context:** `prompts/2026-07-25-scad-ai-describe.md` — deterministic title/description
+prefill from a `.scad`'s leading comment header on import, plus an additive
+"Describe from SCAD" AI action mirroring `ai/cleanup-description`.
+
+- **`extract_scad_header` keeps the title line exactly as written** (including any
+  parenthetical, e.g. `SILICA-SOCK CLAMP  (for 3" / 76mm dust hose)`) rather than
+  trimming at the first double-space or truncating the parenthetical — both were
+  offered as options in the prompt. Verbatim is simpler, fully deterministic, and
+  the field stays user-editable in the wizard, so there's no real cost to keeping
+  the whole line.
+- **Decorative banner-rule lines (`====`, `----`, `####`, blank) are dropped
+  entirely**, not converted to a blank separator — this keeps the description
+  compact and avoids a stray blank line exactly where a banner used to sit. Genuine
+  blank comment lines elsewhere in the header (paragraph breaks) are preserved.
+- **The prefill hook runs unconditionally in `process_import_session`** (not gated
+  on `source_type == upload`) — it only takes effect when a staged `ImportSessionFile`
+  with `role == "source"` exists AND the scrape/sidecar path hasn't already produced
+  a title/description in this same run. In practice this only fires for upload
+  sessions (URL/inbox sessions don't stage files this way), but gating on the actual
+  staged-file query is simpler than special-casing `source_type` and stays correct
+  if that ever changes. The existing `if not session.suggested_title / description`
+  guards at the "Update session" step still ensure a user-entered value is never
+  overwritten.
+- **The AI `ai/describe-scad` endpoint reads the staged file directly off disk**
+  (capped at 512 KB via `_SCAD_READ_CAP_BYTES`) rather than reusing any cached text
+  from the prefill step — the two are decoupled by design (prefill is deterministic
+  and free; the AI action is opt-in and may run long after import, e.g. after the
+  header-based prefill was edited away).
+- **The "Describe from SCAD" button in `TitleStep.tsx` is hidden (not just
+  disabled) when there's no staged `.scad` or no AI provider** — unlike the
+  existing "Clean up (AI)" / "Summarize (AI)" buttons, which stay visible-but-disabled
+  with a "No AI provider configured" hint. Describe-from-SCAD is only ever relevant
+  when a `.scad` is present, so hiding it (per the prompt's explicit design) avoids
+  a confusing always-visible button on every non-SCAD import.
+
 ## 2026-07-23 — Reviews bulk approve/reject: single bulk `UPDATE ... RETURNING`, per-row enqueue
 
 **Context:** `prompts/2026-07-23-reviews-bulk-approve-reject.md` asked for

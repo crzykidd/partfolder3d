@@ -909,6 +909,43 @@ async def process_import_session(ctx: dict, session_id: str) -> None:
                         raw_tags = list(sc.tags) + raw_tags
                     break  # Use first sidecar found
 
+            # ---- .scad header prefill (deterministic, no AI) ----
+            # Self-designed items (typically upload sessions) commonly ship a
+            # rich leading comment header in their .scad — default to it when
+            # nothing else (scrape/sidecar) has already supplied a title or
+            # description. Guarded again below at "Update session" so a value
+            # the user already provided is never overwritten. If multiple
+            # .scad files are staged, use the first by insertion order — kept
+            # simple; see docs/decisions.md.
+            if not scraped_title or not scraped_description:
+                from pathlib import Path  # noqa: PLC0415
+
+                from app.models.import_session import ImportSessionFile  # noqa: PLC0415
+                from app.storage.scad_meta import extract_scad_header  # noqa: PLC0415
+
+                scad_result = await db.execute(
+                    sa.select(ImportSessionFile)
+                    .where(
+                        ImportSessionFile.session_id == sid,
+                        ImportSessionFile.role == "source",
+                    )
+                    .order_by(ImportSessionFile.id)
+                )
+                scad_file = scad_result.scalars().first()
+                if scad_file is not None:
+                    try:
+                        scad_text: str | None = Path(scad_file.staged_path).read_text(
+                            encoding="utf-8", errors="replace"
+                        )
+                    except OSError:
+                        scad_text = None
+                    if scad_text:
+                        header = extract_scad_header(scad_text)
+                        if not scraped_title and header["title"]:
+                            scraped_title = header["title"]
+                        if not scraped_description and header["description"]:
+                            scraped_description = header["description"]
+
             # ---- Tag reconciliation ----
             from app.routers.import_sessions import reconcile_tags  # noqa: PLC0415
 

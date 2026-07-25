@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { FileCode2 } from 'lucide-react'
 import * as api from '@/lib/api'
 import { extractDomain } from '@/lib/import-utils'
 import { safeHref } from '@/lib/utils'
@@ -40,6 +41,7 @@ export function TitleStep({ session, onNext }: TitleStepProps) {
   const [aiStatus, setAiStatus] = useState<string | null>(null)
 
   const domain = session.source_url ? extractDomain(session.source_url) : null
+  const hasScadFile = session.files.some((f) => f.role === 'source')
 
   const { data: siteCap } = useQuery({
     queryKey: ['site-cap', domain],
@@ -115,6 +117,25 @@ export function TitleStep({ session, onNext }: TitleStepProps) {
     },
   })
 
+  const describeScadMutation = useMutation({
+    mutationFn: () =>
+      api.aiDescribeScad(session.id, { title: title.trim() || null }),
+    onSuccess: (result) => {
+      setProviderAvailable(result.provider_available)
+      if (!result.provider_available) return
+      if (result.error) {
+        setAiStatus(`Error: ${result.error}`)
+        setTimeout(() => setAiStatus(null), 3000)
+        return
+      }
+      if (result.text) setAiDescText(result.text)
+    },
+    onError: (err) => {
+      setAiStatus(`Error: ${err instanceof Error ? err.message : 'Request failed'}`)
+      setTimeout(() => setAiStatus(null), 3000)
+    },
+  })
+
   const handleNext = () => {
     setError(null)
     if (!title.trim()) {
@@ -125,7 +146,9 @@ export function TitleStep({ session, onNext }: TitleStepProps) {
   }
 
   const noProvider = providerAvailable === false
-  const aiPending = cleanupMutation.isPending || summarizeMutation.isPending
+  const aiPending =
+    cleanupMutation.isPending || summarizeMutation.isPending || describeScadMutation.isPending
+  const showDescribeScad = hasScadFile && providerAvailable === true
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -179,6 +202,39 @@ export function TitleStep({ session, onNext }: TitleStepProps) {
           onFocus={onAuroraFocus}
           onBlur={onAuroraBlur}
         />
+
+        {/* Describe from SCAD — shown whenever the session has a staged .scad,
+            regardless of whether a description is already present (it's the
+            way to fill an empty one). */}
+        {showDescribeScad && (
+          <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              disabled={aiPending}
+              onClick={() => {
+                setAiStatus(null)
+                setAiDescText(null)
+                describeScadMutation.mutate()
+              }}
+              style={{
+                ...AURORA_BTN_GHOST_SM,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                opacity: aiPending ? 0.4 : 1,
+                cursor: aiPending ? 'not-allowed' : 'pointer',
+              }}
+              onMouseEnter={(e) => { if (!aiPending) (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
+            >
+              <FileCode2 size={13} />
+              {describeScadMutation.isPending ? 'Describing…' : 'Describe from SCAD'}
+            </button>
+            {!description.trim() && aiStatus && (
+              <span style={{ fontSize: 11, color: 'var(--aurora-danger)' }}>{aiStatus}</span>
+            )}
+          </div>
+        )}
 
         {/* AI description buttons */}
         {description.trim() && (

@@ -23,6 +23,7 @@ Endpoints
 POST /api/import-sessions/{id}/ai/suggest-tags
 POST /api/import-sessions/{id}/ai/cleanup-description
 POST /api/import-sessions/{id}/ai/summarize
+POST /api/import-sessions/{id}/ai/describe-scad
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -46,6 +48,11 @@ from ..models.user import User, UserRole
 log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["ai"])
+
+# Guard against reading an absurdly large staged file into memory for the
+# describe-scad action. .scad source is normally tiny (a few KB); this is a
+# generous few-hundred-KB cap, not a realistic size.
+_SCAD_READ_CAP_BYTES = 512 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -417,6 +424,91 @@ async def ai_summarize_scrape(
             provider_str=provider.provider.value,
             model_str=provider.model,
             action="summarize",
+            input_tokens=ai_result.input_tokens,
+            output_tokens=ai_result.output_tokens,
+            user_id=user.id,
+            success=ai_result.error is None,
+        )
+    except Exception:
+        log.exception("Usage recording raised outside _record_usage — swallowed")
+
+    return AiTextOut(
+        text=ai_result.text,
+        provider_available=True,
+        error=ai_result.error,
+    )
+
+
+@router.post(
+    "/api/import-sessions/{session_id}/ai/describe-scad",
+    response_model=AiTextOut,
+)
+async def ai_describe_scad(
+    session_id: str,
+    user: Annotated[User, Depends(get_current_user)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    body: AiDescriptionRequest | None = None,
+) -> AiTextOut:
+    """Describe a design from its whole staged `.scad` source using AI.
+
+    Sends the **whole** OpenSCAD source (capped, see ``_SCAD_READ_CAP_BYTES``)
+    to the configured provider and asks for a concise, user-facing description
+    (purpose, notable print/assembly notes) — never the code itself. Returns
+    the same response shape as `cleanup-description` so the wizard can reuse
+    `AiTextPreview` verbatim.
+
+    400 when the session has no staged `.scad`/`source` file. ``body.title``
+    (when provided) takes precedence over the persisted session value, same
+    as the other AI actions.
+    """
+    from ..ai.client import describe_scad, get_enabled_provider  # noqa: PLC0415
+
+    provider = await get_enabled_provider(db)
+    if provider is None:
+        return AiTextOut(provider_available=False)
+
+    session = await _load_session_owned(session_id, db, user)
+
+    scad_file = next(
+        (f for f in (session.files or []) if f.role == "source"), None
+    )
+    if scad_file is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session has no staged .scad source file.",
+        )
+
+    try:
+        raw_bytes = Path(scad_file.staged_path).read_bytes()[:_SCAD_READ_CAP_BYTES]
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not read the staged .scad file.",
+        ) from exc
+    scad_code = raw_bytes.decode("utf-8", errors="replace")
+
+    title = (
+        body.title
+        if body is not None and body.title is not None
+        else (session.confirmed_title or session.suggested_title or "")
+    )
+
+    # Run in a thread so a slow provider only blocks this request, not the event loop.
+    ai_result = await asyncio.to_thread(
+        describe_scad,
+        provider=provider,
+        scad_code=scad_code,
+        title=title,
+    )
+
+    # Record usage — swallowed on failure (belt-and-suspenders outer guard).
+    try:
+        await _record_usage(
+            db,
+            provider_str=provider.provider.value,
+            model_str=provider.model,
+            action="describe_scad",
             input_tokens=ai_result.input_tokens,
             output_tokens=ai_result.output_tokens,
             user_id=user.id,

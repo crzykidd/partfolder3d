@@ -28,6 +28,9 @@ prefix appears only on git tags and GitHub releases.
   for editing / preview / local STL export). `.scad` is now recognized as a
   design-source file (new `source` file role) and accepted on upload. Optional
   server-side rendering of `.scad` is tracked separately (#46).
+- Importing an OpenSCAD `.scad` now pre-fills the item title and description
+  from the file's header comment, with an optional "Describe from SCAD" AI
+  action on the description step.
 
 ## [0.7.4] — 2026-07-23
 

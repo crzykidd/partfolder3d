@@ -200,6 +200,26 @@ def _build_summarize_prompt(scraped_text: str, title: str) -> tuple[str, str]:
     return system, user
 
 
+# Cap on the .scad source sent to the AI — .scad are normally tiny; this just
+# guards against an absurd upload (a "few hundred KB" per the design spec).
+MAX_SCAD_CHARS = 200_000
+
+
+def _build_describe_scad_prompt(scad_code: str, title: str) -> tuple[str, str]:
+    system = (
+        "You are a 3D printing asset librarian. You are given the full OpenSCAD (.scad) "
+        "source of a 3D-printable design. Write a concise, user-facing description of the "
+        "design (2–6 sentences): what it is, its purpose, and any notable print/assembly "
+        "notes if present in the code or its comments. "
+        "Do NOT reproduce or quote the OpenSCAD code itself. "
+        "Return ONLY the description text — no JSON, no markdown, no code fences."
+    )
+    truncated = scad_code[:MAX_SCAD_CHARS]
+    title_line = f"Design title: {title}\n\n" if title else ""
+    user = f"{title_line}OpenSCAD source:\n{truncated}"
+    return system, user
+
+
 # ---------------------------------------------------------------------------
 # Real SDK callers (used when injectable caller is None)
 # ---------------------------------------------------------------------------
@@ -478,4 +498,33 @@ def summarize_scrape(
         )
     except Exception as exc:
         log.warning("AI scrape summarization failed: %s", exc)
+        return AiTextResult(error=str(exc))
+
+
+def describe_scad(
+    provider: AiProvider,
+    scad_code: str,
+    title: str,
+) -> AiTextResult:
+    """Describe a 3D design from its whole OpenSCAD (.scad) source.
+
+    The result is a **draft** — the caller must present it to the user.
+    Never auto-applies. Returns AiTextResult with error on failure.
+    Token counts in the result allow callers to record usage.
+    """
+    if not scad_code or not scad_code.strip():
+        return AiTextResult(error="No .scad source to describe")
+
+    system, user_msg = _build_describe_scad_prompt(scad_code, title)
+    try:
+        call_result = _dispatch(provider, system, user_msg, max_tokens=512)
+        if call_result is None or call_result.text is None:
+            return AiTextResult(error="No response from AI provider")
+        return AiTextResult(
+            text=call_result.text.strip(),
+            input_tokens=call_result.input_tokens,
+            output_tokens=call_result.output_tokens,
+        )
+    except Exception as exc:
+        log.warning("AI describe-from-SCAD failed: %s", exc)
         return AiTextResult(error=str(exc))
