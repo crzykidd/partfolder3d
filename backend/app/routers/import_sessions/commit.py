@@ -69,7 +69,7 @@ from .schemas import (
     CommitOptions,
     CommitResponse,
 )
-from .sessions import _resolve_import_library, _scraped_image_ext
+from .sessions import _resolve_import_library, _scraped_image_ext, sniff_image_ext
 
 log = logging.getLogger(__name__)
 
@@ -256,32 +256,53 @@ async def _commit_session_inner(
                 # image only — it must not crash the whole commit.
                 images_dir = item_dir / "images"
                 images_dir.mkdir(exist_ok=True)
+                # Allow application/octet-stream through the fetch guard: some
+                # CDNs (e.g. MakerWorld's bblmw.com) serve valid images with a
+                # generic octet-stream Content-Type. We then verify the payload
+                # is genuinely an image by its magic number below, so a
+                # mislabeled non-image is still rejected.
                 r = _sessions.guarded_fetch(
                     si.path,
                     max_bytes=settings.SCRAPE_IMAGE_MAX_MB * 1024 * 1024,
                     timeout=settings.SCRAPE_TIMEOUT,
-                    allowed_content_types=("image/",),
+                    allowed_content_types=("image/", "application/octet-stream"),
                 )
                 if r.status_code == 200:
-                    ext = _scraped_image_ext(si.path, r.content_type)
-                    img_name = f"scraped_{img_order:02d}{ext}"
-                    img_dest = images_dir / img_name
-                    img_dest.write_bytes(r.content)
-                    rel_path = str(img_dest.relative_to(item_dir))
-                    img_obj = Image(
-                        item_id=item.id,
-                        path=rel_path,
-                        source=ImageSource.scraped,
-                        is_default=si.is_default,
-                        order=img_order,
-                    )
-                    db.add(img_obj)
-                    img_order += 1
-                    n_img_ok += 1
-                    log.debug(
-                        "commit: saved scraped image %s (%d bytes) for item %s",
-                        img_name, len(r.content), item.id,
-                    )
+                    # Trust the bytes over the header: prefer the sniffed
+                    # magic-number extension; fall back to Content-Type/URL only
+                    # when the response is a declared image/*. A non-image
+                    # octet-stream payload (sniff fails, header not image/*) is
+                    # skipped rather than written to disk as a fake image.
+                    ct = r.content_type or ""
+                    sniffed_ext = sniff_image_ext(r.content)
+                    if sniffed_ext is None and not ct.startswith("image/"):
+                        n_img_fail += 1
+                        log.warning(
+                            "commit: fetched non-image content for %s "
+                            "(content-type %r, %d bytes), skipping",
+                            _safe_img_url, ct, len(r.content),
+                        )
+                    else:
+                        ext = sniffed_ext or _scraped_image_ext(si.path, ct)
+                        img_name = f"scraped_{img_order:02d}{ext}"
+                        img_dest = images_dir / img_name
+                        img_dest.write_bytes(r.content)
+                        rel_path = str(img_dest.relative_to(item_dir))
+                        img_obj = Image(
+                            item_id=item.id,
+                            path=rel_path,
+                            source=ImageSource.scraped,
+                            is_default=si.is_default,
+                            order=img_order,
+                        )
+                        db.add(img_obj)
+                        img_order += 1
+                        n_img_ok += 1
+                        log.debug(
+                            "commit: saved scraped image %s (%d bytes, ct=%r) "
+                            "for item %s",
+                            img_name, len(r.content), ct, item.id,
+                        )
                 else:
                     n_img_fail += 1
                     log.warning(

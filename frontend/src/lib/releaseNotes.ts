@@ -18,6 +18,15 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: Record<string, ReleaseNote> = {
+  '0.7.4': {
+    title: "What's New in v0.7.4",
+    bullets: [
+      'MakerWorld imports save their gallery images again — the CDN had started serving some images as application/octet-stream, which the importer rejected (the wizard showed them, but the committed item had none)',
+      'The importer now verifies the actual image bytes (PNG/JPEG/GIF/WEBP) and saves them regardless of a mislabeled Content-Type; non-image payloads are still skipped',
+      'Same fix applies to other scraped sources (e.g. prinnit) whose CDN mislabels image content-types',
+    ],
+    githubReleaseUrl: 'https://github.com/crzykidd/partfolder3d/releases/tag/v0.7.4',
+  },
   '0.7.3': {
     title: "What's New in v0.7.3",
     bullets: [
