@@ -20,6 +20,8 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.7.5] — 2026-07-25
+
 ### Added
 
 - View an item's OpenSCAD `.scad` source in-app — a **Show SCAD** action on the
@@ -1304,7 +1306,8 @@ detail in this one file. (An earlier plan to archive closed minor series into
 <!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
      earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
 
-[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.7.4...HEAD
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.7.5...HEAD
+[0.7.5]: https://github.com/crzykidd/partfolder3d/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/crzykidd/partfolder3d/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/crzykidd/partfolder3d/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/crzykidd/partfolder3d/compare/v0.7.1...v0.7.2

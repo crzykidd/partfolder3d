@@ -18,6 +18,16 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: Record<string, ReleaseNote> = {
+  '0.7.5': {
+    title: "What's New in v0.7.5",
+    bullets: [
+      'OpenSCAD .scad files are now a first-class design source — a "Show SCAD" button on the item opens a read-only viewer to copy or download the code',
+      'Open a .scad prefilled in the OpenSCAD web playground (ochafik.com/openscad2) to edit, preview, and export an STL',
+      'Importing a .scad auto-fills the item title and description from the file\'s header comment',
+      'Optional "Describe from SCAD" AI action on the description step summarizes the model from its source',
+    ],
+    githubReleaseUrl: 'https://github.com/crzykidd/partfolder3d/releases/tag/v0.7.5',
+  },
   '0.7.4': {
     title: "What's New in v0.7.4",
     bullets: [
