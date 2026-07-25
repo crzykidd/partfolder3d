@@ -130,6 +130,46 @@ async def test_upload_file_creates_row_and_file(
 
 
 @pytest.mark.asyncio
+async def test_upload_file_scad_accepted_as_source_role(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+) -> None:
+    """POST /api/items/{key}/files accepts .scad and classifies it role='source'.
+
+    Previously .scad was rejected (not in _ALLOWED_FILE_EXTENSIONS); it is now a
+    recognized design-source format (v1: view/copy/download/playground only).
+    """
+    csrf = await _setup_and_login(client, tmp_path)
+    _, item = await _create_library_and_item(client, tmp_path, csrf)
+    item_key = item["key"]
+    item_dir = Path(item["dir_path"])
+
+    scad_bytes = b"cube([10, 10, 10]);\n"
+    resp = await client.post(
+        f"/api/items/{item_key}/files",
+        files={"file": ("part.scad", io.BytesIO(scad_bytes), "application/octet-stream")},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert data["path"] == "part.scad"
+    assert data["role"] == "source"
+    assert data["size"] == len(scad_bytes)
+
+    # Verify DB row
+    result = await db_session.execute(
+        select(File).where(File.item_id == item["id"], File.path == "part.scad")
+    )
+    row = result.scalar_one_or_none()
+    assert row is not None
+    assert row.role == FileRole.source
+
+    # Verify file on disk
+    assert (item_dir / "part.scad").exists()
+
+
+@pytest.mark.asyncio
 async def test_upload_file_rejects_unsupported_extension(
     client: AsyncClient,
     tmp_path: Path,

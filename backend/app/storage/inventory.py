@@ -8,6 +8,7 @@ Role inference (docs/sidecar-schema.md §1 + PRD §4):
 - Files inside prints/       with .gcode/.gco extension → gcode
 - Files inside prints/       with photo extensions      → photo
 - Files at any depth with model extensions             → model
+- Files at any depth with source extensions (.scad)    → source
 - Files with .zip extension                            → zip
 - Anything else                                        → other
 
@@ -43,6 +44,10 @@ PHOTO_EXTENSIONS = frozenset({
 
 GCODE_EXTENSIONS = frozenset({".gcode", ".gco", ".bgcode"})
 
+# Design-source files (v1: OpenSCAD only). Kept distinct from MODEL_EXTENSIONS —
+# a .scad is source, not a printable/mesh asset.
+SOURCE_EXTENSIONS = frozenset({".scad"})
+
 
 # ---------------------------------------------------------------------------
 # Role inference
@@ -71,6 +76,8 @@ def infer_role(relative_path: str) -> FileRole:
 
     if ext in MODEL_EXTENSIONS:
         return FileRole.model
+    if ext in SOURCE_EXTENSIONS:
+        return FileRole.source
     if ext == ".zip":
         return FileRole.zip
     if ext in PHOTO_EXTENSIONS:

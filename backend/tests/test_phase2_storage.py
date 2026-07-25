@@ -464,6 +464,10 @@ def test_inventory_force_rehash(tmp_path: Any) -> None:
     ("project.zip", FileRole.zip),
     ("notes.txt", FileRole.other),
     ("subdir/model.stl", FileRole.model),  # model at any depth
+    ("part.scad", FileRole.source),
+    ("subdir/part.scad", FileRole.source),  # source at any depth
+    ("renders/part.scad", FileRole.render),  # directory rules win over extension
+    ("images/part.scad", FileRole.image),  # directory rules win over extension
 ])
 def test_infer_role(path: str, expected_role: FileRole) -> None:
     assert infer_role(path) == expected_role

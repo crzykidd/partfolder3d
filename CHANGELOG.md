@@ -20,6 +20,15 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Added
+
+- View an item's OpenSCAD `.scad` source in-app — a **Show SCAD** action on the
+  item's details card opens a read-only viewer with **Copy**, **Download**, and
+  **Open in OpenSCAD Playground** (opens the code prefilled in the web playground
+  for editing / preview / local STL export). `.scad` is now recognized as a
+  design-source file (new `source` file role) and accepted on upload. Optional
+  server-side rendering of `.scad` is tracked separately (#46).
+
 ## [0.7.3] — 2026-07-23
 
 ### Changed

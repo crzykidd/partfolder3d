@@ -1,19 +1,27 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Maximize2, X } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Copy, Download, ExternalLink, FileCode2, Maximize2, X } from 'lucide-react'
 
 import * as api from '@/lib/api'
 import { safeHref } from '@/lib/utils'
+import { playgroundUrl } from '@/lib/openscadPlayground'
 
-import { AURORA_CARD, formatDate } from './styles'
+import { AURORA_BTN_GHOST, AURORA_CARD, formatBytes, formatDate } from './styles'
 
 // ---------------------------------------------------------------------------
 // Item metadata card (right column of hero grid)
 // Includes: title, creator, tags, source/license, modified badge + override,
-// description, and timestamps.
+// description, Show SCAD (read-only source viewer), and timestamps.
 // ---------------------------------------------------------------------------
+
+/**
+ * Size cap for inline .scad preview — a smaller cap than the 3D-viewer's
+ * BROWSER_PREVIEW_MAX_MB since this is a plain-text read, not a mesh render.
+ * Above this, the modal skips the fetch and offers Download only.
+ */
+const SCAD_PREVIEW_MAX_MB = 5
 
 export interface ItemMetadataProps {
   item: api.ItemDetail
@@ -26,6 +34,13 @@ export function ItemMetadata({ item, itemKey, isOwnerOrAdmin }: ItemMetadataProp
   const [descExpanded, setDescExpanded] = useState(false)
   // A long description gets a capped, scrollable box + an "Expand" modal.
   const descLong = (item.description?.length ?? 0) > 280
+
+  // "Show SCAD" — an OpenSCAD design-source file (role='source'; fallback to
+  // extension in case an older row predates the source role migration).
+  const scadFile = item.files.find(
+    (f) => f.role === 'source' || f.path.toLowerCase().endsWith('.scad'),
+  )
+  const [scadModalOpen, setScadModalOpen] = useState(false)
 
   // Phase 15: manual modified-override mutation
   const overrideMutation = useMutation({
@@ -132,6 +147,26 @@ export function ItemMetadata({ item, itemKey, isOwnerOrAdmin }: ItemMetadataProp
               <span style={{ color: 'var(--aurora-text-dim)' }}>{item.license}</span>
             </>
           )}
+        </div>
+      )}
+
+      {/* Show SCAD — only when the item has an OpenSCAD design-source file */}
+      {scadFile && (
+        <div>
+          <button
+            onClick={() => setScadModalOpen(true)}
+            style={{
+              ...AURORA_BTN_GHOST,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 12,
+              padding: '5px 12px',
+            }}
+          >
+            <FileCode2 size={13} />
+            Show SCAD
+          </button>
         </div>
       )}
 
@@ -359,6 +394,248 @@ export function ItemMetadata({ item, itemKey, isOwnerOrAdmin }: ItemMetadataProp
           </div>,
           document.body,
         )}
+
+      {/* Show SCAD modal — read-only source viewer (v1: no editing, no server render) */}
+      {scadFile && (
+        <ShowScadModal
+          open={scadModalOpen}
+          onClose={() => setScadModalOpen(false)}
+          itemKey={itemKey}
+          file={scadFile}
+        />
+      )}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Show SCAD modal
+// ---------------------------------------------------------------------------
+
+interface ShowScadModalProps {
+  open: boolean
+  onClose: () => void
+  itemKey: string
+  file: api.FileOut
+}
+
+function ShowScadModal({ open, onClose, itemKey, file }: ShowScadModalProps) {
+  const [copied, setCopied] = useState(false)
+  const [opening, setOpening] = useState(false)
+  const basename = file.path.split('/').pop() ?? file.path
+  const tooLarge = file.size > SCAD_PREVIEW_MAX_MB * 1024 * 1024
+
+  const { data: code, isLoading, isError } = useQuery({
+    queryKey: ['scad-text', itemKey, file.path],
+    queryFn: () => api.fetchFileText(itemKey, file.path),
+    enabled: open && !tooLarge,
+  })
+
+  // Close on Escape.
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [open, onClose])
+
+  // Reset transient "Copied" state whenever the modal is reopened.
+  useEffect(() => {
+    if (open) setCopied(false)
+  }, [open])
+
+  if (!open) return null
+
+  const handleCopy = async () => {
+    if (!code) return
+    await navigator.clipboard.writeText(code)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  const handleOpenInPlayground = async () => {
+    if (!code) return
+    setOpening(true)
+    try {
+      const url = await playgroundUrl(code, basename)
+      window.open(url, '_blank', 'noopener')
+    } finally {
+      setOpening(false)
+    }
+  }
+
+  return createPortal(
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'rgba(5,13,28,0.80)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
+        padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`SCAD source — ${basename}`}
+        style={{
+          background: 'var(--aurora-card)',
+          border: '1px solid var(--aurora-card-border)',
+          borderRadius: 14,
+          width: '100%',
+          maxWidth: 780,
+          maxHeight: '85vh',
+          display: 'flex',
+          flexDirection: 'column',
+          color: 'var(--aurora-text)',
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            padding: '16px 20px',
+            borderBottom: '1px solid var(--aurora-divider)',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: 15,
+                fontWeight: 700,
+                fontFamily: 'monospace',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {basename}
+            </h2>
+            <span style={{ fontSize: 11, color: 'var(--aurora-muted)' }}>{formatBytes(file.size)}</span>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close SCAD viewer"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--aurora-muted)',
+              padding: 4,
+              display: 'flex',
+              flexShrink: 0,
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1, minHeight: 0 }}>
+          {tooLarge ? (
+            <p style={{ fontSize: 12, color: 'var(--aurora-muted)', margin: 0 }}>
+              This file is larger than {SCAD_PREVIEW_MAX_MB} MB — too large to preview inline.
+              Use Download below to get the full source.
+            </p>
+          ) : isLoading ? (
+            <p style={{ fontSize: 12, color: 'var(--aurora-muted)', margin: 0 }}>Loading…</p>
+          ) : isError ? (
+            <p style={{ fontSize: 12, color: 'var(--aurora-danger)', margin: 0 }}>
+              Failed to load the file's contents.
+            </p>
+          ) : (
+            <pre
+              style={{
+                margin: 0,
+                fontSize: 12,
+                fontFamily: 'monospace',
+                lineHeight: 1.6,
+                color: 'var(--aurora-text-dim)',
+                whiteSpace: 'pre',
+                overflow: 'auto',
+                background: 'var(--aurora-glass)',
+                border: '1px solid var(--aurora-glass-border)',
+                borderRadius: 8,
+                padding: 12,
+              }}
+            >
+              {code}
+            </pre>
+          )}
+        </div>
+
+        {/* Footer actions */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
+            padding: '12px 20px',
+            borderTop: '1px solid var(--aurora-divider)',
+          }}
+        >
+          <button
+            onClick={handleCopy}
+            disabled={!code}
+            style={{
+              ...AURORA_BTN_GHOST,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              opacity: code ? 1 : 0.5,
+              cursor: code ? 'pointer' : 'not-allowed',
+            }}
+          >
+            <Copy size={12} />
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+          <a
+            href={api.fileDownloadUrl(itemKey, file.path)}
+            download
+            style={{
+              ...AURORA_BTN_GHOST,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              textDecoration: 'none',
+            }}
+          >
+            <Download size={12} />
+            Download
+          </a>
+          <button
+            onClick={handleOpenInPlayground}
+            disabled={!code || opening}
+            title="Open this file in the OpenSCAD web playground (editing/preview/STL export)"
+            style={{
+              ...AURORA_BTN_GHOST,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              opacity: code && !opening ? 1 : 0.5,
+              cursor: code && !opening ? 'pointer' : 'not-allowed',
+            }}
+          >
+            <ExternalLink size={12} />
+            {opening ? 'Opening…' : 'Open in OpenSCAD Playground'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }
