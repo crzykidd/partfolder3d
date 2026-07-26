@@ -2,6 +2,47 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-26 — View PDF inline: PDF-only allowlist (extension + magic-number), same-origin `<iframe>` over blob fallback
+
+**Context:** `prompts/done/2026-07-26-view-pdf-inline.md` — let a user view a catalog
+item's `.pdf` file in-app (browser-native viewer) instead of being forced to download it
+first, without pulling in PDF.js or any new dependency.
+
+- **Inline serving is a PDF-only allowlist, not a general "view any file inline" toggle —
+  load-bearing security constraint.** `download_file` (`backend/app/routers/downloads.py`)
+  gained an opt-in `inline=true` query param, but it is only honored when the resolved
+  file is a *real* PDF: `_is_pdf_file` requires BOTH a `.pdf` extension AND a leading
+  `%PDF-` magic number (mirrors the `sniff_image_ext` magic-byte pattern from the v0.7.4
+  MakerWorld fix in `import_sessions/sessions.py` — don't trust the extension alone).
+  Serving arbitrary user-uploaded files inline, same-origin, is an XSS vector: an uploaded
+  `.html` or `.svg` would execute script in the app's own origin and could read the session
+  cookie. Any other file type, or `inline` absent/false, falls through unchanged to the
+  existing `attachment` + `application/octet-stream` response — silently, not an error, so
+  a non-PDF `?inline=true` request just degrades to a normal download rather than breaking.
+  The existing path-traversal containment barrier (`is_relative_to(item_dir)`) is untouched
+  and runs before the PDF check.
+- **Two independent checks, not one.** Extension-only would let a renamed non-PDF (e.g. an
+  uploaded `.html` renamed to `x.pdf`) through; magic-byte-only isn't reached at all unless
+  the extension already matches, so pairing them is cheap (one 5-byte read) and closes both
+  gaps. Covered by an explicit test (`test_file_download_inline_fake_pdf_extension_falls_back`)
+  that gives a `.pdf`-named file non-PDF bytes and asserts it still gets the attachment
+  response.
+- **Frontend: same-origin `<iframe src=".../files/{path}?inline=1">`, not an `apiFetch` →
+  blob → `URL.createObjectURL` fetch.** The backend sets no `X-Frame-Options` or
+  `Content-Security-Policy: frame-ancestors` header, so a same-origin iframe embed isn't
+  blocked, and every other file-serving affordance already on this page (image thumbnails,
+  the 3D viewer's `fileUrl`, the Show-SCAD download link) already relies on a plain,
+  cookie-authenticated URL rather than a manual blob fetch — the iframe approach is the
+  one consistent with that existing pattern. The blob-object-URL approach named as a
+  fallback in the prompt was not needed since nothing blocked the direct iframe embed.
+- **PdfViewerModal mirrors the "Show SCAD" modal chrome exactly**
+  (`frontend/src/pages/item/ItemMetadata.tsx`'s `ShowScadModal`): `createPortal(...,
+  document.body)` per the v0.7.2 modal-portal fix (a sibling card's `backdrop-filter`
+  stacking context can otherwise trap a non-portaled modal's z-index), Escape-to-close, and
+  the same header/body/footer chrome. Kept in `DownloadsPanel.tsx` rather than
+  `ItemMetadata.tsx` since the PDF file itself lives in the file tree the Downloads panel
+  already renders (same reasoning as the existing "View in 3D" button).
+
 ## 2026-07-25 — Server-side OpenSCAD render (#46): generated-asset via FK not a bool, default-ON compile, minimal enqueue trigger, no multiprocessing needed
 
 **Context:** `prompts/done/2026-07-25-server-side-scad-render.md` — optionally compile a

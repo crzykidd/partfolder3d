@@ -50,6 +50,16 @@ prefix appears only on git tags and GitHub releases.
   skip). Out of scope for this first cut: `include`/`use` of external
   libraries (BOSL2 etc.), Customizer parameters, and a manual "re-render"
   UI action (deferred — see `docs/decisions.md`).
+- View a catalog item's `.pdf` files in-app instead of being forced to
+  download them first. A new **View PDF** button in the Downloads panel opens
+  a modal with a browser-native PDF viewer (`<iframe>`, no PDF.js or any new
+  dependency), plus an **Open in new tab** link and the existing **Download**
+  action as a fallback. The file-serving endpoint (`GET
+  /api/items/{key}/files/{path}`) gained an opt-in `inline=true` query param;
+  it is honored **only** for real PDFs (extension + `%PDF-` magic-number
+  check) — every other file type keeps forcing the existing attachment /
+  `application/octet-stream` download, since serving arbitrary user files
+  inline, same-origin, would be an XSS vector.
 
 ## [0.7.5] — 2026-07-25
 

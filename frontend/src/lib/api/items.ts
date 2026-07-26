@@ -543,6 +543,15 @@ export const pollZip = (key: string, bundleId: string): Promise<BundleOut> =>
 export const fileDownloadUrl = (key: string, filePath: string): string =>
   `/api/items/${key}/files/${filePath}`
 
+/**
+ * URL for viewing a single file inline (browser-native viewer) instead of forcing
+ * a download — e.g. an `<iframe src=...>` for a PDF. The backend only honors
+ * `inline` for real PDFs (see `downloads.py`); every other file type falls back to
+ * the normal attachment response, so this is safe to use only for `.pdf` files.
+ */
+export const fileInlineUrl = (key: string, filePath: string): string =>
+  `${fileDownloadUrl(key, filePath)}?inline=1`
+
 /** Fetch a single item file's raw contents as text (e.g. an OpenSCAD .scad source). */
 export const fetchFileText = (key: string, filePath: string): Promise<string> =>
   apiFetchText(fileDownloadUrl(key, filePath))

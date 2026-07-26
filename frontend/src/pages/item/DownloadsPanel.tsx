@@ -15,12 +15,13 @@
  */
 
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, Download, Box, Trash2, Pencil, Upload, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronRight, Download, Box, FileText, Trash2, Pencil, Upload, RefreshCw, X } from 'lucide-react'
 
 import * as api from '@/lib/api'
 import { mapBundleStatus, shouldContinuePolling, type ZipPollStatus } from '@/lib/catalog-utils'
-import { buildFileTree, is3mf, isImagePath, type FileTreeNode, type FileTreeFolder } from '@/lib/file-tree'
+import { buildFileTree, is3mf, isImagePath, isPdfPath, type FileTreeNode, type FileTreeFolder } from '@/lib/file-tree'
 import { ThreeMfPanel } from './ThreeMfPanel'
 import { AURORA_BTN_GHOST, AURORA_BTN_PRIMARY, formatBytes } from './styles'
 
@@ -95,6 +96,199 @@ function ViewIn3DButton({ onView }: { onView?: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
+// View-PDF button
+// ---------------------------------------------------------------------------
+
+function ViewPdfButton({ onView }: { onView: () => void }) {
+  return (
+    <button
+      onClick={onView}
+      title="View PDF"
+      style={{
+        ...AURORA_BTN_GHOST,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 5,
+        fontSize: 11,
+        padding: '4px 10px',
+        cursor: 'pointer',
+      }}
+    >
+      <FileText size={11} />
+      View PDF
+    </button>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// PDF viewer modal — same-origin <iframe>, session cookie authenticates it.
+//
+// Mirrors the "Show SCAD" modal chrome (ItemMetadata.tsx): Escape to close,
+// backdrop, createPortal(..., document.body) per the v0.7.2 modal-portal fix
+// so a sibling card's backdrop-filter stacking context can't trap z-index.
+//
+// The backend only serves an inline (non-attachment) response for real PDFs
+// (extension + %PDF- magic number) — see downloads.py. Every other file type
+// keeps forcing a download, so this iframe embed is safe to point at any file
+// whose path ends in .pdf.
+// ---------------------------------------------------------------------------
+
+interface PdfViewerModalProps {
+  itemKey: string
+  filePath: string
+  onClose: () => void
+}
+
+function PdfViewerModal({ itemKey, filePath, onClose }: PdfViewerModalProps) {
+  const basename = filePath.split('/').pop() ?? filePath
+  const inlineUrl = api.fileInlineUrl(itemKey, filePath)
+
+  // Close on Escape.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  return createPortal(
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'rgba(5,13,28,0.80)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
+        padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`PDF viewer — ${basename}`}
+        style={{
+          background: 'var(--aurora-card)',
+          border: '1px solid var(--aurora-card-border)',
+          borderRadius: 14,
+          width: '100%',
+          maxWidth: 960,
+          height: '85vh',
+          display: 'flex',
+          flexDirection: 'column',
+          color: 'var(--aurora-text)',
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            padding: '16px 20px',
+            borderBottom: '1px solid var(--aurora-divider)',
+          }}
+        >
+          <h2
+            style={{
+              margin: 0,
+              fontSize: 15,
+              fontWeight: 700,
+              fontFamily: 'monospace',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {basename}
+          </h2>
+          <button
+            onClick={onClose}
+            aria-label="Close PDF viewer"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--aurora-muted)',
+              padding: 4,
+              display: 'flex',
+              flexShrink: 0,
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body — the browser's native PDF viewer renders inside the iframe */}
+        <div style={{ flex: 1, minHeight: 0, padding: '12px 20px' }}>
+          <iframe
+            src={inlineUrl}
+            title={`PDF source — ${basename}`}
+            style={{
+              width: '100%',
+              height: '100%',
+              border: '1px solid var(--aurora-glass-border)',
+              borderRadius: 8,
+              background: '#fff',
+            }}
+          />
+        </div>
+
+        {/* Footer actions */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
+            padding: '12px 20px',
+            borderTop: '1px solid var(--aurora-divider)',
+          }}
+        >
+          <a
+            href={inlineUrl}
+            target="_blank"
+            rel="noopener"
+            style={{
+              ...AURORA_BTN_GHOST,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              textDecoration: 'none',
+            }}
+          >
+            <FileText size={12} />
+            Open in new tab
+          </a>
+          <a
+            href={api.fileDownloadUrl(itemKey, filePath)}
+            download
+            style={{
+              ...AURORA_BTN_GHOST,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              textDecoration: 'none',
+            }}
+          >
+            <Download size={12} />
+            Download
+          </a>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+// ---------------------------------------------------------------------------
 // File row — one leaf node in the tree
 // ---------------------------------------------------------------------------
 
@@ -104,6 +298,7 @@ interface FileRowProps {
   depth: number
   isLast: boolean
   onOpenViewer: (filePath: string) => void
+  onOpenPdf: (filePath: string) => void
   isOwner?: boolean
   onDeleteFile?: (fileId: number) => void
   onRenameFile?: (fileId: number, newName: string) => void
@@ -112,7 +307,7 @@ interface FileRowProps {
 }
 
 function FileRow({
-  itemKey, file, depth, onOpenViewer,
+  itemKey, file, depth, onOpenViewer, onOpenPdf,
   isOwner, onDeleteFile, onRenameFile, isDeletingId, isRenamingId,
 }: FileRowProps) {
   const [threeMfOpen, setThreeMfOpen] = useState(false)
@@ -124,6 +319,7 @@ function FileRow({
   const basename = file.path.split('/').pop() ?? file.path
   const isImg = isImagePath(file.path)
   const is3mfFile = is3mf(file.path)
+  const isPdf = isPdfPath(file.path)
   const hasAnalysis = file.object_analysis != null
 
   const isThisDeleting = isDeletingId === file.id
@@ -234,6 +430,11 @@ function FileRow({
           {/* View in 3D — passes real handler when preview_3d is true */}
           {file.preview_3d && !renaming && (
             <ViewIn3DButton onView={() => onOpenViewer(file.path)} />
+          )}
+
+          {/* View PDF — inline browser-native viewer */}
+          {isPdf && !renaming && (
+            <ViewPdfButton onView={() => onOpenPdf(file.path)} />
           )}
 
           {/* 3MF expand toggle */}
@@ -373,6 +574,7 @@ interface FolderNodeProps {
   depth: number
   defaultExpanded?: boolean
   onOpenViewer: (filePath: string) => void
+  onOpenPdf: (filePath: string) => void
   isOwner?: boolean
   onDeleteFile?: (fileId: number) => void
   onRenameFile?: (fileId: number, newName: string) => void
@@ -381,7 +583,7 @@ interface FolderNodeProps {
 }
 
 function FolderNode({
-  folder, itemKey, depth, defaultExpanded = true, onOpenViewer,
+  folder, itemKey, depth, defaultExpanded = true, onOpenViewer, onOpenPdf,
   isOwner, onDeleteFile, onRenameFile, isDeletingId, isRenamingId,
 }: FolderNodeProps) {
   // The "images" folder duplicates the carousel above, so start it collapsed.
@@ -431,6 +633,7 @@ function FolderNode({
             itemKey={itemKey}
             depth={depth + 1}
             onOpenViewer={onOpenViewer}
+            onOpenPdf={onOpenPdf}
             isOwner={isOwner}
             onDeleteFile={onDeleteFile}
             onRenameFile={onRenameFile}
@@ -452,6 +655,7 @@ interface TreeNodesProps {
   itemKey: string
   depth: number
   onOpenViewer: (filePath: string) => void
+  onOpenPdf: (filePath: string) => void
   isOwner?: boolean
   onDeleteFile?: (fileId: number) => void
   onRenameFile?: (fileId: number, newName: string) => void
@@ -460,7 +664,7 @@ interface TreeNodesProps {
 }
 
 function TreeNodes({
-  nodes, itemKey, depth, onOpenViewer,
+  nodes, itemKey, depth, onOpenViewer, onOpenPdf,
   isOwner, onDeleteFile, onRenameFile, isDeletingId, isRenamingId,
 }: TreeNodesProps) {
   return (
@@ -474,6 +678,7 @@ function TreeNodes({
             depth={depth}
             defaultExpanded={depth === 0}
             onOpenViewer={onOpenViewer}
+            onOpenPdf={onOpenPdf}
             isOwner={isOwner}
             onDeleteFile={onDeleteFile}
             onRenameFile={onRenameFile}
@@ -491,6 +696,7 @@ function TreeNodes({
               depth={depth}
               isLast={idx === nodes.length - 1}
               onOpenViewer={onOpenViewer}
+              onOpenPdf={onOpenPdf}
               isOwner={isOwner}
               onDeleteFile={onDeleteFile}
               onRenameFile={onRenameFile}
@@ -538,6 +744,9 @@ export function DownloadsSection({
 
   // Viewer state: {filePath, ext} of the currently-open file, or null
   const [viewerFile, setViewerFile] = useState<{ filePath: string; ext: string } | null>(null)
+
+  // PDF viewer modal state: the path of the currently-open PDF, or null
+  const [pdfFile, setPdfFile] = useState<string | null>(null)
 
   // Capture mutation — uploads the viewer blob as a new item image
   const captureMutation = useMutation({
@@ -627,6 +836,9 @@ export function DownloadsSection({
 
   const handleCloseViewer = useCallback(() => setViewerFile(null), [])
 
+  const handleOpenPdf = useCallback((filePath: string) => setPdfFile(filePath), [])
+  const handleClosePdf = useCallback(() => setPdfFile(null), [])
+
   const zipLabel: Record<ZipPollStatus, string> = {
     idle:     'Download all as ZIP',
     queued:   'Queued…',
@@ -654,6 +866,11 @@ export function DownloadsSection({
         </Suspense>
       )}
 
+      {/* PDF viewer modal */}
+      {pdfFile && (
+        <PdfViewerModal itemKey={itemKey} filePath={pdfFile} onClose={handleClosePdf} />
+      )}
+
       {/* File tree */}
       {files.length === 0 ? (
         <p style={{ fontSize: 12, color: 'var(--aurora-muted)', fontStyle: 'italic', margin: 0 }}>
@@ -675,6 +892,7 @@ export function DownloadsSection({
             itemKey={itemKey}
             depth={0}
             onOpenViewer={handleOpenViewer}
+            onOpenPdf={handleOpenPdf}
             isOwner={isOwner}
             onDeleteFile={onDeleteFile}
             onRenameFile={onRenameFile}
