@@ -27,17 +27,18 @@ from fastapi import (
 from fastapi import (
     File as FastAPIFile,
 )
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ...auth.deps import csrf_protect, get_current_user, get_db
-from ...models.file import File
+from ...models.file import File, FileRole
 from ...models.item import Item
 from ...models.user import User
 from ...services.item_helpers import (
     _enqueue_analyze,
     _enqueue_render,
+    _enqueue_scad_compile,
     _write_item_sidecar,
 )
 from ...storage.inventory import hash_file_sha256, infer_role
@@ -153,6 +154,18 @@ async def upload_file(
 
     await _enqueue_analyze(item.id, pool=arq, db=db)
     await _enqueue_render(item.id, pool=arq, db=db, model_extensions=[suffix])
+
+    # Issue #46: uploading a .scad source directly (not via import) — compile it
+    # if this item still has no other printable/mesh asset. Mirrors the
+    # import-commit trigger in routers/import_sessions/commit.py.
+    if role == FileRole.source and suffix == ".scad":
+        existing_model_count = await db.scalar(
+            select(func.count())
+            .select_from(File)
+            .where(File.item_id == item.id, File.role == FileRole.model)
+        )
+        if not existing_model_count:
+            await _enqueue_scad_compile(item.id, pool=arq, db=db)
 
     return FileOut(
         id=f.id,

@@ -156,6 +156,38 @@ class Settings(BaseSettings):
     # ANALYZE_MEM_LIMIT_MB) since it bounds input bytes, not the child's RSS.
     ANALYZE_MAX_3MF_XML_MB: int = 256
 
+    # ---- OpenSCAD server-side render (issue #46) ----
+    # Optionally compiles a self-designed item's .scad SOURCE file into an STL
+    # server-side (openscad -o out.stl in.scad), then feeds the derived STL
+    # through the existing render/analyze/viewer pipeline. Turing-complete
+    # input (loops, allocation, import()/include()) — ALWAYS compiled in an
+    # isolated subprocess (wall-clock timeout + RLIMIT_AS + RLIMIT_CPU + a
+    # scratch workdir), same rigor as render/analyze. Default ON: the compile
+    # is best-effort and fails soft (missing binary / bad include / timeout /
+    # OOM all fall back to "store source, skip preview" — never a crash, never
+    # an Issue) so it is safe to leave on even before the worker image has been
+    # rebuilt with the `openscad` binary (see Dockerfile deps stage).
+    SCAD_RENDER_ENABLED: bool = True
+    # Wall-clock kill timeout (seconds) for a single .scad compile subprocess.
+    # OpenSCAD CSG evaluation of a pathological model (e.g. a runaway loop)
+    # can hang; the child is SIGTERM'd (then SIGKILL'd) after this many seconds.
+    SCAD_RENDER_TIMEOUT_S: int = 120
+    # Per-child virtual-memory bound (MB) for the compile subprocess, enforced
+    # via RLIMIT_AS on the openscad child (preexec_fn, before exec). Mirrors
+    # ANALYZE_MEM_LIMIT_MB's rationale: a bare subprocess alone is not enough —
+    # the container's cgroup OOM-killer can still pick the PARENT worker as
+    # its victim. Never set below 512 MB — the runner enforces that floor.
+    SCAD_RENDER_MEM_LIMIT_MB: int = 2048
+    # Max CPU-seconds (RLIMIT_CPU) for the compile subprocess — a second,
+    # independent bound alongside the wall-clock timeout (a busy-loop CSG
+    # evaluation can burn CPU without necessarily hitting the wall-clock cap
+    # first on a loaded host).
+    SCAD_RENDER_CPU_LIMIT_S: int = 120
+    # Max concurrent .scad compiles, independent of WORKER_MAX_JOBS. OpenSCAD's
+    # CSG/CGAL evaluation is CPU-heavy like server rendering; keep low on a
+    # small host.
+    SCAD_RENDER_CONCURRENCY: int = 1
+
     # ---- Import / Inbox (Phase 5) ----
     # Directory the inbox scanner watches for incoming asset folders.
     # Each direct subdirectory is treated as one pending import.

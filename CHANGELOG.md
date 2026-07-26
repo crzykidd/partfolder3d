@@ -32,6 +32,24 @@ prefix appears only on git tags and GitHub releases.
   setting is on, and a pending badge is shown until an admin approves them.
   Title editing is deferred (renaming triggers an atomic directory move — a
   separate, heavier flow left for a future pass).
+- Optional server-side OpenSCAD render/preview (closes #46). A self-designed
+  item whose only printable is a `.scad` source is now compiled server-side
+  into an STL (`openscad -o out.stl in.scad`, no GUI/GL needed) so it gets an
+  in-app thumbnail, 3D viewer, and mesh stats without the user bringing their
+  own STL — the derived STL flows through the existing render/analyze/viewer
+  pipeline unchanged. The compile always runs in an isolated subprocess
+  (wall-clock timeout + `RLIMIT_AS`/`RLIMIT_CPU` + a scratch workdir), same
+  rigor as mesh render/analyze; any failure (missing `include`/library,
+  timeout, OOM, bad geometry) falls back to "store source, skip preview" —
+  never a crash, never an Issue. The derived STL is recorded as a
+  machine-generated asset linked to its `.scad` source (new
+  `generated_from_file_id` / `generated_source_sha256` columns, migration
+  `0026`) and is excluded from the sidecar and from reconcile's drift checks.
+  New `SCAD_RENDER_*` config knobs (default ON — safe even before a worker
+  image rebuild, since a missing `openscad` binary is just another soft
+  skip). Out of scope for this first cut: `include`/`use` of external
+  libraries (BOSL2 etc.), Customizer parameters, and a manual "re-render"
+  UI action (deferred — see `docs/decisions.md`).
 
 ## [0.7.5] — 2026-07-25
 

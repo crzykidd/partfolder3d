@@ -2,6 +2,78 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-25 — Server-side OpenSCAD render (#46): generated-asset via FK not a bool, default-ON compile, minimal enqueue trigger, no multiprocessing needed
+
+**Context:** `prompts/done/2026-07-25-server-side-scad-render.md` — optionally compile a
+self-designed item's `.scad` source into an STL server-side, feeding it through the
+existing render/analyze/viewer pipeline, deferred companion to the v0.7.5 read-only
+`.scad` viewer.
+
+- **Generated-asset shape: `generated_from_file_id` (self-FK) + `generated_source_sha256`,
+  no separate boolean.** A derived File row's "is this generated?" question is answered
+  entirely by `generated_from_file_id is not None` — a redundant `generated: bool` would
+  just be a second source of truth that could drift from the FK. `generated_source_sha256`
+  (the SOURCE `.scad`'s sha256 at compile time, not the STL's own hash) is the piece that
+  actually earns its keep: it lets a re-run of `compile_scad_item` skip an unchanged source
+  cheaply (mirrors the file inventory's own cheap-first drift check) without hashing/
+  recompiling every pass. FK is `ondelete="SET NULL"` — deleting the source `.scad` must
+  not be blocked by, or cascade-delete, a derived STL that may still be a perfectly good
+  mesh asset in its own right.
+- **The derived STL is a real `FileRole.model` File row, not a new asset type.** This was
+  the whole point of "write no new preview code" — render_item/analyze_item/the browser
+  viewer all filter on `File.role == FileRole.model` already, so making the derived STL
+  exactly that (not, say, an Image or a new role) means it rides the entire existing
+  pipeline for free. The only thing that needed to change was excluding it from the
+  **sidecar** (regenerable artifact, same rationale as render/embedded Images already
+  excluded there) — done in both `_build_sidecar_data` (the canonical builder) and
+  `worker/reconcile.py`'s `_write_sidecar_for_item` (a **pre-existing duplicate** builder
+  that already diverges slightly from the canonical one — e.g. it does not apply the
+  render/embedded-image sidecar exclusion either; out of scope to unify here, but both were
+  kept in sync for *this* exclusion since leaving one out would silently leak the derived
+  STL into the sidecar depending on which code path last wrote it).
+- **No subprocess isolation multiprocessing dance — a plain `asyncio.create_subprocess_exec`
+  is the isolation.** `render_subprocess.py`/`analyze_subprocess.py` use
+  `multiprocessing.get_context("spawn")` because the actual heavy work (VTK/trimesh) runs
+  *in-process* in the Python child, and a fresh interpreter is needed to avoid inheriting
+  half-initialised GL/BLAS state. OpenSCAD is an external binary — the moment it's exec'd it
+  already has its own address space and its own killable PID; `preexec_fn` sets
+  `RLIMIT_AS`/`RLIMIT_CPU` on it directly before `exec()`, and `asyncio.wait_for` +
+  `os.killpg` (via `start_new_session=True`) gives the same wall-clock-timeout-and-kill
+  guarantee. Same rigor, less code, no multiprocessing pickling/spawn overhead for what's
+  fundamentally just running a CLI tool.
+- **Default `SCAD_RENDER_ENABLED=True`, safe even before the worker image is rebuilt.**
+  The compile step checks `openscad_available()` (`shutil.which`) BEFORE attempting
+  anything and treats a missing binary as a normal soft skip (Job succeeds, log says why,
+  no Issue) — so leaving the feature on by default doesn't break anything on the `:dev`
+  stack until the owner rebuilds the worker image; it just quietly no-ops until then.
+- **`openscad` costs ~370 MB of image size, confirmed by measurement, and `--no-install-
+  recommends` can't avoid it.** Debian's `openscad` binary package hard-`Depends` on the
+  full Qt5 GUI stack (`libqt5gui5`, `libqt5widgets5`, `libqt5multimedia5`, ...) even though
+  STL export (`-o out.stl`) never touches a display — those are `Depends`, not
+  `Recommends`, so `--no-install-recommends` (which already keeps VTK/OSMesa lean
+  elsewhere in this image) has no effect on them. Accepted for this first cut; a headless/
+  Manifold-only OpenSCAD build (upstream has one) is a possible future slimming pass, noted
+  in the Dockerfile comment and `docs/architecture.md`, not built now.
+- **Enqueue trigger kept minimal: import-commit + direct `.scad` upload, both gated on "no
+  existing model file yet."** Import commit (`routers/import_sessions/commit.py`) and the
+  single-file upload endpoint (`routers/items/files.py`) both enqueue
+  `compile_scad_item` only when the item's ONLY printable is the `.scad` source (no
+  `FileRole.model` file already present) — an item that bundles a real STL alongside its
+  `.scad` is left alone (the user already has a preview). **No manual "re-render preview"
+  UI action was added this cut** — deferred: the compile task is naturally idempotent and
+  re-runnable (the sha-cache in `generated_source_sha256` makes a second enqueue a cheap
+  no-op unless the source actually changed), so a future re-trigger affordance (a button, or
+  wiring it into rescan/reconcile) is a small additive follow-up, not a redesign. Flagged
+  explicitly as a judgement call in the handoff prompt; kept out to keep this cut backend-
+  only (no frontend files touched, no `tsc`/build gate needed).
+- **The derived STL's on-disk path is stable (`generated/<stem>.stl`), not sha-keyed like
+  `renders/<sha>.png`.** A recompile overwrites the same path in place rather than writing
+  a new sha-named file and orphaning the old one — simpler bookkeeping (no leftover files to
+  sweep), and it still correctly busts the render/analyze sha-cache downstream because the
+  File row's own `sha256` (of the STL bytes, recomputed on every compile) changes, which is
+  what render_item/analyze_item actually key their cache on — the path's stability doesn't
+  matter to them.
+
 ## 2026-07-25 — Edit item description/tags (#47): reuse the existing PATCH endpoint, defer title, keep the tag editor deliberately simpler than the wizard
 
 **Context:** `prompts/2026-07-25-edit-item-description-tags.md` — let a user edit an

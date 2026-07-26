@@ -55,6 +55,22 @@ class File(Base):
     # Phase 16: per-object mesh analysis (JSON, sha-keyed; null until analyzed)
     object_analysis: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
 
+    # Issue #46: marks this File as a machine-generated derived asset (e.g. the
+    # STL server-compiled from a .scad source) rather than a user-provided
+    # original. Non-null generated_from_file_id IS the "is generated" marker —
+    # no separate boolean, so there is exactly one source of truth. Points at
+    # the source File (e.g. the .scad) this asset was compiled from.
+    # ondelete=SET NULL: deleting the source file (or the whole item cascades
+    # away first) must not be blocked by — or delete — the derived asset.
+    generated_from_file_id: Mapped[int | None] = mapped_column(
+        ForeignKey("files.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # sha256 of the SOURCE file at the time this asset was generated from it —
+    # lets the compile step skip a re-compile when the source hasn't changed
+    # since (cheap "is this derived asset stale?" check, same idea as the
+    # cheap-first drift check above) without re-running openscad every pass.
+    generated_source_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     item: Mapped["Item"] = relationship(  # noqa: F821
         "Item", back_populates="files", foreign_keys=[item_id]
     )

@@ -154,6 +154,9 @@ async def _write_sidecar_for_item(db: AsyncSession, item: Any) -> None:
     tags = [t.name for t in tag_result.scalars().all()]
 
     file_result = await db.execute(select(File).where(File.item_id == item.id))
+    # Exclude machine-generated derived assets (issue #46) — same rationale as
+    # _build_sidecar_data in services/item_helpers.py (kept in sync manually;
+    # this is a pre-existing duplicate sidecar builder, not introduced here).
     sidecar_files = [
         SidecarFile(
             path=f.path,
@@ -163,6 +166,7 @@ async def _write_sidecar_for_item(db: AsyncSession, item: Any) -> None:
             mtime=f.mtime.strftime("%Y-%m-%dT%H:%M:%SZ") if f.mtime else None,
         )
         for f in file_result.scalars().all()
+        if f.generated_from_file_id is None
     ]
 
     img_result = await db.execute(
