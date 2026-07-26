@@ -6,25 +6,39 @@ It is NOT a full reference: durable rules live in `CLAUDE.md`, the module map + 
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
 "Current state" + "Next phases" before every `/clear`.
 
-**Last updated:** 2026-07-24 — **`v0.7.4` RELEASED.** Tag `v0.7.4` cut on `main`, GitHub release
+**Last updated:** 2026-07-26 — **`v0.7.5` RELEASED.** Tag `v0.7.5` cut on `main`, GitHub release
 published, `release`-triggered "Build and publish Docker images" green — prod images
-`:latest`/`:0.7.4`/`:0` for all three (backend/frontend/nginx). **v0.7.4 fixes the "MakerWorld
-import shows images in the wizard but the committed item saves none" bug:** the `bblmw.com` CDN now
-serves some gallery PNGs as `application/octet-stream`, which the commit-time image download rejected
-(`image/*`-only) — fix trusts the payload's magic bytes (`sniff_image_ext`). **`v0.7.3`** (cut just
-before) was the diagnostic logging that found it. **NOTE:** v0.7.3's PR merged but it was **never
-tagged** — `main` advanced to 0.7.4 before the cut, so only `v0.7.4` is a tag/release (the `[0.7.3]`
-CHANGELOG compare link won't resolve — harmless; optional one-line doc fix outstanding).
+`:latest`/`:0.7.5`/`:0` for all three (backend/frontend/nginx). **v0.7.5 = OpenSCAD `.scad` support**
+for self-designed items: a read-only **Show SCAD** viewer (copy / download / **Open in OpenSCAD
+Playground** deep-link) + **import-time title/description prefill from the `.scad` header** and an
+optional **Describe from SCAD** AI action. Adds a `source` `FileRole` (migration **0025**). Previous
+`v0.7.4` was the MakerWorld octet-stream image-save fix (`sniff_image_ext`); `v0.7.3` (the diagnostic
+logging that found it) merged but was never tagged.
 
-> **⏭️ NO RELEASE IN FLIGHT, no forced next task.** `dev` == `main` apart from this startnewsession
-> refresh (rides the next PR). Next build pickup is a roadmap **choice** (see "Next phases"):
-> (a) **automatic Let's Encrypt/ACME** ([#41](https://github.com/crzykidd/partfolder3d/issues/41)),
-> or (b) **bulk move-assets UI** (#25 follow-up) — both need an owner call. Optional tidy-up:
-> repoint the `[0.7.4]` CHANGELOG compare link to `v0.7.2...v0.7.4` (since v0.7.3 is untagged).
+> **⏭️ NO RELEASE IN FLIGHT, no forced next task.** `dev` == `main` (v0.7.5). Next build pickup is an
+> owner **choice** (`gh issue list` is the source of truth): **[#47](https://github.com/crzykidd/partfolder3d/issues/47)**
+> edit an existing item's description + add/remove tags in-app; **[#46](https://github.com/crzykidd/partfolder3d/issues/46)**
+> optional server-side `.scad` render/preview; **[#41](https://github.com/crzykidd/partfolder3d/issues/41)**
+> automatic Let's Encrypt/ACME at nginx; or **bulk move-assets UI** (#25 follow-up). Optional tidy-up:
+> the `[0.7.4]`/`[0.7.3]` CHANGELOG compare links don't resolve (v0.7.3 was never tagged).
 
 ## Current state
 
-- **Latest release `v0.7.4`** (2026-07-24, on `main`; `:latest`/`:0.7.4`/`:0` published) —
+- **Latest release `v0.7.5`** (2026-07-26, on `main`; `:latest`/`:0.7.5`/`:0` published) — **OpenSCAD
+  `.scad` support**, two features (`make verify-backend` 949 pass):
+  - **Read-only viewer** (`feat:` `7a3f456`). `.scad` is a new **`FileRole.source`** (migration
+    **0025**), accepted on upload; classified in `storage/inventory.py` `infer_role`. A **Show SCAD**
+    modal on the item details card (`frontend/src/pages/item/ItemMetadata.tsx`) shows the source with
+    **Copy / Download / Open in OpenSCAD Playground** — the last deep-links `ochafik.com/openscad2`
+    with the code prefilled via the playground's compressed hash-fragment format (encoder:
+    `frontend/src/lib/openscadPlayground.ts`). No server render, no in-app editing.
+  - **Import prefill + AI describe** (`feat:` `9cfcb82`). On import, item title/description are
+    pre-filled from the `.scad`'s leading comment header (`backend/app/storage/scad_meta.py` —
+    deterministic, no AI; only fills empties). Optional **Describe from SCAD** AI action on the wizard
+    description step (`POST /api/import-sessions/{id}/ai/describe-scad` in `routers/ai_actions.py`,
+    button in `pages/import-wizard/TitleStep.tsx`, whole-file to the provider, reuses `AiTextPreview`).
+  - Deferred: server-side `.scad`→STL render/preview → **#46**. In-app edit of `.scad` → future.
+- **`v0.7.4`** (2026-07-24, on `main`; `:latest`/`:0.7.4`/`:0` published) —
   **fix: scraped images served as `application/octet-stream` are now saved** (`fix:` `acef0c9`;
   `make verify-backend` 930 pass). MakerWorld's `bblmw.com` CDN began returning some gallery PNGs
   (dated filenames, e.g. `design/2025-08-16_*.png`) with a generic octet-stream Content-Type; the
@@ -91,6 +105,14 @@ CHANGELOG compare link won't resolve — harmless; optional one-line doc fix out
 
 ## Next phases (roadmap)
 
+- **Edit an existing item's description + add/remove tags in-app** (issue [#47](https://github.com/crzykidd/partfolder3d/issues/47)) —
+  today description/tags are only set at import (or by editing the on-disk sidecar + rescan). Needs an
+  item-update endpoint that **writes through to the sidecar** and marks a legit local edit (same
+  baseline discipline as the v0.7.2 corruption-vs-edit work), plus inline edit UI on the item card.
+- **Optional server-side `.scad` render/preview** (issue [#46](https://github.com/crzykidd/partfolder3d/issues/46)) —
+  deferred companion to the v0.7.5 `.scad` viewer: add the `openscad` binary + a sandboxed compile
+  (`.scad`→STL) that reuses the existing render/analyze/viewer pipeline. Not needed yet (the playground
+  covers edit/preview/STL export). Also future: in-app `.scad` editing (pairs with #47's write path).
 - **Automatic Let's Encrypt/ACME at nginx** (issue [#41](https://github.com/crzykidd/partfolder3d/issues/41)) —
   the deferred follow-up to v0.7.1's BYO/self-signed TLS. Bigger lift (certbot companion or Caddy
   edge; needs public 80/443 + DNS + renewal). Not started; owner decides approach at build time.
@@ -106,11 +128,15 @@ CHANGELOG compare link won't resolve — harmless; optional one-line doc fix out
   Printables/MakerWorld — deferred from #27). Partial analysis of very large 3MFs
   (streaming/decimation) if ever wanted. Prinnit's `/designs/<sub>` returns the designer's whole
   catalog (~1.2 MB) to get one design — fine today, but revisit for a lighter path if it ever slows.
-- **Next release = `/release-prep <next>` when a batch is ready** (v0.7.2 is fully cut). Standing gotchas: CodeQL on big
-  diffs surfaces pre-existing alerts (`sanitize_for_log` real ones; dismiss path-injection FPs with
-  existing `resolve()`+`is_relative_to()` barriers); transient pip-download timeouts in the Image
-  build check — just re-run the failed job; the local `verify-frontend` gate can flake (waitFor
-  timeouts) when the host is CPU-loaded — CI on a clean runner is the authority.
+- **Next release = `/release-prep <next>` when a batch is ready** (v0.7.5 is fully cut; next is
+  `0.7.6`). Standing gotchas: CodeQL on big diffs surfaces pre-existing alerts (`sanitize_for_log`
+  real ones; dismiss path-injection FPs with existing `resolve()`+`is_relative_to()` barriers);
+  transient pip-download timeouts in the Image build check — just re-run the failed job; the local
+  `verify-frontend`/vitest gate flakes hard (nondeterministic `waitFor` 5s timeouts, a *different*
+  heavy-async test each run — catalog-page/reviews-page/scrapers/tag-admin — zero assertion failures)
+  when the host is CPU-loaded — **CI (`dev-checks` on push, `CI` on the PR) on a clean runner is the
+  authority; don't chase them.** **`make verify` via `| tail` masks the real exit code** (tail's 0
+  hides a red gate) — read the summary line / capture `$?` without a pipe.
 
 ## How we work (recap — full rules in `CLAUDE.md`)
 
@@ -132,13 +158,11 @@ CHANGELOG compare link won't resolve — harmless; optional one-line doc fix out
 
 ## Backlog (themes — `gh issue list` is the source of truth for what we build **now**, not the PRD)
 
-- **Open issue [#41](https://github.com/crzykidd/partfolder3d/issues/41)** — automatic Let's
-  Encrypt/ACME at nginx (deferred follow-up to v0.7.1 TLS; not started). (#40 nginx bump: **closed**
-  in v0.7.1.)
-- **Owner op (post-0.7.2-deploy):** clear the **405 pending reviews** in prod via the new
-  **Reject all** button on `/admin/reviews` (reconcile modes are already on Auto, so the next scan
-  re-applies the legit drift). This is why the bulk-review feature was built this cycle.
-- **Needs owner decision:** Let's Encrypt approach (#41); bulk-move multi-select UX (#25 follow-up).
+- **Open issues (run `gh issue list`):** [#47](https://github.com/crzykidd/partfolder3d/issues/47)
+  edit item description + add/remove tags in-app; [#46](https://github.com/crzykidd/partfolder3d/issues/46)
+  optional server-side `.scad` render/preview (deferred companion to v0.7.5); [#41](https://github.com/crzykidd/partfolder3d/issues/41)
+  automatic Let's Encrypt/ACME at nginx. All three await an owner call on scope/approach.
+- **Needs owner decision:** which of #47 / #46 / #41 is next; bulk-move multi-select UX (#25 follow-up).
 - Older PRD §18 notes: real slicing for filament estimates, trash-purge UI, `.bgcode`/multi-filament gcode.
 
 ## Session start order
