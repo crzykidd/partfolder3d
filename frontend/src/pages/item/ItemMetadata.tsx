@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Copy, Download, ExternalLink, FileCode2, Maximize2, X } from 'lucide-react'
+import { Copy, Download, ExternalLink, FileCode2, Maximize2, Pencil, X } from 'lucide-react'
 
 import * as api from '@/lib/api'
 import { safeHref } from '@/lib/utils'
 import { playgroundUrl } from '@/lib/openscadPlayground'
+import { addConfirmedTag, removeConfirmedTag } from '@/lib/import-utils'
 
-import { AURORA_BTN_GHOST, AURORA_CARD, formatBytes, formatDate } from './styles'
+import { AURORA_BTN_GHOST, AURORA_BTN_PRIMARY, AURORA_CARD, AURORA_INPUT, formatBytes, formatDate } from './styles'
 
 // ---------------------------------------------------------------------------
 // Item metadata card (right column of hero grid)
@@ -51,6 +52,60 @@ export function ItemMetadata({ item, itemKey, isOwnerOrAdmin }: ItemMetadataProp
     },
   })
 
+  // -------------------------------------------------------------------------
+  // Issue #47 — inline edit for description + tags.
+  // -------------------------------------------------------------------------
+  const [editingMeta, setEditingMeta] = useState(false)
+  const [descDraft, setDescDraft] = useState(item.description ?? '')
+  const [tagsDraft, setTagsDraft] = useState<string[]>(item.tags.map((t) => t.name))
+  const [tagInput, setTagInput] = useState('')
+
+  const startEditingMeta = () => {
+    setDescDraft(item.description ?? '')
+    setTagsDraft(item.tags.map((t) => t.name))
+    setTagInput('')
+    setEditingMeta(true)
+  }
+  const cancelEditingMeta = () => {
+    setEditingMeta(false)
+    setTagInput('')
+  }
+
+  // Popular existing tags for quick-add while editing — a distinct query key
+  // from the catalog's ['tags','cloud'] (different params); saving invalidates
+  // the whole ['tags'] prefix so both stay fresh.
+  const popularTagsQuery = useQuery({
+    queryKey: ['tags', 'popular', 'item-edit'],
+    queryFn: () => api.listTags({ in_use_only: true, per_page: 24 }),
+    enabled: editingMeta,
+    staleTime: 5 * 60 * 1000,
+  })
+  const popularTags = (popularTagsQuery.data?.tags ?? []).filter(
+    (t) => !tagsDraft.includes(t.name),
+  )
+
+  const addTagFromInput = () => {
+    const next = addConfirmedTag(tagsDraft, tagInput)
+    if (next !== tagsDraft) {
+      setTagsDraft(next)
+      setTagInput('')
+    }
+  }
+
+  const updateMetaMutation = useMutation({
+    // NOTE: ItemUpdate treats `description: null` as "leave unchanged" (same
+    // convention as title/source_url/license on this endpoint), so an emptied
+    // textarea must send `""`, not `null`, to actually clear it.
+    mutationFn: () =>
+      api.updateItem(itemKey, { description: descDraft, tags: tagsDraft }),
+    onSuccess: (updatedItem) => {
+      queryClient.setQueryData(['item', itemKey], updatedItem)
+      void queryClient.invalidateQueries({ queryKey: ['tags'] })
+      setEditingMeta(false)
+      setTagInput('')
+    },
+  })
+
   return (
     <div
       style={{
@@ -86,41 +141,96 @@ export function ItemMetadata({ item, itemKey, isOwnerOrAdmin }: ItemMetadataProp
         )}
       </div>
 
-      {/* Tags */}
-      {item.tags.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {item.tags.map((tag) => (
-            <Link
-              key={tag.id}
-              to={`/catalog?tags=${encodeURIComponent(tag.name)}`}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                padding: '3px 9px',
-                borderRadius: 20,
-                fontSize: 11,
-                fontWeight: 500,
-                background: 'var(--aurora-glass)',
-                border: '1px solid var(--aurora-glass-border)',
-                color: 'var(--aurora-text-dim)',
-                textDecoration: 'none',
-                transition: 'all 0.15s',
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLElement).style.background = 'var(--aurora-pill)'
-                ;(e.currentTarget as HTMLElement).style.borderColor = 'var(--aurora-pill-border)'
-                ;(e.currentTarget as HTMLElement).style.color = 'var(--aurora-accent)'
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLElement).style.background = 'var(--aurora-glass)'
-                ;(e.currentTarget as HTMLElement).style.borderColor = 'var(--aurora-glass-border)'
-                ;(e.currentTarget as HTMLElement).style.color = 'var(--aurora-text-dim)'
-              }}
-            >
-              #{tag.name}
-            </Link>
-          ))}
+      {/* Issue #47 — entry point for the description/tags editor. Always shown
+          (even with no tags/description yet) so an owner can add them. */}
+      {isOwnerOrAdmin && !editingMeta && (
+        <div>
+          <button
+            type="button"
+            onClick={startEditingMeta}
+            style={{
+              ...AURORA_BTN_GHOST,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 11,
+              padding: '4px 10px',
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass-hover)' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--aurora-glass)' }}
+          >
+            <Pencil size={11} />
+            Edit description &amp; tags
+          </button>
         </div>
+      )}
+
+      {/* Tags — editable inline (issue #47) when isOwnerOrAdmin */}
+      {editingMeta ? (
+        <TagEditor
+          tags={tagsDraft}
+          input={tagInput}
+          onInputChange={setTagInput}
+          onAdd={addTagFromInput}
+          onRemove={(name) => setTagsDraft((c) => removeConfirmedTag(c, name))}
+          popularTags={popularTags}
+          onQuickAdd={(name) => setTagsDraft((c) => addConfirmedTag(c, name))}
+        />
+      ) : (
+        item.tags.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {item.tags.map((tag) => (
+              <span key={tag.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <Link
+                  to={`/catalog?tags=${encodeURIComponent(tag.name)}`}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    padding: '3px 9px',
+                    borderRadius: 20,
+                    fontSize: 11,
+                    fontWeight: 500,
+                    background: 'var(--aurora-glass)',
+                    border: '1px solid var(--aurora-glass-border)',
+                    color: 'var(--aurora-text-dim)',
+                    textDecoration: 'none',
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLElement).style.background = 'var(--aurora-pill)'
+                    ;(e.currentTarget as HTMLElement).style.borderColor = 'var(--aurora-pill-border)'
+                    ;(e.currentTarget as HTMLElement).style.color = 'var(--aurora-accent)'
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLElement).style.background = 'var(--aurora-glass)'
+                    ;(e.currentTarget as HTMLElement).style.borderColor = 'var(--aurora-glass-border)'
+                    ;(e.currentTarget as HTMLElement).style.color = 'var(--aurora-text-dim)'
+                  }}
+                >
+                  #{tag.name}
+                </Link>
+                {tag.status === 'pending' && (
+                  <span
+                    title="Awaiting admin approval"
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.05em',
+                      color: '#D97706',
+                      background: 'rgba(217,119,6,0.10)',
+                      border: '1px solid rgba(217,119,6,0.30)',
+                      borderRadius: 10,
+                      padding: '1px 6px',
+                    }}
+                  >
+                    pending
+                  </span>
+                )}
+              </span>
+            ))}
+          </div>
+        )
       )}
 
       {/* Source + license */}
@@ -271,44 +381,90 @@ export function ItemMetadata({ item, itemKey, isOwnerOrAdmin }: ItemMetadataProp
         </div>
       )}
 
-      {/* Description — capped + scrollable when long, with an Expand modal */}
-      {item.description && (
+      {/* Description — capped + scrollable when long, with an Expand modal.
+          Issue #47: replaced by an editable textarea + Save/Cancel while editingMeta. */}
+      {editingMeta ? (
         <div>
-          <div
-            style={{
-              fontSize: 12,
-              color: 'var(--aurora-text-dim)',
-              lineHeight: 1.6,
-              whiteSpace: 'pre-wrap',
-              maxHeight: descLong ? 220 : undefined,
-              overflowY: descLong ? 'auto' : undefined,
-              paddingRight: descLong ? 6 : undefined,
-            }}
-          >
-            {item.description}
-          </div>
-          {descLong && (
+          <textarea
+            value={descDraft}
+            onChange={(e) => setDescDraft(e.target.value)}
+            placeholder="Add a description…"
+            rows={5}
+            style={{ ...AURORA_INPUT, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+            onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--aurora-accent)' }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--aurora-input-border)' }}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
             <button
-              onClick={() => setDescExpanded(true)}
+              type="button"
+              disabled={updateMetaMutation.isPending}
+              onClick={() => updateMetaMutation.mutate()}
               style={{
-                marginTop: 8,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'var(--aurora-accent)',
-                fontSize: 11,
-                fontWeight: 600,
-                padding: 0,
+                ...AURORA_BTN_PRIMARY,
+                opacity: updateMetaMutation.isPending ? 0.6 : 1,
+                cursor: updateMetaMutation.isPending ? 'not-allowed' : 'pointer',
               }}
             >
-              <Maximize2 size={11} />
-              Expand
+              {updateMetaMutation.isPending ? 'Saving…' : 'Save'}
             </button>
+            <button
+              type="button"
+              disabled={updateMetaMutation.isPending}
+              onClick={cancelEditingMeta}
+              style={{
+                ...AURORA_BTN_GHOST,
+                opacity: updateMetaMutation.isPending ? 0.6 : 1,
+                cursor: updateMetaMutation.isPending ? 'not-allowed' : 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+          {updateMetaMutation.isError && (
+            <p style={{ fontSize: 12, color: 'var(--aurora-danger)', margin: '8px 0 0' }}>
+              Failed to save changes. Please try again.
+            </p>
           )}
         </div>
+      ) : (
+        item.description && (
+          <div>
+            <div
+              style={{
+                fontSize: 12,
+                color: 'var(--aurora-text-dim)',
+                lineHeight: 1.6,
+                whiteSpace: 'pre-wrap',
+                maxHeight: descLong ? 220 : undefined,
+                overflowY: descLong ? 'auto' : undefined,
+                paddingRight: descLong ? 6 : undefined,
+              }}
+            >
+              {item.description}
+            </div>
+            {descLong && (
+              <button
+                onClick={() => setDescExpanded(true)}
+                style={{
+                  marginTop: 8,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--aurora-accent)',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: 0,
+                }}
+              >
+                <Maximize2 size={11} />
+                Expand
+              </button>
+            )}
+          </div>
+        )
       )}
 
       {/* Timestamps */}
@@ -404,6 +560,153 @@ export function ItemMetadata({ item, itemKey, isOwnerOrAdmin }: ItemMetadataProp
           file={scadFile}
         />
       )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Tag editor (issue #47) — chips with remove + an add-tag input + a
+// popular-tags quick-add row. Deliberately simpler than the import wizard's
+// TagsStep (no AI suggestions, no pending/reconcile split, no autocomplete
+// dropdown — none of that applies to editing an already-committed item); it
+// reuses the wizard's pure add/remove helpers (`addConfirmedTag` /
+// `removeConfirmedTag` from lib/import-utils) so the chip-array semantics
+// stay identical rather than being reimplemented.
+// ---------------------------------------------------------------------------
+
+interface TagEditorProps {
+  tags: string[]
+  input: string
+  onInputChange: (value: string) => void
+  onAdd: () => void
+  onRemove: (name: string) => void
+  popularTags: api.TagSummary[]
+  onQuickAdd: (name: string) => void
+}
+
+function TagEditor({
+  tags,
+  input,
+  onInputChange,
+  onAdd,
+  onRemove,
+  popularTags,
+  onQuickAdd,
+}: TagEditorProps) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {tags.length === 0 && (
+          <p style={{ fontSize: 12, color: 'var(--aurora-muted)', fontStyle: 'italic', margin: 0 }}>
+            No tags yet.
+          </p>
+        )}
+        {tags.map((tag) => (
+          <span
+            key={tag}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              background: 'var(--aurora-pill)',
+              border: '1px solid var(--aurora-pill-border)',
+              borderRadius: 20,
+              padding: '3px 10px 3px 9px',
+              fontSize: 11,
+              fontWeight: 600,
+              color: 'var(--aurora-accent)',
+            }}
+          >
+            #{tag}
+            <button
+              type="button"
+              onClick={() => onRemove(tag)}
+              aria-label={`Remove tag ${tag}`}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                cursor: 'pointer',
+                color: 'var(--aurora-accent)',
+                lineHeight: 1,
+                fontSize: 12,
+                display: 'flex',
+                alignItems: 'center',
+                opacity: 0.7,
+              }}
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => onInputChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              onAdd()
+            }
+          }}
+          placeholder="Add a tag"
+          style={{ ...AURORA_INPUT, flex: 1 }}
+          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--aurora-accent)' }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--aurora-input-border)' }}
+        />
+        <button
+          type="button"
+          onClick={onAdd}
+          disabled={!input.trim()}
+          style={{
+            ...AURORA_BTN_GHOST,
+            opacity: !input.trim() ? 0.4 : 1,
+            cursor: !input.trim() ? 'not-allowed' : 'pointer',
+          }}
+        >
+          Add
+        </button>
+      </div>
+
+      {popularTags.length > 0 && (
+        <div>
+          <p style={{ fontSize: 10, color: 'var(--aurora-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 6px' }}>
+            Popular tags — click to add
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {popularTags.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => onQuickAdd(t.name)}
+                title={`Add tag "${t.name}"`}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  borderRadius: 20,
+                  padding: '3px 10px',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  background: 'rgba(15,164,171,0.08)',
+                  border: '1px solid var(--aurora-pill-border)',
+                  color: 'var(--aurora-accent)',
+                }}
+              >
+                + #{t.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p style={{ fontSize: 11, color: 'var(--aurora-muted)', margin: 0 }}>
+        New tags are added immediately but may show as <strong>pending</strong> until
+        an admin approves them.
+      </p>
     </div>
   )
 }

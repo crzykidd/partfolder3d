@@ -2,6 +2,74 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-25 — Edit item description/tags (#47): reuse the existing PATCH endpoint, defer title, keep the tag editor deliberately simpler than the wizard
+
+**Context:** `prompts/2026-07-25-edit-item-description-tags.md` — let a user edit an
+existing item's description and add/remove tags from the item page, with a
+write-through to the sidecar that a subsequent scan treats as a legit local edit
+(v0.7.2 corruption-vs-legit-edit discipline), not drift.
+
+- **No new endpoint — `PATCH /api/items/{key}` already did the hard part.**
+  Investigation found this endpoint (existing since Phase 2) already accepts
+  `description` and `tags`, already writes through to the sidecar in the same
+  request (`_write_item_sidecar`), and already refreshes `search_vector`. The
+  reconcile baseline concern turned out to be a non-issue for this feature:
+  `_behavior_sidecar_sync` (unlike the v0.7.2 model-file hash/mtime baseline)
+  compares **timestamps** — `item.updated_at` vs. the sidecar's own recorded
+  `updated_at` vs. the sidecar file's on-disk mtime, within a 5s
+  `SIDECAR_SYNC_TOLERANCE_SECONDS`. Because the PATCH write-through updates the
+  DB row and rewrites the sidecar synchronously in one transaction, those three
+  timestamps are already within tolerance after every save — no explicit
+  "adopt baseline" step was needed, and a new reconcile test
+  (`test_reconcile_after_edit_not_flagged_as_drift`) proves zero Issues/
+  ReviewItems/ChangeLog sidecar_sync entries after an edit. The only real gap
+  was wiring a frontend UI to this endpoint at all — it was never called from
+  the app.
+- **Fixed a real gap: new tags added via this endpoint now respect
+  `tags.auto_approve`.** Before this change, `update_item`'s tag handling
+  called `_attach_tags` with the default `new_tag_status=TagStatus.active`,
+  unlike the import-commit path (`routers/import_sessions/commit.py`), which
+  reads the `tags.auto_approve` instance setting. A brand-new tag added via
+  item edit now lands `pending` unless auto-approve is on, matching import
+  behavior. Existing tags (any status) keep whatever status they already have
+  — only brand-new tag rows get the computed status.
+- **`TagOut` gained a `status` field** (`active`/`pending`) so the frontend can
+  badge a newly-added tag awaiting approval. No migration — `Tag.status`
+  already existed; this only exposes it in the response.
+- **Title is explicitly NOT editable in this UI — deferred.** The existing
+  endpoint already supports a title change (atomic directory rename, fully
+  tested), so backend support isn't the blocker. The judgment call: renaming
+  is a materially heavier operation (moves the on-disk directory, can 409 on
+  conflict) that deserves its own dedicated, clearly-labeled affordance rather
+  than being folded into a single Save button alongside description/tags,
+  where a user could trigger a directory move by accident. Scoped to
+  description + tags per the prompt's explicit fallback.
+- **The tag editor is deliberately simpler than the import wizard's
+  `TagsStep`** — chips with remove, a plain add-tag input, and a "popular
+  tags" quick-add row (reusing `api.listTags({in_use_only: true})`, same as
+  the wizard). It does NOT reproduce the wizard's AI-suggestion box, the
+  pending/reconcile accept-reject split, or the keyboard-navigable
+  autocomplete dropdown — none of those concepts apply to editing an
+  already-committed item (there's no import session, no AI-suggested-tags
+  step here). What IS reused directly, not reimplemented: the wizard's pure
+  chip-array helpers `addConfirmedTag`/`removeConfirmedTag` from
+  `lib/import-utils.ts`, so add/remove semantics stay identical.
+- **Save applies description + tags in one PATCH call**, not two independent
+  saves — a single "Edit description & tags" entry point reveals both an
+  editable textarea and editable tag chips at once, with one Save/Cancel pair
+  at the bottom of the description block. This matches the prompt's emphasis
+  on a single write-through operation and avoids two separate round trips
+  (and two separate sidecar rewrites) for what is conceptually one edit.
+- **Clearing the description sends `""`, not `null`.** `ItemUpdate` treats
+  `description: null` as "leave unchanged" (the same sentinel-free convention
+  already used for `title`/`source_url`/`license` on this endpoint — `is not
+  None` gates every field). An emptied textarea therefore sends the empty
+  string, which the endpoint treats as a real value and stores, correctly
+  clearing the field. This is a pre-existing schema limitation (no way to
+  explicitly null out a field via this endpoint) worked around on the
+  frontend rather than redesigning `ItemUpdate`'s semantics for every field,
+  which was out of scope here.
+
 ## 2026-07-25 — `.scad` header prefill: keep the title line verbatim; gate the AI action on both a staged source file and provider availability
 
 **Context:** `prompts/2026-07-25-scad-ai-describe.md` — deterministic title/description

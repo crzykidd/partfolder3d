@@ -20,6 +20,19 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Added
+
+- Edit an existing item's description and add/remove tags directly from the
+  item page (closes #47). The item metadata card gets an inline editor
+  (description textarea + tag chips with remove, add-tag input, and a
+  popular-tags quick-add row) that writes through to the on-disk `.yml`
+  sidecar and the full-text search index in the same operation, so a
+  subsequent scan treats the change as a legitimate local edit rather than
+  drift. New tags land `pending` unless the `tags.auto_approve` instance
+  setting is on, and a pending badge is shown until an admin approves them.
+  Title editing is deferred (renaming triggers an atomic directory move — a
+  separate, heavier flow left for a future pass).
+
 ## [0.7.5] — 2026-07-25
 
 ### Added

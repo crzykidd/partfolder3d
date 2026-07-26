@@ -100,6 +100,9 @@ class TagOut(BaseModel):
     id: int
     name: str
     category: str | None
+    # 'active' | 'pending' — surfaced so item-edit UI can badge newly-added tags
+    # that are awaiting admin approval (issue #47).
+    status: str = "active"
 
     model_config = {"from_attributes": True}
 
