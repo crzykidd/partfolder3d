@@ -2,6 +2,30 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-26 — Reconcile sidecar writer deduped onto item_helpers; expired `updated_at` guarded
+
+**Context:** `prompts/done/2026-07-26-fix-sidecar-sync-greenlet.md` — the nightly reconcile
+scan filed recurring `sidecar_error` issues (`greenlet_spawn has not been called; can't
+call await_only()`) that "Retry rescan" could not clear (live items #9/#12/#13/#20).
+
+- **Two illegal async lazy-loads, both closed.** `reconcile.py::_write_sidecar_for_item`
+  had drifted from `item_helpers._write_item_sidecar`: it called `build_sidecar()` directly
+  without eager-loading `item.creator` or refreshing flush-expired `created_at`/`updated_at`.
+  Fixed by refreshing `creator` then delegating to `_write_item_sidecar` (single source of
+  truth; the delegation also restores the render/embedded-image sidecar exclusion the
+  duplicate had lost). **But the first crash actually fires earlier** — `_behavior_sidecar_sync`
+  reads `item.updated_at` (a server-default/`onupdate` column that an earlier scan-transaction
+  flush can leave expired) before the write path is ever reached; that read now refreshes the
+  attribute in the async context first, guarded via `inspect(item).unloaded` so it only issues
+  a query when the attribute is actually expired.
+- **Existing open issues auto-resolve:** `routers/issues.py::_action_retry` already flips an
+  issue to `resolved` when `recon.errors` is empty — so once deployed, Retry rescan (or the
+  next nightly scan) clears #9/#12/#13/#20 with no further action.
+- **Test/finalize note:** the regression test's setup used `await db_session.expire(...)`, but
+  `AsyncSession.expire()` is synchronous (no I/O) — the stray `await` crashed setup and masked
+  the real assertion; corrected during finalize, and the fix was then confirmed to address the
+  earlier `_behavior_sidecar_sync` crash the delegation alone did not.
+
 ## 2026-07-26 — View PDF inline: PDF-only allowlist (extension + magic-number), same-origin `<iframe>` over blob fallback
 
 **Context:** `prompts/done/2026-07-26-view-pdf-inline.md` — let a user view a catalog

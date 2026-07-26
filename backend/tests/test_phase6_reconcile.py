@@ -1066,6 +1066,115 @@ async def test_reconcile_no_hash_change_is_a_noop(
     assert result.changes_applied == []
 
 
+# ---------------------------------------------------------------------------
+# Sidecar-sync greenlet regression (2026-07-26-fix-sidecar-sync-greenlet)
+#
+# `_write_sidecar_for_item`'s "DB is newer -> push to sidecar" branch used to
+# call `build_sidecar()` directly, without either of the two guards
+# `item_helpers._write_item_sidecar` has always had: a refresh of the
+# flush-expired `created_at`/`updated_at` columns, and an eagerly-loaded
+# `item.creator`. The library scan loads items with a bare `select(Item)`
+# (no `selectinload(Item.creator)`), so on real items whose DB row was newer
+# than their sidecar, `build_sidecar()` triggered an illegal lazy-load in the
+# async session (`MissingGreenlet: greenlet_spawn has not been called`),
+# caught by `reconcile_one_item`'s try/except and filed as a `sidecar_error`
+# Issue that recurred identically on every retry. This test reproduces those
+# exact conditions directly against `reconcile_one_item` (the same function
+# called by the nightly scan, the per-item rescan, and the issue "Retry
+# rescan" action).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reconcile_sidecar_sync_db_newer_no_greenlet_crash(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """DB-newer sidecar push with an unloaded `creator` relationship and
+    flush-expired `created_at`/`updated_at` must NOT raise `MissingGreenlet` —
+    it must write the sidecar cleanly and create no `sidecar_error` Issue."""
+    from app.models.creator import Creator  # noqa: PLC0415
+    from app.models.item import Item  # noqa: PLC0415
+    from app.models.library import Library  # noqa: PLC0415
+    from app.storage.paths import sidecar_path  # noqa: PLC0415
+    from app.storage.sidecar import SidecarData, read_sidecar, write_sidecar  # noqa: PLC0415
+    from app.worker.reconcile import reconcile_one_item  # noqa: PLC0415
+
+    item_dir = tmp_path / "gh" / "greenlet-model-fff6666"
+    item_dir.mkdir(parents=True)
+
+    lib = Library(name="greenlet_lib", mount_path=str(tmp_path), enabled=True)
+    db_session.add(lib)
+    await db_session.flush()
+
+    creator = Creator(name="Some Designer", source_site="example.com")
+    db_session.add(creator)
+    await db_session.flush()
+
+    baseline_time = datetime.now(UTC) - timedelta(minutes=5)
+
+    # Sidecar last written 5 minutes ago; the on-disk file's mtime matches
+    # that write exactly (NOT externally edited).
+    sc = SidecarData(
+        schema_version=1, key="fff6666", title="Greenlet Model",
+        slug="greenlet-model-fff6666",
+        created_at=baseline_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        updated_at=baseline_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
+    write_sidecar(item_dir, sc, "Greenlet Model", "fff6666")
+    sc_path = sidecar_path(item_dir, "Greenlet Model", "fff6666")
+    ts = baseline_time.timestamp()
+    os.utime(sc_path, (ts, ts))
+
+    # Item's DB row is newer than the sidecar (edited via the API since the
+    # last sync) and references a creator that is NOT eager-loaded.
+    item = Item(
+        key="fff6666",
+        title="Greenlet Model",
+        slug="greenlet-model-fff6666",
+        library_id=lib.id,
+        dir_path=str(item_dir),
+        schema_version=1,
+        creator_id=creator.id,
+        updated_at=datetime.now(UTC),
+    )
+    db_session.add(item)
+    await db_session.flush()
+
+    # Reproduce the exact scan condition: the scan's bare `select(Item)` never
+    # touches `item.creator`, so the relationship stays unloaded (never
+    # queried in this test either), and a prior flush in the same transaction
+    # expires the server-generated created_at/updated_at columns.
+    # NB: AsyncSession.expire() is synchronous (marks attrs expired, no I/O) — not awaited.
+    db_session.expire(item, attribute_names=["created_at", "updated_at"])
+
+    result = await reconcile_one_item(
+        db_session, item,
+        mode_settings={"sidecar_sync": "auto", "re_render": "auto", "file_changes": "auto"},
+    )
+
+    # No error escaped, no sidecar_error Issue was filed.
+    assert result.errors == []
+    assert result.issues_created == []
+    sidecar_errors = (await db_session.execute(
+        select(Issue).where(
+            Issue.item_id == item.id, Issue.issue_type == IssueType.sidecar_error
+        )
+    )).scalars().all()
+    assert sidecar_errors == []
+
+    # ChangeLog records the push.
+    changes = (await db_session.execute(
+        select(ChangeLog).where(ChangeLog.item_id == item.id)
+    )).scalars().all()
+    assert any(c.change_type == "db_pushed_to_sidecar" for c in changes)
+
+    # The sidecar was actually rewritten on disk with the creator populated.
+    updated_sc = read_sidecar(item_dir, "Greenlet Model", "fff6666")
+    assert updated_sc is not None
+    assert updated_sc.creator is not None
+    assert updated_sc.creator.name == "Some Designer"
+
+
 @pytest.mark.asyncio
 async def test_reconcile_legit_3mf_edit_no_false_corruption(
     db_session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

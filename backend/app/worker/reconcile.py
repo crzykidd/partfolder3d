@@ -136,52 +136,31 @@ async def load_mode_settings(db: AsyncSession) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 async def _write_sidecar_for_item(db: AsyncSession, item: Any) -> None:
-    """Build and write the sidecar for an item from the current DB state."""
-    from ..models.file import File  # noqa: I001,PLC0415
-    from ..models.image import Image  # noqa: PLC0415
-    from ..models.tag import ItemTag, Tag  # noqa: PLC0415
-    from ..storage.sidecar import (  # noqa: PLC0415
-        SidecarFile,
-        SidecarImage,
-        build_sidecar,
-        write_sidecar,
-    )
+    """Build and write the sidecar for an item from the current DB state.
 
-    tag_result = await db.execute(
-        select(Tag).join(ItemTag, Tag.id == ItemTag.tag_id)
-        .where(ItemTag.item_id == item.id)
-    )
-    tags = [t.name for t in tag_result.scalars().all()]
+    Delegates to :func:`item_helpers._write_item_sidecar` — the single source
+    of truth for sidecar writes (also used by the API create/update path) —
+    instead of maintaining a second, independently-drifting sidecar builder
+    here. The two had diverged: this function used to call ``build_sidecar()``
+    directly, without either of the guards ``_write_item_sidecar`` has always
+    had, and without its render/embedded image exclusion. The reconcile scan
+    loads items with a bare ``select(Item)`` (no ``selectinload(Item.creator)``)
+    and any earlier flush in the transaction expires ``created_at``/
+    ``updated_at`` — so the direct call triggered an illegal lazy-load in the
+    async session (``MissingGreenlet: greenlet_spawn has not been called``)
+    whenever ``build_sidecar()`` touched ``item.creator`` or those timestamps.
+    See ``docs/decisions.md`` (2026-07-26 entry).
 
-    file_result = await db.execute(select(File).where(File.item_id == item.id))
-    # Exclude machine-generated derived assets (issue #46) — same rationale as
-    # _build_sidecar_data in services/item_helpers.py (kept in sync manually;
-    # this is a pre-existing duplicate sidecar builder, not introduced here).
-    sidecar_files = [
-        SidecarFile(
-            path=f.path,
-            role=f.role.value,
-            size=f.size,
-            sha256=f.sha256,
-            mtime=f.mtime.strftime("%Y-%m-%dT%H:%M:%SZ") if f.mtime else None,
-        )
-        for f in file_result.scalars().all()
-        if f.generated_from_file_id is None
-    ]
+    ``_write_item_sidecar`` already refreshes ``created_at``/``updated_at``
+    before the synchronous build, but assumes ``item.creator`` is already
+    loaded (true for its other callers, which all ``selectinload`` it) — so we
+    eagerly load just that relationship here, in the async context, before
+    delegating.
+    """
+    from ..services.item_helpers import _write_item_sidecar  # noqa: PLC0415
 
-    img_result = await db.execute(
-        select(Image).where(Image.item_id == item.id).order_by(Image.order)
-    )
-    images_list = img_result.scalars().all()
-    sidecar_images = [
-        SidecarImage(path=img.path, source=img.source.value, order=img.order)
-        for img in images_list
-    ]
-    default_img = next((img.path for img in images_list if img.is_default), None)
-
-    data = build_sidecar(item, tags=tags, files=sidecar_files, images=sidecar_images,
-                         default_image=default_img)
-    write_sidecar(Path(item.dir_path), data, item.title, item.key)
+    await db.refresh(item, attribute_names=["creator"])
+    await _write_item_sidecar(db, item)
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +220,18 @@ async def _behavior_sidecar_sync(
     except (ValueError, AttributeError):
         # Can't parse → treat sidecar as externally edited to be safe
         sidecar_written_at = datetime.min.replace(tzinfo=UTC)
+
+    # item.updated_at is a server-default/onupdate column; an earlier flush in
+    # the scan transaction can leave it expired.  The reconcile scan loads items
+    # with a bare select() and runs in a worker greenlet where a lazy reload of
+    # an expired attribute raises MissingGreenlet ("greenlet_spawn has not been
+    # called").  Refresh it in the async context before the synchronous read
+    # below.  (The DB→sidecar write path guards creator/created_at/updated_at
+    # separately via _write_sidecar_for_item.)  See docs/decisions.md 2026-07-26.
+    from sqlalchemy import inspect as _sa_inspect  # noqa: PLC0415
+
+    if "updated_at" in _sa_inspect(item).unloaded:
+        await db.refresh(item, attribute_names=["updated_at"])
 
     # Ensure item.updated_at is UTC-aware
     db_updated_at = item.updated_at

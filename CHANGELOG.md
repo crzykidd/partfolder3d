@@ -61,6 +61,20 @@ prefix appears only on git tags and GitHub releases.
   `application/octet-stream` download, since serving arbitrary user files
   inline, same-origin, would be an XSS vector.
 
+### Fixed
+
+- The nightly reconcile scan (and per-item rescan / the issue "Retry rescan"
+  action) no longer crashes with `MissingGreenlet` ("greenlet_spawn has not
+  been called") while pushing DB metadata to a sidecar. Two illegal lazy-loads
+  in the async worker were closed: `reconcile.py::_write_sidecar_for_item` now
+  delegates to the corrected `item_helpers._write_item_sidecar` (eager-loading
+  `item.creator` first) instead of a second, drifted copy of the sidecar
+  builder, and `_behavior_sidecar_sync` now refreshes a possibly-flush-expired
+  `item.updated_at` before reading it. Previously these surfaced as recurring,
+  unactionable `sidecar_error` issues that "Retry rescan" could never clear;
+  they now resolve automatically on the next successful sync. Also fixes a
+  latent render/embedded-image inclusion bug in the removed duplicate builder.
+
 ## [0.7.5] — 2026-07-25
 
 ### Added
