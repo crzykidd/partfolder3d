@@ -1,4 +1,4 @@
-import { apiFetch, apiFetchForm } from './core'
+import { apiFetch, apiFetchForm, apiFetchText } from './core'
 
 // ---------------------------------------------------------------------------
 // Phase 3 — Catalog types
@@ -523,6 +523,10 @@ export const pollZip = (key: string, bundleId: string): Promise<BundleOut> =>
 /** URL for directly streaming a single file (use as href or window.open). */
 export const fileDownloadUrl = (key: string, filePath: string): string =>
   `/api/items/${key}/files/${filePath}`
+
+/** Fetch a single item file's raw contents as text (e.g. an OpenSCAD .scad source). */
+export const fetchFileText = (key: string, filePath: string): Promise<string> =>
+  apiFetchText(fileDownloadUrl(key, filePath))
 
 export const uploadItemFile = (key: string, file: File): Promise<FileOut> => {
   const form = new FormData()

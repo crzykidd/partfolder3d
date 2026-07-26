@@ -421,3 +421,68 @@ async def test_commit_url_session_with_attached_file_creates_item_file_rows(
     assert any("widget.stl" in p for p in file_names), (
         f"Expected 'widget.stl' in item file paths; got: {file_names}"
     )
+
+
+@pytest.mark.asyncio
+async def test_commit_url_session_with_attached_scad_creates_source_role_file(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Path,
+) -> None:
+    """A .scad attached mid-wizard and committed lands as an item File with role='source'.
+
+    Covers the import-session path of 2026-07-25-scad-source-view.md: infer_role()
+    classifies .scad as FileRole.source with no change needed in
+    upload_session_files (it already accepts any extension).
+    """
+    from unittest.mock import patch  # noqa: PLC0415
+
+    from app.models.file import File as FileModel  # noqa: PLC0415
+    from app.models.file import FileRole  # noqa: PLC0415
+
+    csrf, user_id = await _setup_and_login(client)
+
+    lib_path = tmp_path / "lib_scad"
+    lib_path.mkdir()
+    lib_resp = await client.post(
+        "/api/libraries",
+        json={"name": "SCAD Attach Lib", "mount_path": str(lib_path)},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert lib_resp.status_code == 201
+    library_id = lib_resp.json()["id"]
+
+    sess = await _make_url_session_pending(db_session, user_id, library_id=library_id)
+
+    with patch("socket.getaddrinfo"):
+        resp = await client.post(
+            f"/api/import-sessions/{sess.id}/files",
+            files={
+                "files": (
+                    "part.scad",
+                    io.BytesIO(b"cube([10, 10, 10]);\n"),
+                    "application/octet-stream",
+                )
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert len(data["files"]) == 1
+    assert data["files"][0]["role"] == "source"
+
+    commit_resp = await client.post(
+        f"/api/import-sessions/{sess.id}/commit",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert commit_resp.status_code == 200, commit_resp.text
+    item_id: int = commit_resp.json()["item_id"]
+
+    file_rows = (
+        await db_session.execute(
+            select(FileModel).where(FileModel.item_id == item_id)
+        )
+    ).scalars().all()
+    scad_files = [f for f in file_rows if f.path.endswith("part.scad")]
+    assert len(scad_files) == 1, f"Expected exactly one part.scad row; got: {file_rows}"
+    assert scad_files[0].role == FileRole.source

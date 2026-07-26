@@ -162,6 +162,30 @@ async def test_has_asset_false_for_images_only(
 
 
 @pytest.mark.asyncio
+async def test_has_asset_false_for_source_only(
+    client: AsyncClient, tmp_path: Path, db_session: AsyncSession
+) -> None:
+    """has_asset=False when item has only a design-source file (role='source', e.g. .scad).
+
+    _PRINT_ASSET_ROLES is [model, gcode] — a .scad source file is neither a
+    printable/mesh asset nor gcode, so it must not count toward has_asset.
+    """
+    csrf = await _login_admin(client, tmp_path)
+    lib_id = await _create_lib(client, tmp_path, csrf, "lib_sourceonly")
+    item = await _create_item(client, csrf, "SCAD Source Only", lib_id)
+
+    await _attach_file(db_session, item["id"], "part.scad", FileRole.source)
+    db_session.expire_all()
+
+    resp = await client.get("/api/items", params={"library_ids": lib_id})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    target = next((i for i in items if i["key"] == item["key"]), None)
+    assert target is not None
+    assert target["has_asset"] is False
+
+
+@pytest.mark.asyncio
 async def test_has_asset_false_for_zero_files(
     client: AsyncClient, tmp_path: Path
 ) -> None:

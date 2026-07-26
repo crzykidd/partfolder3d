@@ -59,6 +59,8 @@ _ALLOWED_FILE_EXTENSIONS = frozenset({
     ".gcode", ".gco", ".bgcode",
     # Documents / project notes
     ".pdf", ".txt", ".md",
+    # Design source (OpenSCAD)
+    ".scad",
 })
 
 

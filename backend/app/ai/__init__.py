@@ -14,6 +14,7 @@ from .client import (
     AiTagResult,
     AiTextResult,
     cleanup_description,
+    describe_scad,
     get_enabled_provider,
     suggest_tags,
     summarize_scrape,
@@ -24,6 +25,7 @@ __all__ = [
     "suggest_tags",
     "cleanup_description",
     "summarize_scrape",
+    "describe_scad",
     "AiTagResult",
     "AiTextResult",
 ]

@@ -140,6 +140,20 @@ export const aiSummarize = (
     { method: 'POST', body: JSON.stringify(body) },
   )
 
+/**
+ * Describe a design from its whole staged `.scad` source (2026-07-25-scad-ai-describe.md).
+ * Sends the entire OpenSCAD file to the configured provider — same response
+ * shape as `aiCleanupDescription`/`aiSummarize` so `AiTextPreview` is reused.
+ */
+export const aiDescribeScad = (
+  sessionId: string,
+  body: AiDescriptionRequest = {},
+): Promise<AiTextOut> =>
+  apiFetch<AiTextOut>(
+    `/api/import-sessions/${sessionId}/ai/describe-scad`,
+    { method: 'POST', body: JSON.stringify(body) },
+  )
+
 export interface AiStatusOut {
   provider_available: boolean
 }

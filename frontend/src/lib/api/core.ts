@@ -112,3 +112,28 @@ export async function apiFetchForm<T>(path: string, body: FormData): Promise<T> 
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
 }
+
+// ---------------------------------------------------------------------------
+// Internal helper: plain-text GET fetch (for reading raw file contents, e.g.
+// an item's .scad source — the file-serving endpoint returns raw bytes, not JSON)
+// ---------------------------------------------------------------------------
+
+export async function apiFetchText(path: string): Promise<string> {
+  const res = await fetch(path, { credentials: 'include' })
+
+  if (!res.ok) {
+    let detail: unknown
+    try {
+      detail = await res.json()
+    } catch {
+      detail = res.statusText
+    }
+    const message =
+      typeof detail === 'object' && detail !== null && 'detail' in detail
+        ? String((detail as Record<string, unknown>)['detail'])
+        : res.statusText
+    throw new ApiError(res.status, message, detail)
+  }
+
+  return res.text()
+}

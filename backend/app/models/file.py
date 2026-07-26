@@ -24,6 +24,10 @@ class FileRole(str, enum.Enum):
     gcode = "gcode"
     photo = "photo"
     other = "other"
+    # Design-source file (e.g. OpenSCAD .scad) — not a printable/mesh asset.
+    # Named generically so more source formats can be added later without
+    # another enum migration.
+    source = "source"
 
 
 class File(Base):
