@@ -6,28 +6,36 @@ It is NOT a full reference: durable rules live in `CLAUDE.md`, the module map + 
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
 "Current state" + "Next phases" before every `/clear`.
 
-**Last updated:** 2026-07-26 — **`v0.8.0` RELEASED.** Tag `v0.8.0` cut on `main`, GitHub release
-published, `release`-triggered "Build and publish Docker images" run kicked off (publishes prod
-`:latest`/`:0.8.0`/`:0` for all three images: backend/frontend/nginx). A big batch — **5 features + 1
-fix** (see Current state). `dev` == `main`.
+**Last updated:** 2026-07-26 — **`v0.8.1` RELEASED** (latest). Tag `v0.8.1` cut on `main`,
+GitHub release published, `release`-triggered image build publishes `:latest`/`:0.8.1`/`:0`.
+v0.8.1 is a one-fix patch on top of the v0.8.0 batch (**5 features + 1 fix**): resolving a
+`conflict` Issue via **Keep DB** / **Keep sidecar** no longer 500s with `greenlet_spawn` for
+items with a creator (a follow-up to v0.8.0's reconcile sidecar-sync fix, which missed those
+two call sites). `dev` == `main`.
 
-> **⏭️ NO RELEASE IN FLIGHT, no forced next task.** `dev` == `main` (v0.8.0). Next build pickup is an
+> **⏭️ NO RELEASE IN FLIGHT, no forced next task.** `dev` == `main` (v0.8.1). Next build pickup is an
 > owner **choice** (`gh issue list` is the source of truth). Only **one open issue**:
 > **[#41](https://github.com/crzykidd/partfolder3d/issues/41)** automatic Let's Encrypt/ACME at nginx.
 > Other candidates (Next phases): **bulk move-assets UI** (#25 follow-up); refresh a `.3mf`'s embedded
 > slicer thumbnail on in-place edit; a manual **"re-render `.scad`"** button (deferred from #46).
 
-> **⚠️ DEPLOY NOTE for v0.8.0:** the on-host stack must **pull the new `:latest` images and restart**
-> to pick this up — v0.8.0 adds the **`openscad` binary** (image change, ~+370 MB) and **migration
-> `0026`** (auto-runs on backend-container start). The restart is also what makes the **sidecar-sync
-> fix** live, which clears the recurring `sidecar_error` Issues (dev DB: #9/#12/#13/#20 — Retry rescan
-> will succeed once deployed).
+> **⚠️ DEPLOY NOTE (v0.8.0 + v0.8.1):** the on-host/prod stack must **pull the new `:latest`
+> images and restart** to pick these up — v0.8.0 adds the **`openscad` binary** (image change,
+> ~+370 MB) and **migration `0026`** (auto-runs on backend-container start), and v0.8.1 fixes the
+> Keep DB/Keep sidecar 500. Restart is also what makes the sidecar-sync fixes live and clears the
+> recurring `sidecar_error` Issues. **Known live prod item:** conflict Issue #15
+> (`playbook-d-cribbage-ogjg73q`) — Keep DB/Keep sidecar 500s until v0.8.1 is deployed; **Ignore**
+> clears it safely meanwhile.
 
 ## Current state
 
-- **Latest release `v0.8.0`** (2026-07-26, on `main`; `:latest`/`:0.8.0`/`:0` published). Full
-  per-bullet detail in `CHANGELOG.md` `[0.8.0]` and `docs/decisions.md` (2026-07-26 entries).
-  Shipped this batch:
+- **Latest release `v0.8.1`** (2026-07-26, on `main`; `:latest`/`:0.8.1`/`:0` published) — a
+  one-fix patch: `_write_item_sidecar` now loads `item.creator` in the async context (guarded by
+  `inspect().unloaded`), so the conflict **Keep DB**/**Keep sidecar** actions (and any other
+  caller) no longer `greenlet_spawn`-crash on items with a creator. `CHANGELOG.md` `[0.8.1]` +
+  `docs/decisions.md` (2026-07-26 top entry).
+- **`v0.8.0`** (2026-07-26, on `main`; `:0.8.0` published) — the feature batch. Full per-bullet
+  detail in `CHANGELOG.md` `[0.8.0]` and `docs/decisions.md`. Shipped:
   - **Edit item description + add/remove tags in-app** (`feat:`, closes #47). Reused the existing
     write-through `PATCH /api/items/{key}` (`routers/items/core.py`) — updates DB + on-disk `.yml`
     sidecar + FTS in one op, marks a legit local edit (no reconcile drift). New tags land `pending`
