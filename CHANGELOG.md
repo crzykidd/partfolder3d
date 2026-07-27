@@ -20,6 +20,18 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Fixed
+
+- Resolving a `conflict` Issue via **Keep DB** or **Keep sidecar** no longer
+  crashes with `MissingGreenlet` ("greenlet_spawn has not been called") for items
+  that have a creator. Those actions (`routers/issues.py`) fetch the item with a
+  bare `select()` that doesn't eager-load `item.creator`, then write the sidecar —
+  `build_sidecar()` then lazy-loaded `creator` mid-write and crashed. The async-safe
+  attribute load now lives in the single sidecar writer
+  (`item_helpers._write_item_sidecar`), so every caller (these actions + the
+  reconcile scan) is covered. Follow-up to the v0.8.0 reconcile sidecar-sync fix,
+  which only guarded the scan's writer.
+
 ## [0.8.0] — 2026-07-26
 
 ### Added

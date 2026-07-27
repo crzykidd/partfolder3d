@@ -149,14 +149,28 @@ async def _build_sidecar_data(
 
 
 async def _write_item_sidecar(db: AsyncSession, item: Item) -> None:
-    """Write (or overwrite) the sidecar for an item."""
-    # created_at / updated_at are server-generated (server_default / onupdate), so a
-    # preceding flush EXPIRES them. build_sidecar() reads them synchronously, which
-    # would trigger an illegal lazy reload in the async session
-    # (MissingGreenlet: "greenlet_spawn has not been called"). Reload just these two
-    # scalars here, in the async context, before the sync build. We scope to these
-    # attribute names so already-loaded relationships (e.g. item.creator) stay intact.
+    """Write (or overwrite) the sidecar for an item.
+
+    Loads everything ``build_sidecar()`` reads synchronously *in the async
+    context first*, so no caller can trigger an illegal lazy reload
+    (``MissingGreenlet: "greenlet_spawn has not been called"``):
+
+    - ``created_at`` / ``updated_at`` are server-generated (server_default /
+      onupdate); a preceding flush EXPIRES them, so they're always refreshed.
+    - ``item.creator`` is a lazy relationship. Some callers pass an item fetched
+      with a **bare ``select(Item)``** that does not eager-load it — the reconcile
+      scan, and the conflict ``keep_db`` / ``keep_sidecar`` issue actions
+      (``routers/issues.py``). If left unloaded, ``build_sidecar``'s
+      ``item.creator`` access lazy-loads mid-write and crashes. Load it here (the
+      single source of truth for the sidecar write) so every caller is safe;
+      guarded via ``inspect().unloaded`` so an already-loaded creator isn't
+      needlessly re-queried.
+    """
+    from sqlalchemy import inspect as _sa_inspect  # noqa: PLC0415
+
     await db.refresh(item, attribute_names=["created_at", "updated_at"])
+    if "creator" in _sa_inspect(item).unloaded:
+        await db.refresh(item, attribute_names=["creator"])
     tags, files, images, default_img = await _build_sidecar_data(db, item)
     data = build_sidecar(
         item, tags=tags, files=files, images=images, default_image=default_img
