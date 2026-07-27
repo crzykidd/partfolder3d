@@ -956,6 +956,62 @@ async def test_action_keep_db_rewrites_sidecar(
 
 
 @pytest.mark.asyncio
+async def test_action_keep_db_with_creator_no_greenlet_crash(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    tmp_path: Any,
+    monkeypatch: Any,
+) -> None:
+    """Regression: keep_db on a conflict whose item HAS a creator must NOT crash
+    with MissingGreenlet.  `_action_keep_db` fetches the item with a bare
+    `select(Item)` (creator not eager-loaded), then `_write_item_sidecar` →
+    `build_sidecar` reads `item.creator`; without an in-context load that lazy
+    reload raises `greenlet_spawn has not been called`.  An item with NO creator
+    short-circuits the lazy load (FK is NULL → no SELECT), which is why the
+    plain keep_db test above never caught this."""
+    from app.models.creator import Creator  # noqa: PLC0415
+
+    csrf = await _setup_and_login(client)
+
+    mount = tmp_path / "library"
+    item_dir = mount / "cc" / "conflict-with-creator"
+    item_dir.mkdir(parents=True)
+
+    lib = await _make_library(db_session, str(mount))
+    creator = Creator(name="Some Designer", source_site="printables.com")
+    db_session.add(creator)
+    await db_session.flush()
+    item = await _make_item(db_session, lib.id, str(item_dir), title="Creator Conflict")
+    item.creator_id = creator.id
+    await db_session.flush()
+    item_id = item.id
+
+    (item_dir / f"conflict-with-creator_{item.key}.yml").write_text(
+        "schema_version: 1\nkey: x\ntitle: Old Title\n"
+    )
+
+    issue = await _make_issue(
+        db_session,
+        issue_type=IssueType.conflict,
+        target_path=str(item_dir),
+        item_id=item_id,
+        detail="Sidecar and DB both changed",
+    )
+    await db_session.flush()
+
+    monkeypatch.setattr("app.config.settings.DATA_DIR", str(tmp_path))
+
+    resp = await client.post(
+        f"/api/issues/{issue.id}/action",
+        json={"action": "keep_db"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["issue"]["status"] == "resolved"
+    assert list(item_dir.glob("*.yml"))
+
+
+@pytest.mark.asyncio
 async def test_action_keep_sidecar_applies_to_db(
     client: AsyncClient,
     db_session: AsyncSession,

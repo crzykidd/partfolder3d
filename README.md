@@ -18,7 +18,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.8.0-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.8.1-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 
@@ -28,10 +28,10 @@
 
 ## What's New
 
-**Latest — v0.8.0 (2026-07-26):** in-app editing of an item's description & tags,
-server-side OpenSCAD `.scad` → STL rendering, an in-app PDF viewer, one-click
-**Clear failed** in the Job Monitor, and stlflix.com import support — plus a fix for
-recurring reconcile `sidecar_error` issues.
+**Latest — v0.8.1 (2026-07-26):** patch release — fixes an Internal Server Error when
+resolving a `conflict` Issue via **Keep DB** / **Keep sidecar**. The v0.8 feature batch
+(in-app description/tag editing, server-side OpenSCAD render, in-app PDF viewer, one-click
+**Clear failed**, and stlflix.com import) is summarized below.
 
 **Top features by minor version** — full detail for *every* release (including patch
 releases and fixes) lives in **[CHANGELOG.md](CHANGELOG.md)** and the
@@ -55,7 +55,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.8.0) — see the
+> The full feature set below is **built and released** (v0.8.1) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -332,7 +332,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is in **active development** (v0.8.0).
+Honest snapshot — this project is in **active development** (v0.8.1).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -552,6 +552,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — v0.8.0 · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — v0.8.1 · built by <code>crzykidd</code></sub>
 
 </div>

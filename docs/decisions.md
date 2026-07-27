@@ -2,6 +2,27 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-26 — Sidecar-writer creator guard moved into `_write_item_sidecar` (keep_db/keep_sidecar greenlet crash)
+
+**Context:** on prod, resolving conflict Issue #15 via **Keep DB** 500'd with
+`MissingGreenlet: greenlet_spawn has not been called` — traceback:
+`issues.py::_action_keep_db → _write_item_sidecar → build_sidecar → item.creator` (lazy
+reload of an un-eager-loaded relationship in the async worker). The v0.8.0 reconcile fix
+only guarded the scan's writer; `_action_keep_db` / `_action_keep_sidecar` fetch the item
+with a bare `select(Item)` and were missed.
+
+- **Fix in the single writer, not per call site.** Moved the async-context creator load
+  **into `item_helpers._write_item_sidecar`** (guarded by `inspect(item).unloaded` so an
+  already-selectinloaded creator isn't re-queried), alongside the existing
+  created_at/updated_at refresh. Now every caller — the two conflict actions, the reconcile
+  scan, the API create/update path — is covered by one guard; no future caller can
+  reintroduce the bug.
+- **Why the original keep_db test missed it:** its item had no creator, and a NULL
+  many-to-one FK short-circuits the lazy load (no SELECT → no greenlet). The regression
+  test (`test_action_keep_db_with_creator_no_greenlet_crash`) sets a real `creator_id`.
+- Left reconcile's `_write_sidecar_for_item` creator refresh in place (now redundant but
+  harmless — the writer's guard sees creator already loaded and skips).
+
 ## 2026-07-26 — Scraper: stlflix host-gated `__NEXT_DATA__` enrichment (not shape-gated)
 
 **Context:** `prompts/done/2026-07-26-scrape-stlflix.md` — importing a

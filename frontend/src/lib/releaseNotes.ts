@@ -18,6 +18,13 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: Record<string, ReleaseNote> = {
+  '0.8.1': {
+    title: "What's New in v0.8.1",
+    bullets: [
+      'Fixed: resolving a conflict Issue via "Keep DB" or "Keep sidecar" no longer fails with an Internal Server Error for items that have a creator',
+    ],
+    githubReleaseUrl: 'https://github.com/crzykidd/partfolder3d/releases/tag/v0.8.1',
+  },
   '0.8.0': {
     title: "What's New in v0.8.0",
     bullets: [
