@@ -60,6 +60,9 @@ prefix appears only on git tags and GitHub releases.
   check) — every other file type keeps forcing the existing attachment /
   `application/octet-stream` download, since serving arbitrary user files
   inline, same-origin, would be an XSS vector.
+- Job Monitor: an always-visible **Clear failed** button archives all failed
+  jobs in one click, without first having to select the "failed" status
+  filter (the clear action was previously only reachable via that filter).
 
 ### Fixed
 
