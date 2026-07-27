@@ -1131,6 +1131,14 @@ def test_next_data_stlflix_gate_is_host_not_shape() -> None:
     )
     # og:title kept; stlflix enrichment never ran on this domain.
     assert sr.title == "Some Other Strapi Site"
+
+    # A look-alike domain that merely *ends with* the literal "stlflix.com"
+    # (e.g. evilstlflix.com) must NOT trigger the branch — the gate matches the
+    # apex or a dotted subdomain only.
+    sr_lookalike = extract_metadata_from_html(
+        html, "https://evilstlflix.com/product/lion-rest", "evilstlflix.com", 20
+    )
+    assert sr_lookalike.title == "Some Other Strapi Site"
     assert sr.creator_name is None
     assert sr.image_urls == []
 

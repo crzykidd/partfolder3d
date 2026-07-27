@@ -865,7 +865,10 @@ def extract_metadata_from_html(
     # stlflix.com: host-gated Strapi-shaped __NEXT_DATA__ enrichment (its
     # pageProps shape is unrelated to MakerWorld's and would false-positive if
     # shape-sniffed instead — see _enrich_from_next_data_stlflix docstring).
-    if domain.endswith("stlflix.com"):
+    # Match the apex and any subdomain (platform.stlflix.com), but NOT a
+    # look-alike like evilstlflix.com — a bare endswith("stlflix.com") would
+    # accept those (CodeQL py/incomplete-url-substring-sanitization).
+    if domain == "stlflix.com" or domain.endswith(".stlflix.com"):
         _enrich_from_next_data_stlflix(result, html, max_images)
 
     return result
