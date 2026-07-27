@@ -2,6 +2,26 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-26 — Scraper: stlflix host-gated `__NEXT_DATA__` enrichment (not shape-gated)
+
+**Context:** `prompts/done/2026-07-26-scrape-stlflix.md` — importing a
+`platform.stlflix.com/product/<slug>` URL only scraped the generic site-wide header.
+
+stlflix.com is Next.js like MakerWorld, but its `props.pageProps` is a **Strapi** shape
+(product fields directly on `pageProps`, not nested under `design`) — the existing
+MakerWorld-shaped `_enrich_from_next_data` silently skipped it, so imports fell back to the
+generic `og:title`/`og:description`. Added a sibling `_enrich_from_next_data_stlflix` (plus
+`_strapi_single_url`/`_strapi_collection_urls`/`_strapi_collection_names` unwrap helpers),
+gated on **hostname** (`domain.endswith("stlflix.com")`) rather than shape-sniffed — the
+generic Strapi `field.data.attributes` relation shape is common enough across unrelated
+Next.js/Strapi sites that shape-sniffing risks false positives. **Creator:** stlflix exposes
+no per-model designer (`collab` is null; `drop` is a release group, not a person) — defaulted
+`creator_name` to `"STLFLIX"`, applied only as a fallback when no meta-author signal already
+populated it (same priority rule as MakerWorld's `designCreator`). No dedicated connector
+(unlike prinnit) — it flows through the normal `scrape_url` → `extract_metadata_from_html`
+path, which now has the host-gated branch built in. The base `httpx` fetch already handles
+the site's `NEXT_LOCALE` 307 redirect, so no cookie/redirect/FlareSolverr work was needed.
+
 ## 2026-07-26 — Reconcile sidecar writer deduped onto item_helpers; expired `updated_at` guarded
 
 **Context:** `prompts/done/2026-07-26-fix-sidecar-sync-greenlet.md` — the nightly reconcile

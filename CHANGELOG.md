@@ -63,6 +63,10 @@ prefix appears only on git tags and GitHub releases.
 - Job Monitor: an always-visible **Clear failed** button archives all failed
   jobs in one click, without first having to select the "failed" status
   filter (the clear action was previously only reachable via that filter).
+- Scraper: import stlflix.com product pages correctly — title, description,
+  gallery images and tags are now extracted from the page's Next.js
+  `__NEXT_DATA__` blob (a Strapi shape), instead of falling back to the
+  generic site-wide header that every stlflix URL previously produced.
 
 ### Fixed
 

@@ -946,6 +946,213 @@ def test_next_data_no_design_pictures_keeps_dom_images() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 11c. __NEXT_DATA__ enrichment (stlflix — Strapi shape, host-gated)
+# ---------------------------------------------------------------------------
+
+# Trimmed/transcribed from a live capture of
+# platform.stlflix.com/product/lion-rest (see docs/decisions.md) — no live
+# network is used in these tests.  Strapi relations: single -> data.attributes,
+# collection -> data[].attributes.
+_STLFLIX_NEXT_DATA = _json.dumps({
+    "props": {
+        "pageProps": {
+            "name": "Lion Rest",
+            "description": (
+                "<p><strong>3D MODEL DESCRIPTION</strong></p>"
+                "<p>The jungle can wait&hellip; this lion is busy enjoying "
+                "the quiet.</p>"
+                "<ul><li>This <strong>STL</strong> file is recommended for "
+                "<strong>FDM</strong> printers.</li></ul>"
+            ),
+            "keywords": "cute, animal, habitat, keychain, lion",
+            "thumbnail": {
+                "data": {
+                    "attributes": {
+                        "url": (
+                            "https://s3.us-east-2.amazonaws.com/"
+                            "static.stlflix.com/Lion_Rest_thumb_2d383bb66c.png"
+                        )
+                    }
+                }
+            },
+            "hover": {
+                "data": {
+                    "attributes": {
+                        "url": (
+                            "https://s3.us-east-2.amazonaws.com/"
+                            "static.stlflix.com/Lion_Rest_WEBM_311bf1ca41.webm"
+                        )
+                    }
+                }
+            },
+            "stl_preview": {"data": None},
+            "gallery": {
+                "data": [
+                    {"attributes": {"url": "https://s3.us-east-2.amazonaws.com/static.stlflix.com/Lion_Rest_1.png"}},
+                    {"attributes": {"url": "https://s3.us-east-2.amazonaws.com/static.stlflix.com/Lion_Rest_2.png"}},
+                    {"attributes": {"url": "https://s3.us-east-2.amazonaws.com/static.stlflix.com/Lion_Rest_3.png"}},
+                ]
+            },
+            "tags": {
+                "data": [
+                    {"attributes": {"name": "Intermediate"}},
+                    {"attributes": {"name": "Long (5 hours - 12 hours)"}},
+                    {"attributes": {"name": "Filament"}},
+                ]
+            },
+            "sub_categories": {
+                "data": [
+                    {"attributes": {"name": "Animals"}},
+                    {"attributes": {"name": "Keychains"}},
+                ]
+            },
+            "parent_categories": {
+                "data": [
+                    {"attributes": {"name": "Toys"}},
+                    {"attributes": {"name": "Art"}},
+                ]
+            },
+            "categories": {"data": []},
+            "collab": {"data": None},
+            "drop": {"data": {"attributes": {"title": "Drop #251", "slug": "drop-251"}}},
+        }
+    }
+})
+
+_STLFLIX_HTML = f"""<html>
+<head>
+  <meta property="og:title" content="STLFLIX - The Ultimate STL Subscription" />
+  <meta property="og:description" content="Download thousands of 3D models." />
+  <meta property="og:site_name" content="STLFLIX" />
+  <script id="__NEXT_DATA__" type="application/json">{_STLFLIX_NEXT_DATA}</script>
+</head>
+<body></body>
+</html>"""
+
+
+def test_next_data_stlflix_happy_path() -> None:
+    """stlflix Strapi-shaped NEXT_DATA replaces the generic og title/description,
+    yields the gallery in order with the thumbnail cover prepended, and unions
+    keywords + tags + sub/parent categories into raw_tags."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    sr = extract_metadata_from_html(
+        _STLFLIX_HTML,
+        "https://platform.stlflix.com/product/lion-rest",
+        "platform.stlflix.com",
+        20,
+    )
+    # Real product title/description replace the generic site-wide og: values.
+    assert sr.title == "Lion Rest"
+    assert sr.description is not None
+    assert "STLFLIX" not in sr.description
+    assert "<strong>" not in sr.description
+    assert "jungle" in sr.description
+
+    # Thumbnail (cover) prepended; gallery order preserved after it.
+    assert sr.image_urls == [
+        "https://s3.us-east-2.amazonaws.com/static.stlflix.com/Lion_Rest_thumb_2d383bb66c.png",
+        "https://s3.us-east-2.amazonaws.com/static.stlflix.com/Lion_Rest_1.png",
+        "https://s3.us-east-2.amazonaws.com/static.stlflix.com/Lion_Rest_2.png",
+        "https://s3.us-east-2.amazonaws.com/static.stlflix.com/Lion_Rest_3.png",
+    ]
+
+    # Tags: union of keywords + tags + sub/parent categories.
+    for expected_tag in (
+        "cute", "animal", "habitat", "keychain", "lion",  # keywords
+        "Intermediate", "Long (5 hours - 12 hours)", "Filament",  # tags
+        "Animals", "Keychains",  # sub_categories
+        "Toys", "Art",  # parent_categories
+    ):
+        assert expected_tag in sr.raw_tags
+
+    # No per-model designer field on stlflix -> default fallback creator.
+    assert sr.creator_name == "STLFLIX"
+    assert sr.blocked is False
+
+
+def test_next_data_stlflix_meta_author_wins_over_default_creator() -> None:
+    """Existing meta author takes priority; the STLFLIX default is not applied."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    html = f"""<html>
+    <head>
+      <meta property="og:title" content="STLFLIX - The Ultimate STL Subscription" />
+      <meta name="author" content="MetaAuthor" />
+      <script id="__NEXT_DATA__" type="application/json">{_STLFLIX_NEXT_DATA}</script>
+    </head>
+    <body></body>
+    </html>"""
+
+    sr = extract_metadata_from_html(
+        html, "https://platform.stlflix.com/product/lion-rest", "platform.stlflix.com", 20
+    )
+    assert sr.creator_name == "MetaAuthor"
+    assert sr.creator_name != "STLFLIX"
+
+
+def test_next_data_stlflix_malformed_shape_no_effect() -> None:
+    """stlflix-hosted page whose pageProps lacks 'name' (not the product shape)
+    is silently ignored — no enrichment, no crash."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    nd = _json.dumps({"props": {"pageProps": {"someOtherField": 1}}})
+    html = f"""<html>
+    <head>
+      <meta property="og:title" content="STLFLIX - The Ultimate STL Subscription" />
+      <script id="__NEXT_DATA__" type="application/json">{nd}</script>
+    </head>
+    <body></body>
+    </html>"""
+
+    sr = extract_metadata_from_html(
+        html, "https://platform.stlflix.com/product/unknown", "platform.stlflix.com", 20
+    )
+    assert sr.title == "STLFLIX - The Ultimate STL Subscription"
+    assert sr.creator_name is None
+
+
+def test_next_data_stlflix_gate_is_host_not_shape() -> None:
+    """A non-stlflix domain never hits the stlflix branch, even with a
+    stlflix-shaped pageProps (host-gated, not shape-gated -- regression guard
+    against false-positiving on unrelated Strapi/Next.js sites)."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    html = f"""<html>
+    <head>
+      <meta property="og:title" content="Some Other Strapi Site" />
+      <script id="__NEXT_DATA__" type="application/json">{_STLFLIX_NEXT_DATA}</script>
+    </head>
+    <body></body>
+    </html>"""
+
+    sr = extract_metadata_from_html(
+        html, "https://othernextjssite.com/product/lion-rest", "othernextjssite.com", 20
+    )
+    # og:title kept; stlflix enrichment never ran on this domain.
+    assert sr.title == "Some Other Strapi Site"
+    assert sr.creator_name is None
+    assert sr.image_urls == []
+
+
+def test_next_data_makerworld_unaffected_by_stlflix_branch() -> None:
+    """MakerWorld's own NEXT_DATA enrichment is unaffected by the new stlflix
+    branch (regression guard) -- a makerworld.com domain never evaluates the
+    stlflix host gate's enrichment path."""
+    from app.storage.scraper import extract_metadata_from_html
+
+    sr = extract_metadata_from_html(
+        _MAKERWORLD_HTML,
+        "https://makerworld.com/en/models/2990447-knitted-goose",
+        "makerworld.com",
+        20,
+    )
+    assert sr.title == "Knitted Goose"
+    assert sr.creator_name == "Smoggy3D"
+    assert sr.creator_name != "STLFLIX"
+
+
+# ---------------------------------------------------------------------------
 # Generic image hygiene (applies to all sites via _extract_images)
 # ---------------------------------------------------------------------------
 

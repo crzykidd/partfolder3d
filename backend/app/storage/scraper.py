@@ -565,6 +565,194 @@ def _enrich_from_next_data(result: ScrapeResult, html: str, max_images: int) -> 
 
 
 # ---------------------------------------------------------------------------
+# stlflix.com __NEXT_DATA__ enrichment (host-gated — Strapi shape)
+# ---------------------------------------------------------------------------
+
+_STLFLIX_CREATOR_DEFAULT = "STLFLIX"
+
+
+def _strapi_single_url(field: object) -> str | None:
+    """Unwrap a Strapi single-relation field's URL: ``field.data.attributes.url``."""
+    if not isinstance(field, dict):
+        return None
+    data = field.get("data")
+    if not isinstance(data, dict):
+        return None
+    attrs = data.get("attributes")
+    if not isinstance(attrs, dict):
+        return None
+    url = attrs.get("url")
+    return url.strip() if isinstance(url, str) and url.strip() else None
+
+
+def _strapi_collection_urls(field: object) -> list[str]:
+    """Unwrap a Strapi collection-relation field's URLs: ``field.data[].attributes.url``."""
+    if not isinstance(field, dict):
+        return []
+    data = field.get("data")
+    if not isinstance(data, list):
+        return []
+    urls: list[str] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        attrs = item.get("attributes")
+        if not isinstance(attrs, dict):
+            continue
+        url = attrs.get("url")
+        if isinstance(url, str) and url.strip():
+            urls.append(url.strip())
+    return urls
+
+
+def _strapi_collection_names(field: object) -> list[str]:
+    """Unwrap a Strapi collection-relation field's names: ``field.data[].attributes.name``."""
+    if not isinstance(field, dict):
+        return []
+    data = field.get("data")
+    if not isinstance(data, list):
+        return []
+    names: list[str] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        attrs = item.get("attributes")
+        if not isinstance(attrs, dict):
+            continue
+        name = attrs.get("name")
+        if isinstance(name, str) and name.strip():
+            names.append(name.strip())
+    return names
+
+
+def _enrich_from_next_data_stlflix(result: ScrapeResult, html: str, max_images: int) -> None:
+    """stlflix.com ``__NEXT_DATA__`` enrichment.
+
+    stlflix is Next.js like MakerWorld, but its ``props.pageProps`` is a
+    **Strapi** shape (product fields live directly on ``pageProps``, not
+    nested under a ``design`` key) — the existing MakerWorld-shaped
+    `_enrich_from_next_data` silently skips it.  Single Strapi relations
+    unwrap as ``field.data.attributes.<x>``; collections as
+    ``field.data[].attributes.<x>``.
+
+    **Host-gated** (the caller checks the domain before calling this), not
+    shape-gated like the MakerWorld helper: the generic Strapi
+    ``.data.attributes`` relation shape is common enough across unrelated
+    Next.js/Strapi sites that shape-sniffing alone risks false positives.
+
+    Field map (confirmed against ``platform.stlflix.com/product/lion-rest``):
+      - title        <- ``pageProps.name`` (plain string) — *replaces* the
+                        og:title-derived title, same priority rule as MakerWorld.
+      - description  <- ``pageProps.description`` (HTML; tags stripped, then run
+                        through the shared boilerplate cleaner) — *replaces*.
+      - images       <- ``pageProps.gallery.data[].attributes.url``, with
+                        ``pageProps.thumbnail.data.attributes.url`` prepended when
+                        it differs from ``gallery[0]``; *replaces* DOM-scraped
+                        images entirely (same replace-not-merge rule as MakerWorld's
+                        ``design_pictures`` gallery).
+      - tags         <- union of ``pageProps.keywords`` (comma-separated string),
+                        ``pageProps.tags.data[].attributes.name``,
+                        ``pageProps.sub_categories.data[].attributes.name``,
+                        ``pageProps.parent_categories.data[].attributes.name``
+                        (deduped case-insensitively, capped at 50 like the
+                        MakerWorld path).
+      - creator_name <- stlflix exposes no per-model designer field (``collab``
+                        is null; ``drop`` is a release group, not a person), so
+                        this defaults to the constant ``"STLFLIX"`` — applied
+                        only when ``result.creator_name`` is still empty (existing
+                        signals always win, same fallback-only rule as MakerWorld).
+
+    Never raises.  A malformed/huge JSON blob, or a ``pageProps`` missing the
+    ``name`` string (i.e. not this Strapi product shape), is silently ignored.
+    """
+    try:
+        import json  # noqa: PLC0415
+
+        marker = '<script id="__NEXT_DATA__"'
+        start = html.find(marker)
+        if start == -1:
+            return
+
+        tag_end = html.find(">", start)
+        if tag_end == -1:
+            return
+        script_end = html.find("</script>", tag_end)
+        if script_end == -1:
+            return
+
+        blob = html[tag_end + 1 : script_end]
+        if len(blob) > _NEXT_DATA_MAX_BYTES:
+            log.debug(
+                "_enrich_from_next_data_stlflix: blob too large (%d bytes), skipping",
+                len(blob),
+            )
+            return
+
+        data = json.loads(blob)
+        page_props = data.get("props", {}).get("pageProps")
+        if not isinstance(page_props, dict):
+            return
+
+        nd_name = page_props.get("name")
+        if not (isinstance(nd_name, str) and nd_name.strip()):
+            # Not the expected Strapi product shape; leave result untouched.
+            return
+
+        # 1. Title — plain string; still run through the shared cleaner.
+        cleaned_title = _clean_title(nd_name)
+        if cleaned_title:
+            result.title = cleaned_title
+
+        # 2. Description — HTML; strip tags, collapse whitespace, then run
+        #    through the shared boilerplate cleaner.
+        nd_desc = page_props.get("description")
+        if isinstance(nd_desc, str) and nd_desc.strip():
+            text = re.sub(r"<[^>]+>", " ", nd_desc)
+            text = re.sub(r"\s+", " ", text).strip()
+            cleaned_desc = _clean_description(text)
+            if cleaned_desc:
+                result.description = cleaned_desc
+
+        # 3. Images — gallery replaces DOM-scraped images; thumbnail cover
+        #    prepended when it differs from gallery[0].
+        gallery_urls = _strapi_collection_urls(page_props.get("gallery"))
+        if gallery_urls:
+            cover = _strapi_single_url(page_props.get("thumbnail"))
+            if cover and cover != gallery_urls[0]:
+                gallery_urls = [cover] + [u for u in gallery_urls if u != cover]
+            result.image_urls = gallery_urls[:max_images]
+
+        # 4. Tags — union of keywords + tags + sub/parent categories.
+        existing_lower = {t.lower() for t in result.raw_tags}
+        new_tags: list[str] = []
+
+        kw = page_props.get("keywords")
+        if isinstance(kw, str) and kw.strip():
+            for t in kw.split(","):
+                t = t.strip()
+                if t:
+                    new_tags.append(t)
+
+        new_tags.extend(_strapi_collection_names(page_props.get("tags")))
+        new_tags.extend(_strapi_collection_names(page_props.get("sub_categories")))
+        new_tags.extend(_strapi_collection_names(page_props.get("parent_categories")))
+
+        for t in new_tags:
+            if t.lower() not in existing_lower:
+                result.raw_tags.append(t)
+                existing_lower.add(t.lower())
+        result.raw_tags = result.raw_tags[:50]
+
+        # 5. Creator — no per-model designer field; default fallback only
+        #    applied when nothing has already populated creator_name.
+        if not result.creator_name:
+            result.creator_name = _STLFLIX_CREATOR_DEFAULT
+
+    except Exception:
+        log.debug("_enrich_from_next_data_stlflix: failed to parse NEXT_DATA (ignored)")
+
+
+# ---------------------------------------------------------------------------
 # Shared HTML → ScrapeResult extraction helper
 # ---------------------------------------------------------------------------
 
@@ -673,6 +861,12 @@ def extract_metadata_from_html(
     # only filled in when still empty; the clean NEXT_DATA title overrides the
     # og:title-suffixed one; design_pictures gallery replaces DOM-scraped images.
     _enrich_from_next_data(result, html, max_images)
+
+    # stlflix.com: host-gated Strapi-shaped __NEXT_DATA__ enrichment (its
+    # pageProps shape is unrelated to MakerWorld's and would false-positive if
+    # shape-sniffed instead — see _enrich_from_next_data_stlflix docstring).
+    if domain.endswith("stlflix.com"):
+        _enrich_from_next_data_stlflix(result, html, max_images)
 
     return result
 
