@@ -20,6 +20,8 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-07-26
+
 ### Fixed
 
 - Resolving a `conflict` Issue via **Keep DB** or **Keep sidecar** no longer
@@ -1382,7 +1384,8 @@ detail in this one file. (An earlier plan to archive closed minor series into
 <!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
      earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
 
-[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/crzykidd/partfolder3d/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/crzykidd/partfolder3d/compare/v0.7.5...v0.8.0
 [0.7.5]: https://github.com/crzykidd/partfolder3d/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/crzykidd/partfolder3d/compare/v0.7.3...v0.7.4
