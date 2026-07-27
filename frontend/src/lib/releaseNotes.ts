@@ -18,6 +18,18 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: Record<string, ReleaseNote> = {
+  '0.8.0': {
+    title: "What's New in v0.8.0",
+    bullets: [
+      'Edit an existing item\'s description and add/remove tags directly from the item page — no re-import or hand-editing the sidecar needed',
+      'Server-side OpenSCAD rendering: import a .scad and PartFolder compiles it to an STL so it gets an in-app thumbnail, 3D viewer, and mesh stats',
+      'View a PDF file in-app (browser-native viewer + open-in-new-tab) instead of being forced to download it first',
+      'One-click "Clear failed" button in the Job Monitor — archive all failed jobs without first selecting the failed filter',
+      'Import stlflix.com product pages — title, description, gallery images, and tags now populate correctly',
+      'Fixed a reconcile bug that filed recurring, unclearable "sidecar_error" issues (a greenlet crash while syncing DB metadata to the sidecar); Retry rescan now clears them',
+    ],
+    githubReleaseUrl: 'https://github.com/crzykidd/partfolder3d/releases/tag/v0.8.0',
+  },
   '0.7.5': {
     title: "What's New in v0.7.5",
     bullets: [

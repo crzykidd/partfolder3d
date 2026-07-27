@@ -18,7 +18,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.7.5-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.8.0-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 
@@ -28,95 +28,18 @@
 
 ## What's New
 
-### v0.7.5 (2026-07-25)
+**Latest — v0.8.0 (2026-07-26):** in-app editing of an item's description & tags,
+server-side OpenSCAD `.scad` → STL rendering, an in-app PDF viewer, one-click
+**Clear failed** in the Job Monitor, and stlflix.com import support — plus a fix for
+recurring reconcile `sidecar_error` issues.
 
-- **OpenSCAD `.scad` support for self-designed models.** Import a `.scad` and it's now kept
-  as a first-class design source: a **Show SCAD** button on the item opens a read-only viewer
-  to copy or download the code, or **open it prefilled in the OpenSCAD web playground** for
-  editing / preview / STL export.
-- **Auto-filled details from your `.scad` header.** On import, the item title and description
-  are pre-filled from the file's leading comment header — with an optional **Describe from
-  SCAD** AI action on the description step if you want the model summarized for you.
+**Top features by minor version** — full detail for *every* release (including patch
+releases and fixes) lives in **[CHANGELOG.md](CHANGELOG.md)** and the
+[GitHub releases](https://github.com/crzykidd/partfolder3d/releases):
 
-### v0.7.4 (2026-07-23)
-
-- **MakerWorld imports save their gallery images again** — MakerWorld's image CDN recently
-  started serving some gallery images with a generic `application/octet-stream` type, which the
-  importer rejected (the wizard showed the images, but the finished item had none). Imports now
-  verify the actual image data and save it regardless of the mislabeled content type; anything
-  that isn't genuinely an image is skipped. The same fix applies to any source (e.g. prinnit)
-  whose CDN mislabels image content-types.
-
-### v0.7.3 (2026-07-23)
-
-- **Clearer diagnostics when a scraped image doesn't save on import** — if an image shown in
-  the import wizard fails to download or write when you finalize the import, the backend log
-  now records the exact reason (the HTTP error, a blocked/failed fetch with its exception
-  type, or a missing staged file) plus a per-import summary of how many images were saved vs.
-  failed and how long it took. Previously such a failure was logged with no cause, making it
-  impossible to tell why the image didn't land on the item.
-
-### v0.7.2 (2026-07-23)
-
-- **No more false "corruption" alerts on files you edit yourself** — open a `.3mf` in your
-  slicer, tweak it, and save it back in place, and the reconcile scan now recognizes it as a
-  legitimate edit: it adopts the new hash and re-renders instead of raising a critical
-  corruption Issue. A `corruption` Issue is now reserved for a genuinely bad write (a file
-  that no longer parses) or silent bit-rot (content changed with no newer timestamp).
-- **Clear a review backlog in one click** — the Reviews page (`/admin/reviews`) gained
-  **Approve all** and **Reject all** buttons for pending reconcile reviews. Reject-all is a
-  cheap discard; Approve-all replays every queued change (with a confirm step).
-- **Fixed:** the **Log a Print** and **Add asset** dialogs no longer let the page's Share
-  card (or other panels) paint on top of them — both are now portaled so they always sit
-  above the page.
-
-### v0.7.1 (2026-07-21)
-
-- **Built-in HTTPS at nginx** — self-hosters without an upstream reverse proxy can now serve HTTPS
-  directly. Set `TLS_MODE=selfsigned` for an auto-generated cert (instant HTTPS, browser trust
-  warning) or `TLS_MODE=provided` to bring your own real cert; the default `off` is unchanged. See
-  [`docs/tls.md`](docs/tls.md), and the new **HTTPS / TLS** card in admin Settings points the way.
-- **Security:** nginx base image bumped `1.27-alpine` → `1.30-alpine`, fixing several 2026 nginx
-  CVEs (incl. CVE-2026-42533).
-- **Upgrading:** the default (plain-HTTP) setup needs **no changes** — TLS is opt-in and defaults
-  to `off`, so just `pull` and go. Only if you bind-mount a **custom** `nginx.conf` do you need to
-  reconcile it against this release (the config was refactored into includes) — see the CHANGELOG.
-
-### v0.7.0 (2026-07-20)
-
-- **Added: prinnit.com import.** Paste a [prinnit.com](https://prinnit.com) design URL into
-  the import wizard and it now pre-fills the real title, description (with an appended
-  print-details block — print time, difficulty, weight, bed size, filaments, video), creator,
-  tags, and gallery images. prinnit's design pages are a client-rendered app with no metadata
-  for the built-in scraper to read, so a dedicated connector pulls the details from its public
-  API instead. No setup required. The paid `.3mf` is still downloaded after purchase and
-  uploaded in the wizard.
-
-### v0.6.1 (2026-07-19)
-
-- **Fixes a worker crash-loop on large models.** Analyzing a very large mesh could
-  out-of-memory–kill the whole background worker and then retry forever, stalling all
-  jobs. Mesh analysis now runs in an isolated, memory- and time-bounded subprocess, so one
-  bad file can never take the worker down, and a repeatedly-failing job is retried a
-  bounded number of times and then marked failed instead of looping.
-- **Very large models are skipped gracefully.** Meshes over a configurable size — including
-  huge multi-object 3MFs (detected by uncompressed geometry size before loading) — are
-  flagged "too large to analyze" and cached, instead of failing on every rescan.
-- **No more duplicate analysis.** A model is no longer analyzed twice at once after a
-  restart or double-enqueue.
-
-### v0.6.0 (2026-07-19)
-
-**Added: Manyfold import workflow.** Import a model straight from a self-hosted
-[Manyfold](https://manyfold.org) instance — register the instance with its OAuth credentials
-under **Admin → AI & Scraping → Manyfold**, then paste any model URL from it into the
-import wizard. PartFolder pulls the metadata, tags, images, and 3D files straight from Manyfold's
-API into the wizard for review (a new **Assets** step lets you deselect any files you don't want
-before committing).
-
-For the full, per-release history of every version, see **[CHANGELOG.md](CHANGELOG.md)**.
-
----
+- **v0.8** — in-app description/tag editing · server-side OpenSCAD render · in-app PDF viewer · one-click clear-failed jobs · stlflix.com import
+- **v0.7** — OpenSCAD `.scad` source viewer + playground hand-off · prinnit.com import · built-in HTTPS/TLS at nginx · bulk review approve/reject
+- **v0.6** — Manyfold import workflow · large-model analysis hardening (isolated, memory/time-bounded subprocess)
 
 ## Overview
 
@@ -132,7 +55,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.7.5) — see the
+> The full feature set below is **built and released** (v0.8.0) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -409,7 +332,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is in **active development** (v0.7.5).
+Honest snapshot — this project is in **active development** (v0.8.0).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -629,6 +552,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — v0.7.5 · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — v0.8.0 · built by <code>crzykidd</code></sub>
 
 </div>
