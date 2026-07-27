@@ -36,7 +36,7 @@ One row per subsystem. Paths are relative to repo root. Backend routers live in
 
 | Feature | Router | Model(s) | Worker task | Storage/service | API client | Page(s) | Test file(s) |
 |---|---|---|---|---|---|---|---|
-| Items / catalog | `items.py` | `item.py`, `file.py`, `image.py`, `favorite.py` | `tasks/render.py`, `tasks/analysis.py` | `storage/paths.py`, `storage/inventory.py`, `services/item_helpers.py` | `items.ts` | `CatalogPage.tsx`, `ItemPage.tsx`, `pages/item/*` | `test_phase2_items.py`, `test_phase3_catalog.py`, `test_item_files.py`, `test_phase14_item_images.py`, `test_phase15_local_modified.py`; FE `catalog.test.ts`, `carousel.test.ts` |
+| Items / catalog | `items.py` | `item.py`, `file.py`, `image.py`, `favorite.py` | `tasks/render.py`, `tasks/analysis.py` | `storage/paths.py`, `storage/inventory.py`, `services/item_helpers.py` | `items.ts` | `CatalogPage.tsx`, `ItemPage.tsx`, `pages/item/*` (`ItemMetadata.tsx` — inline description/tags editor, issue #47) | `test_phase2_items.py`, `test_phase3_catalog.py`, `test_item_files.py`, `test_phase14_item_images.py`, `test_phase15_local_modified.py`, `test_item_edit_metadata.py`; FE `catalog.test.ts`, `carousel.test.ts`, `item-metadata-edit.test.tsx` |
 | Import sessions / bulk import | `import_sessions/` (`sessions.py`, `helpers.py`, `commit.py`, `__init__.py`) | `import_session.py` (`ImportSessionFile.selected` — per-file commit toggle, Manyfold Part 2) | `tasks/import_session.py` (`_maybe_manyfold_import` — Manyfold primary path, tried BEFORE `scrape_url`/the fallback chain when the URL's domain matches an enabled `ManyfoldInstance`) | `storage/scraper.py`, `storage/archive.py`, `storage/manyfold_client.py` | `import.ts` (`patchSessionFileSelection`, Manyfold Part 3) | `ImportsPage.tsx`, `ImportWizardPage.tsx`, `pages/import-wizard/*` (`AssetsStep.tsx` — file-selection step, shown when the session has staged files, Manyfold Part 3) | `test_phase5_import.py`, `test_bulk_import.py`, `test_import_management.py`, `test_url_wizard_attach.py`, `test_manyfold_import.py`; FE `import-wizard.test.ts`, `bulk-import.test.ts`, `import-wizard-steps.test.tsx` |
 | Shares (item + site) / public share | `shares.py`, `site_capabilities.py` | `share_link.py`, `share_audit_event.py`, `site_capability.py` | — | `storage/paths.py` (traversal guards) | `shares.ts` | `PublicSharePage.tsx`, `pages/item/ShareControls.tsx`, `admin/ShareAuditPage.tsx`, `admin/SiteCapabilitiesPage.tsx` | **Share assertions span several files:** `test_phase7_sharing.py` (primary), plus expiry/revocation/privacy checks in `test_phase7_print_history.py`, `test_phase9_admin.py`, `test_phase15_local_modified.py` |
 | Issues / reconcile | `issues.py`, `changes.py` | `issue.py`, `change_log.py` | `worker/reconcile.py` (`_behavior_re_render` is the unified model-file change classifier: legit-edit → adopt hash + re-render vs bad-write/bit-rot → `corruption` Issue; `_behavior_integrity` handles the rest), `tasks/scheduled.py` | `storage/sidecar.py`, `storage/inventory.py`, `worker/render_mesh.py` (`validate_model_file`) | `issues.ts`, `changes.ts` | `admin/IssuesPage.tsx`, `admin/ChangesPage.tsx` | `test_phase6_reconcile.py`, `test_issue_resolution.py`; FE `reconcile-ui.test.ts` |
@@ -51,7 +51,8 @@ One row per subsystem. Paths are relative to repo root. Backend routers live in
 | Tags / tag-admin | `tags.py`, `tag_admin.py` | `tag.py` | — | — | `tag-admin.ts` (+ tag ops in `items.ts`) | `admin/TagAdminPage.tsx`, `admin/PendingTagsPage.tsx` | `test_tag_delete_and_browse_counts.py`, `test_tag_search_autocomplete.py`, `test_starter_tags_ai_status.py` |
 | Creators | `creators.py` | `creator.py` | — | — | (via `items.ts`) | `CreatorPage.tsx`, `MyCreationsPage.tsx` | (covered in item/import tests) |
 | Mesh / 3MF analysis & 3D viewer | `items.py` (preview_3d), `downloads.py` | `file.py`, `image.py` | `worker/mesh_analysis.py`, `worker/threemf.py` (`validate_3mf_structure`), `worker/render_mesh.py` (`validate_model_file` — reconcile structural check, no render backend needed), `worker/render_subprocess.py`, `tasks/render.py`, `tasks/analysis.py` | `storage/gcode_parser.py` | `items.ts` | `pages/item/ObjectBreakdown.tsx`, `ThreeMfPanel.tsx`, 3D viewer | `test_object_analysis.py`, `test_threemf.py`, `test_threemf_thumbnail_path.py`, `test_render_reliability.py`; FE `viewer.test.tsx`, `threemf-panel.test.tsx`, `object-breakdown.test.tsx` |
-| Downloads / export | `downloads.py`, `export.py` | `download_bundle.py` | `tasks/bundles.py` | `storage/archive.py` | `export.ts` | `admin/ExportPage.tsx` | (covered in `test_phase9_admin.py`, archive in `test_archive.py`) |
+| OpenSCAD server-side render (issue #46) | `import_sessions/commit.py`, `items/files.py` (enqueue trigger only — no dedicated router) | `file.py` (`generated_from_file_id` / `generated_source_sha256`) | `tasks/scad_render.py` (`compile_scad_item`) | `worker/scad_subprocess.py` (`run_scad_compile_subprocess` — isolated `openscad` child), `services/item_helpers.py` (`_enqueue_scad_compile`) | — (no new client; the derived STL rides the existing `items.ts` file list) | — (no new page; the derived STL shows up wherever model files already render — item viewer / thumbnail) | `test_scad_render.py` |
+| Downloads / export | `downloads.py` (`download_file` — single-file stream; opt-in `?inline=true` PDF-only viewer path, `_is_pdf_file` gates on extension + `%PDF-` magic number, everything else keeps forcing `attachment` + `application/octet-stream`), `export.py` | `download_bundle.py` | `tasks/bundles.py` | `storage/archive.py` | `export.ts`, `items.ts` (`fileInlineUrl`) | `admin/ExportPage.tsx`, `pages/item/DownloadsPanel.tsx` (**View PDF** button + `<iframe>` modal, same-origin session cookie auth, no PDF.js) | `test_phase3_catalog.py` (inline PDF / non-PDF fallback / fake-`.pdf` fallback / auth), `test_phase9_admin.py`, archive in `test_archive.py`; FE `viewer.test.tsx` |
 | Scheduled jobs | `scheduled_jobs.py` | `scheduled_job.py` | `tasks/scheduled.py` | — | `scheduled-jobs.ts` | `admin/ScheduledJobsPage.tsx` | (covered in `test_phase9_admin.py`) |
 | Reviews | `reviews.py` (per-item approve/reject + `approve-all` / `reject-all` bulk endpoints, admin+CSRF, idempotent) | `review_item.py` | `tasks/reviews.py` | — | `reviews.ts` (`approveAllReviews` / `rejectAllReviews`) | `admin/ReviewsPage.tsx` (`BulkActions` in the Pending tab) | `test_phase6_reconcile.py` (bulk actions), `test_phase9_admin.py`; FE `reviews-page.test.tsx` |
 | Storage / atomic moves / sidecar | (used across items/libraries/reconcile) | — | `worker/reconcile.py` | `storage/journal.py`, `storage/paths.py`, `storage/keys.py`, `storage/inventory.py`, `storage/sidecar.py` | — | — | `test_phase2_storage.py` |
@@ -110,6 +111,29 @@ image-only (invisible to local unit runs).
 - **Migration numbering is serialized.** Tasks creating an Alembic migration run
   one-at-a-time; the orchestrator assigns the next `00NN` in the handoff prompt.
   Parallel agents both creating `0023_*` collide. (Head is `0022` as of v0.3.0.)
+- **OpenSCAD compile is a real subprocess isolation, not multiprocessing.**
+  `worker/scad_subprocess.py` looks different from `render_subprocess.py` /
+  `analyze_subprocess.py`'s `multiprocessing.get_context("spawn")` dance —
+  that spawn dance exists because render/analyze run heavy *Python* code
+  (VTK/trimesh) in-process in the child, so they need a fresh interpreter.
+  OpenSCAD is an external binary; a plain `asyncio.create_subprocess_exec`
+  child already has its own address space, and `preexec_fn` sets
+  `RLIMIT_AS`/`RLIMIT_CPU` on it directly before `exec()`. Same isolation
+  guarantee, no multiprocessing needed. The `openscad` apt package pulls in
+  the full Qt5 stack even with `--no-install-recommends` (it's a hard
+  Depends of the Debian binary package, not a Recommends) — a real
+  image-size cost (~370 MB), noted in the Dockerfile comment; a headless/
+  Manifold-only build is a possible future slimming pass.
+- **The derived STL is excluded from the sidecar, not from the DB.** It IS a
+  normal `FileRole.model` File row (so render/analyze/the browser viewer
+  pick it up with zero new code) but `generated_from_file_id` is non-null,
+  which both `_build_sidecar_data` (`services/item_helpers.py`) and
+  reconcile's duplicate sidecar builder (`worker/reconcile.py
+  _write_sidecar_for_item`) filter out — a regenerable artifact isn't
+  portable metadata. Reconcile's drift checks never fire on it either, since
+  the compile task always writes the File row and the on-disk bytes in the
+  same step — reconcile only ever sees a File row whose sha256 already
+  matches disk.
 - **nginx: optional TLS is assembled at container start, not baked.**
   `nginx/nginx.conf` only bakes the plain `:80` server; everything shared
   (headers/CSP/locations) lives in `nginx/partfolder-common.conf`, `include`d by

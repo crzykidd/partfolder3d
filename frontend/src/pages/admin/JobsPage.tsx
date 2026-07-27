@@ -401,6 +401,17 @@ export function JobsPage() {
     clearMutation.mutate(clearConfig.status)
   }
 
+  // Always-available "Clear failed" — reachable in one click regardless of the
+  // active status filter, so the user doesn't have to select the failed pill
+  // first. Hidden when the contextual clearConfig button above is already
+  // offering the same action (statusFilter === 'failed') to avoid showing two
+  // identical "clear failed" buttons at once.
+  const handleClearFailed = () => {
+    if (!window.confirm('Archive all failed jobs? They will be moved to the archive and hidden from the live view.')) return
+    setClearCount(null)
+    clearMutation.mutate('failed')
+  }
+
   return (
     <AdminPage>
       <PageHeader
@@ -430,6 +441,17 @@ export function JobsPage() {
           >
             <Archive size={12} />
             {clearMutation.isPending ? 'Clearing…' : clearConfig.label}
+          </Button>
+        )}
+        {!archived && clearConfig?.status !== 'failed' && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleClearFailed}
+            disabled={clearMutation.isPending}
+          >
+            <Archive size={12} />
+            {clearMutation.isPending ? 'Clearing…' : 'Clear failed'}
           </Button>
         )}
         {clearCount != null && (

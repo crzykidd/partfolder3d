@@ -99,6 +99,7 @@ from app.worker.tasks.import_session import (  # noqa: E402, F401
 )
 from app.worker.tasks.render import _reconcile_render_images, render_item  # noqa: E402, F401
 from app.worker.tasks.reviews import apply_review_item  # noqa: E402
+from app.worker.tasks.scad_render import compile_scad_item  # noqa: E402
 from app.worker.tasks.scheduled import (  # noqa: E402
     cron_db_backup,
     cron_expired_zip_cleanup,
@@ -127,6 +128,7 @@ _IDEMPOTENT_JOB_TASKS: dict[str, str] = {
     "render": "render_item",
     "analyze": "analyze_item",
     "extract_archives": "extract_archives",
+    "scad_render": "compile_scad_item",
 }
 
 # Orphan-requeue attempt cap (issue #37, fix #1) — a job that repeatedly
@@ -350,6 +352,8 @@ class WorkerSettings:
         analyze_item,
         # Phase B (render-rework-B)
         extract_archives,
+        # issue #46
+        compile_scad_item,
     ]
 
     cron_jobs = [

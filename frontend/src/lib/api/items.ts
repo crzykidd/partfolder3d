@@ -25,6 +25,8 @@ export interface TagOut {
   id: number
   name: string
   category: string | null
+  /** 'active' | 'pending' — a newly-added tag may be pending admin approval. */
+  status: string
 }
 
 // ---------------------------------------------------------------------------
@@ -354,6 +356,23 @@ export const listItems = (params: ItemListParams = {}): Promise<PaginatedItems> 
 export const getItem = (key: string): Promise<ItemDetail> =>
   apiFetch<ItemDetail>(`/api/items/${key}`)
 
+/**
+ * Update an existing item's editable metadata (issue #47 — edit description /
+ * add-remove tags in-app). `tags`, when provided, REPLACES the item's full tag
+ * set — send the complete desired list (existing minus removed, plus added).
+ * Any brand-new tag name lands `pending` unless the `tags.auto_approve`
+ * instance setting is on. Writes through to the on-disk sidecar in the same
+ * operation, so a later rescan sees a legitimate edit, not drift.
+ */
+export const updateItem = (
+  key: string,
+  body: { description?: string | null; tags?: string[] },
+): Promise<ItemDetail> =>
+  apiFetch<ItemDetail>(`/api/items/${key}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+
 /** Re-inventory the item's folder on disk + resync the sidecar (per-item rescan). */
 export const rescanItem = (key: string): Promise<ItemDetail> =>
   apiFetch<ItemDetail>(`/api/items/${key}/rescan`, { method: 'POST' })
@@ -523,6 +542,15 @@ export const pollZip = (key: string, bundleId: string): Promise<BundleOut> =>
 /** URL for directly streaming a single file (use as href or window.open). */
 export const fileDownloadUrl = (key: string, filePath: string): string =>
   `/api/items/${key}/files/${filePath}`
+
+/**
+ * URL for viewing a single file inline (browser-native viewer) instead of forcing
+ * a download — e.g. an `<iframe src=...>` for a PDF. The backend only honors
+ * `inline` for real PDFs (see `downloads.py`); every other file type falls back to
+ * the normal attachment response, so this is safe to use only for `.pdf` files.
+ */
+export const fileInlineUrl = (key: string, filePath: string): string =>
+  `${fileDownloadUrl(key, filePath)}?inline=1`
 
 /** Fetch a single item file's raw contents as text (e.g. an OpenSCAD .scad source). */
 export const fetchFileText = (key: string, filePath: string): Promise<string> =>

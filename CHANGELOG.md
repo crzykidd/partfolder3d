@@ -20,6 +20,70 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-07-26
+
+### Added
+
+- Edit an existing item's description and add/remove tags directly from the
+  item page (closes #47). The item metadata card gets an inline editor
+  (description textarea + tag chips with remove, add-tag input, and a
+  popular-tags quick-add row) that writes through to the on-disk `.yml`
+  sidecar and the full-text search index in the same operation, so a
+  subsequent scan treats the change as a legitimate local edit rather than
+  drift. New tags land `pending` unless the `tags.auto_approve` instance
+  setting is on, and a pending badge is shown until an admin approves them.
+  Title editing is deferred (renaming triggers an atomic directory move — a
+  separate, heavier flow left for a future pass).
+- Optional server-side OpenSCAD render/preview (closes #46). A self-designed
+  item whose only printable is a `.scad` source is now compiled server-side
+  into an STL (`openscad -o out.stl in.scad`, no GUI/GL needed) so it gets an
+  in-app thumbnail, 3D viewer, and mesh stats without the user bringing their
+  own STL — the derived STL flows through the existing render/analyze/viewer
+  pipeline unchanged. The compile always runs in an isolated subprocess
+  (wall-clock timeout + `RLIMIT_AS`/`RLIMIT_CPU` + a scratch workdir), same
+  rigor as mesh render/analyze; any failure (missing `include`/library,
+  timeout, OOM, bad geometry) falls back to "store source, skip preview" —
+  never a crash, never an Issue. The derived STL is recorded as a
+  machine-generated asset linked to its `.scad` source (new
+  `generated_from_file_id` / `generated_source_sha256` columns, migration
+  `0026`) and is excluded from the sidecar and from reconcile's drift checks.
+  New `SCAD_RENDER_*` config knobs (default ON — safe even before a worker
+  image rebuild, since a missing `openscad` binary is just another soft
+  skip). Out of scope for this first cut: `include`/`use` of external
+  libraries (BOSL2 etc.), Customizer parameters, and a manual "re-render"
+  UI action (deferred — see `docs/decisions.md`).
+- View a catalog item's `.pdf` files in-app instead of being forced to
+  download them first. A new **View PDF** button in the Downloads panel opens
+  a modal with a browser-native PDF viewer (`<iframe>`, no PDF.js or any new
+  dependency), plus an **Open in new tab** link and the existing **Download**
+  action as a fallback. The file-serving endpoint (`GET
+  /api/items/{key}/files/{path}`) gained an opt-in `inline=true` query param;
+  it is honored **only** for real PDFs (extension + `%PDF-` magic-number
+  check) — every other file type keeps forcing the existing attachment /
+  `application/octet-stream` download, since serving arbitrary user files
+  inline, same-origin, would be an XSS vector.
+- Job Monitor: an always-visible **Clear failed** button archives all failed
+  jobs in one click, without first having to select the "failed" status
+  filter (the clear action was previously only reachable via that filter).
+- Scraper: import stlflix.com product pages correctly — title, description,
+  gallery images and tags are now extracted from the page's Next.js
+  `__NEXT_DATA__` blob (a Strapi shape), instead of falling back to the
+  generic site-wide header that every stlflix URL previously produced.
+
+### Fixed
+
+- The nightly reconcile scan (and per-item rescan / the issue "Retry rescan"
+  action) no longer crashes with `MissingGreenlet` ("greenlet_spawn has not
+  been called") while pushing DB metadata to a sidecar. Two illegal lazy-loads
+  in the async worker were closed: `reconcile.py::_write_sidecar_for_item` now
+  delegates to the corrected `item_helpers._write_item_sidecar` (eager-loading
+  `item.creator` first) instead of a second, drifted copy of the sidecar
+  builder, and `_behavior_sidecar_sync` now refreshes a possibly-flush-expired
+  `item.updated_at` before reading it. Previously these surfaced as recurring,
+  unactionable `sidecar_error` issues that "Retry rescan" could never clear;
+  they now resolve automatically on the next successful sync. Also fixes a
+  latent render/embedded-image inclusion bug in the removed duplicate builder.
+
 ## [0.7.5] — 2026-07-25
 
 ### Added
@@ -1306,7 +1370,8 @@ detail in this one file. (An earlier plan to archive closed minor series into
 <!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
      earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
 
-[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.7.5...HEAD
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/crzykidd/partfolder3d/compare/v0.7.5...v0.8.0
 [0.7.5]: https://github.com/crzykidd/partfolder3d/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/crzykidd/partfolder3d/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/crzykidd/partfolder3d/compare/v0.7.2...v0.7.3

@@ -47,6 +47,7 @@ from ...services.item_helpers import (
     _attach_tags,
     _enqueue_analyze,
     _enqueue_extract_archives,
+    _enqueue_scad_compile,
     _update_search_vector,
     _write_item_sidecar,
 )
@@ -442,6 +443,19 @@ async def _commit_session_inner(
     has_zip = any(rec.role == _FileRole.zip for rec in records)
     if has_zip:
         await _enqueue_extract_archives(item.id, pool=pool, db=db)
+
+    # ---- 15. Enqueue OpenSCAD compile (issue #46) ----
+    # Minimal first-cut trigger: only when the item's ONLY printable is a
+    # .scad source with no existing mesh asset at all — an item that already
+    # has a real model file (e.g. a bundled STL alongside the .scad) is left
+    # alone; a manual re-compile trigger is deferred (see docs/decisions.md).
+    has_model = any(rec.role == _FileRole.model for rec in records)
+    has_scad_source = any(
+        rec.role == _FileRole.source and Path(rec.relative_path).suffix.lower() == ".scad"
+        for rec in records
+    )
+    if has_scad_source and not has_model:
+        await _enqueue_scad_compile(item.id, pool=pool, db=db)
 
     return CommitResponse(
         item_key=item.key,

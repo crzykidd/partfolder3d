@@ -43,6 +43,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
     pollZip: vi.fn(),
     zipDownloadUrl: vi.fn(() => '/download/zip'),
     fileDownloadUrl: vi.fn((key: string, path: string) => `/api/items/${key}/files/${path}`),
+    fileInlineUrl: vi.fn((key: string, path: string) => `/api/items/${key}/files/${path}?inline=1`),
   }
 })
 
@@ -211,6 +212,95 @@ describe('Viewer modal', () => {
 
     const viewer = screen.getByTestId('model-viewer-mock')
     expect(viewer.getAttribute('data-ext')).toBe('.3mf')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// View PDF button + inline PDF viewer modal
+// ---------------------------------------------------------------------------
+
+describe('View PDF', () => {
+  it('renders the "View PDF" button for .pdf files', () => {
+    render(
+      <DownloadsSection
+        itemKey="test-key"
+        files={[makeFile({ path: 'docs/manual.pdf', preview_3d: false })]}
+      />,
+      { wrapper },
+    )
+    expect(screen.getByRole('button', { name: /view pdf/i })).toBeInTheDocument()
+  })
+
+  it('does NOT render "View PDF" for non-.pdf files', () => {
+    render(
+      <DownloadsSection
+        itemKey="test-key"
+        files={[makeFile({ path: 'model/part.stl', preview_3d: false })]}
+      />,
+      { wrapper },
+    )
+    expect(screen.queryByRole('button', { name: /view pdf/i })).not.toBeInTheDocument()
+  })
+
+  it('opens a modal with an iframe pointing at the ?inline=1 URL', async () => {
+    render(
+      <DownloadsSection
+        itemKey="abc123"
+        files={[makeFile({ path: 'docs/manual.pdf', preview_3d: false })]}
+      />,
+      { wrapper },
+    )
+
+    expect(screen.queryByRole('dialog', { name: /pdf viewer/i })).not.toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /view pdf/i }))
+    })
+
+    const dialog = screen.getByRole('dialog', { name: /pdf viewer/i })
+    expect(dialog).toBeInTheDocument()
+
+    const iframe = dialog.querySelector('iframe')
+    expect(iframe).not.toBeNull()
+    expect(iframe?.getAttribute('src')).toBe('/api/items/abc123/files/docs/manual.pdf?inline=1')
+  })
+
+  it('includes an "Open in new tab" link using the same ?inline=1 URL', async () => {
+    render(
+      <DownloadsSection
+        itemKey="abc123"
+        files={[makeFile({ path: 'docs/manual.pdf', preview_3d: false })]}
+      />,
+      { wrapper },
+    )
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /view pdf/i }))
+    })
+
+    const link = screen.getByRole('link', { name: /open in new tab/i })
+    expect(link.getAttribute('href')).toBe('/api/items/abc123/files/docs/manual.pdf?inline=1')
+    expect(link.getAttribute('target')).toBe('_blank')
+  })
+
+  it('closes the PDF modal when the close button is clicked', async () => {
+    render(
+      <DownloadsSection
+        itemKey="abc123"
+        files={[makeFile({ path: 'docs/manual.pdf', preview_3d: false })]}
+      />,
+      { wrapper },
+    )
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /view pdf/i }))
+    })
+    expect(screen.getByRole('dialog', { name: /pdf viewer/i })).toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /close pdf viewer/i }))
+    })
+    expect(screen.queryByRole('dialog', { name: /pdf viewer/i })).not.toBeInTheDocument()
   })
 })
 

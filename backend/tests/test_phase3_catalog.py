@@ -651,6 +651,103 @@ async def test_file_download_existing_file(client: AsyncClient, tmp_path: Path) 
     assert resp.status_code == 200
 
 
+@pytest.mark.asyncio
+async def test_file_download_default_no_inline_is_attachment(
+    client: AsyncClient, tmp_path: Path
+) -> None:
+    """Default (no `inline` param) is unchanged: attachment + octet-stream, even for a PDF."""
+    csrf = await _login_admin(client, tmp_path)
+    _, item = await _create_lib_and_item(client, tmp_path, csrf)
+    key = item["key"]
+    item_dir = Path(item["dir_path"])
+
+    (item_dir / "manual.pdf").write_bytes(b"%PDF-1.4\n%mock pdf content\n")
+
+    resp = await client.get(f"/api/items/{key}/files/manual.pdf")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/octet-stream"
+    assert resp.headers["content-disposition"].startswith("attachment")
+
+
+@pytest.mark.asyncio
+async def test_file_download_inline_pdf_served_inline(
+    client: AsyncClient, tmp_path: Path
+) -> None:
+    """?inline=true on a real PDF serves application/pdf + inline + nosniff."""
+    csrf = await _login_admin(client, tmp_path)
+    _, item = await _create_lib_and_item(client, tmp_path, csrf)
+    key = item["key"]
+    item_dir = Path(item["dir_path"])
+
+    (item_dir / "manual.pdf").write_bytes(b"%PDF-1.4\n%mock pdf content\n")
+
+    resp = await client.get(f"/api/items/{key}/files/manual.pdf?inline=true")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/pdf"
+    assert resp.headers["content-disposition"] == "inline"
+    assert resp.headers["x-content-type-options"] == "nosniff"
+
+
+@pytest.mark.asyncio
+async def test_file_download_inline_non_pdf_falls_back_to_attachment(
+    client: AsyncClient, tmp_path: Path
+) -> None:
+    """?inline=true on a non-PDF is ignored — still attachment + octet-stream.
+
+    Load-bearing: inline is a PDF-only allowlist. Serving arbitrary user files
+    inline same-origin (e.g. an uploaded .html/.svg) would be an XSS vector.
+    """
+    csrf = await _login_admin(client, tmp_path)
+    _, item = await _create_lib_and_item(client, tmp_path, csrf)
+    key = item["key"]
+    item_dir = Path(item["dir_path"])
+
+    (item_dir / "notes.txt").write_bytes(b"just some text\n")
+
+    resp = await client.get(f"/api/items/{key}/files/notes.txt?inline=true")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/octet-stream"
+    assert resp.headers["content-disposition"].startswith("attachment")
+
+
+@pytest.mark.asyncio
+async def test_file_download_inline_fake_pdf_extension_falls_back(
+    client: AsyncClient, tmp_path: Path
+) -> None:
+    """A `.pdf`-named file whose content is NOT a real PDF also falls back.
+
+    Extension alone is not trusted — the magic-byte check catches a renamed
+    non-PDF (e.g. HTML saved as "x.pdf") before it would ever get an inline,
+    same-origin response.
+    """
+    csrf = await _login_admin(client, tmp_path)
+    _, item = await _create_lib_and_item(client, tmp_path, csrf)
+    key = item["key"]
+    item_dir = Path(item["dir_path"])
+
+    (item_dir / "fake.pdf").write_bytes(b"<script>alert(1)</script>\n")
+
+    resp = await client.get(f"/api/items/{key}/files/fake.pdf?inline=true")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/octet-stream"
+    assert resp.headers["content-disposition"].startswith("attachment")
+
+
+@pytest.mark.asyncio
+async def test_file_download_requires_auth(client: AsyncClient, tmp_path: Path) -> None:
+    """GET /api/items/{key}/files/{path} returns 401 without authentication."""
+    csrf = await _login_admin(client, tmp_path)
+    _, item = await _create_lib_and_item(client, tmp_path, csrf)
+    key = item["key"]
+    item_dir = Path(item["dir_path"])
+    (item_dir / "manual.pdf").write_bytes(b"%PDF-1.4\n%mock pdf content\n")
+
+    # Fresh unauthenticated client (no session cookie) hitting the same route.
+    client.cookies.clear()
+    resp = await client.get(f"/api/items/{key}/files/manual.pdf?inline=true")
+    assert resp.status_code == 401
+
+
 # ---------------------------------------------------------------------------
 # ZIP bundle
 # ---------------------------------------------------------------------------

@@ -100,3 +100,8 @@ export function is3mf(path: string): boolean {
 export function isImagePath(path: string): boolean {
   return /\.(png|jpe?g|gif|webp|avif|svg)$/i.test(path)
 }
+
+/** Returns true if the file path ends with a PDF extension (case-insensitive). */
+export function isPdfPath(path: string): boolean {
+  return path.toLowerCase().endsWith('.pdf')
+}

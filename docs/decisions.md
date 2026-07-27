@@ -2,6 +2,231 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-07-26 — Scraper: stlflix host-gated `__NEXT_DATA__` enrichment (not shape-gated)
+
+**Context:** `prompts/done/2026-07-26-scrape-stlflix.md` — importing a
+`platform.stlflix.com/product/<slug>` URL only scraped the generic site-wide header.
+
+stlflix.com is Next.js like MakerWorld, but its `props.pageProps` is a **Strapi** shape
+(product fields directly on `pageProps`, not nested under `design`) — the existing
+MakerWorld-shaped `_enrich_from_next_data` silently skipped it, so imports fell back to the
+generic `og:title`/`og:description`. Added a sibling `_enrich_from_next_data_stlflix` (plus
+`_strapi_single_url`/`_strapi_collection_urls`/`_strapi_collection_names` unwrap helpers),
+gated on **hostname** (`domain.endswith("stlflix.com")`) rather than shape-sniffed — the
+generic Strapi `field.data.attributes` relation shape is common enough across unrelated
+Next.js/Strapi sites that shape-sniffing risks false positives. **Creator:** stlflix exposes
+no per-model designer (`collab` is null; `drop` is a release group, not a person) — defaulted
+`creator_name` to `"STLFLIX"`, applied only as a fallback when no meta-author signal already
+populated it (same priority rule as MakerWorld's `designCreator`). No dedicated connector
+(unlike prinnit) — it flows through the normal `scrape_url` → `extract_metadata_from_html`
+path, which now has the host-gated branch built in. The base `httpx` fetch already handles
+the site's `NEXT_LOCALE` 307 redirect, so no cookie/redirect/FlareSolverr work was needed.
+
+## 2026-07-26 — Reconcile sidecar writer deduped onto item_helpers; expired `updated_at` guarded
+
+**Context:** `prompts/done/2026-07-26-fix-sidecar-sync-greenlet.md` — the nightly reconcile
+scan filed recurring `sidecar_error` issues (`greenlet_spawn has not been called; can't
+call await_only()`) that "Retry rescan" could not clear (live items #9/#12/#13/#20).
+
+- **Two illegal async lazy-loads, both closed.** `reconcile.py::_write_sidecar_for_item`
+  had drifted from `item_helpers._write_item_sidecar`: it called `build_sidecar()` directly
+  without eager-loading `item.creator` or refreshing flush-expired `created_at`/`updated_at`.
+  Fixed by refreshing `creator` then delegating to `_write_item_sidecar` (single source of
+  truth; the delegation also restores the render/embedded-image sidecar exclusion the
+  duplicate had lost). **But the first crash actually fires earlier** — `_behavior_sidecar_sync`
+  reads `item.updated_at` (a server-default/`onupdate` column that an earlier scan-transaction
+  flush can leave expired) before the write path is ever reached; that read now refreshes the
+  attribute in the async context first, guarded via `inspect(item).unloaded` so it only issues
+  a query when the attribute is actually expired.
+- **Existing open issues auto-resolve:** `routers/issues.py::_action_retry` already flips an
+  issue to `resolved` when `recon.errors` is empty — so once deployed, Retry rescan (or the
+  next nightly scan) clears #9/#12/#13/#20 with no further action.
+- **Test/finalize note:** the regression test's setup used `await db_session.expire(...)`, but
+  `AsyncSession.expire()` is synchronous (no I/O) — the stray `await` crashed setup and masked
+  the real assertion; corrected during finalize, and the fix was then confirmed to address the
+  earlier `_behavior_sidecar_sync` crash the delegation alone did not.
+
+## 2026-07-26 — View PDF inline: PDF-only allowlist (extension + magic-number), same-origin `<iframe>` over blob fallback
+
+**Context:** `prompts/done/2026-07-26-view-pdf-inline.md` — let a user view a catalog
+item's `.pdf` file in-app (browser-native viewer) instead of being forced to download it
+first, without pulling in PDF.js or any new dependency.
+
+- **Inline serving is a PDF-only allowlist, not a general "view any file inline" toggle —
+  load-bearing security constraint.** `download_file` (`backend/app/routers/downloads.py`)
+  gained an opt-in `inline=true` query param, but it is only honored when the resolved
+  file is a *real* PDF: `_is_pdf_file` requires BOTH a `.pdf` extension AND a leading
+  `%PDF-` magic number (mirrors the `sniff_image_ext` magic-byte pattern from the v0.7.4
+  MakerWorld fix in `import_sessions/sessions.py` — don't trust the extension alone).
+  Serving arbitrary user-uploaded files inline, same-origin, is an XSS vector: an uploaded
+  `.html` or `.svg` would execute script in the app's own origin and could read the session
+  cookie. Any other file type, or `inline` absent/false, falls through unchanged to the
+  existing `attachment` + `application/octet-stream` response — silently, not an error, so
+  a non-PDF `?inline=true` request just degrades to a normal download rather than breaking.
+  The existing path-traversal containment barrier (`is_relative_to(item_dir)`) is untouched
+  and runs before the PDF check.
+- **Two independent checks, not one.** Extension-only would let a renamed non-PDF (e.g. an
+  uploaded `.html` renamed to `x.pdf`) through; magic-byte-only isn't reached at all unless
+  the extension already matches, so pairing them is cheap (one 5-byte read) and closes both
+  gaps. Covered by an explicit test (`test_file_download_inline_fake_pdf_extension_falls_back`)
+  that gives a `.pdf`-named file non-PDF bytes and asserts it still gets the attachment
+  response.
+- **Frontend: same-origin `<iframe src=".../files/{path}?inline=1">`, not an `apiFetch` →
+  blob → `URL.createObjectURL` fetch.** The backend sets no `X-Frame-Options` or
+  `Content-Security-Policy: frame-ancestors` header, so a same-origin iframe embed isn't
+  blocked, and every other file-serving affordance already on this page (image thumbnails,
+  the 3D viewer's `fileUrl`, the Show-SCAD download link) already relies on a plain,
+  cookie-authenticated URL rather than a manual blob fetch — the iframe approach is the
+  one consistent with that existing pattern. The blob-object-URL approach named as a
+  fallback in the prompt was not needed since nothing blocked the direct iframe embed.
+- **PdfViewerModal mirrors the "Show SCAD" modal chrome exactly**
+  (`frontend/src/pages/item/ItemMetadata.tsx`'s `ShowScadModal`): `createPortal(...,
+  document.body)` per the v0.7.2 modal-portal fix (a sibling card's `backdrop-filter`
+  stacking context can otherwise trap a non-portaled modal's z-index), Escape-to-close, and
+  the same header/body/footer chrome. Kept in `DownloadsPanel.tsx` rather than
+  `ItemMetadata.tsx` since the PDF file itself lives in the file tree the Downloads panel
+  already renders (same reasoning as the existing "View in 3D" button).
+
+## 2026-07-25 — Server-side OpenSCAD render (#46): generated-asset via FK not a bool, default-ON compile, minimal enqueue trigger, no multiprocessing needed
+
+**Context:** `prompts/done/2026-07-25-server-side-scad-render.md` — optionally compile a
+self-designed item's `.scad` source into an STL server-side, feeding it through the
+existing render/analyze/viewer pipeline, deferred companion to the v0.7.5 read-only
+`.scad` viewer.
+
+- **Generated-asset shape: `generated_from_file_id` (self-FK) + `generated_source_sha256`,
+  no separate boolean.** A derived File row's "is this generated?" question is answered
+  entirely by `generated_from_file_id is not None` — a redundant `generated: bool` would
+  just be a second source of truth that could drift from the FK. `generated_source_sha256`
+  (the SOURCE `.scad`'s sha256 at compile time, not the STL's own hash) is the piece that
+  actually earns its keep: it lets a re-run of `compile_scad_item` skip an unchanged source
+  cheaply (mirrors the file inventory's own cheap-first drift check) without hashing/
+  recompiling every pass. FK is `ondelete="SET NULL"` — deleting the source `.scad` must
+  not be blocked by, or cascade-delete, a derived STL that may still be a perfectly good
+  mesh asset in its own right.
+- **The derived STL is a real `FileRole.model` File row, not a new asset type.** This was
+  the whole point of "write no new preview code" — render_item/analyze_item/the browser
+  viewer all filter on `File.role == FileRole.model` already, so making the derived STL
+  exactly that (not, say, an Image or a new role) means it rides the entire existing
+  pipeline for free. The only thing that needed to change was excluding it from the
+  **sidecar** (regenerable artifact, same rationale as render/embedded Images already
+  excluded there) — done in both `_build_sidecar_data` (the canonical builder) and
+  `worker/reconcile.py`'s `_write_sidecar_for_item` (a **pre-existing duplicate** builder
+  that already diverges slightly from the canonical one — e.g. it does not apply the
+  render/embedded-image sidecar exclusion either; out of scope to unify here, but both were
+  kept in sync for *this* exclusion since leaving one out would silently leak the derived
+  STL into the sidecar depending on which code path last wrote it).
+- **No subprocess isolation multiprocessing dance — a plain `asyncio.create_subprocess_exec`
+  is the isolation.** `render_subprocess.py`/`analyze_subprocess.py` use
+  `multiprocessing.get_context("spawn")` because the actual heavy work (VTK/trimesh) runs
+  *in-process* in the Python child, and a fresh interpreter is needed to avoid inheriting
+  half-initialised GL/BLAS state. OpenSCAD is an external binary — the moment it's exec'd it
+  already has its own address space and its own killable PID; `preexec_fn` sets
+  `RLIMIT_AS`/`RLIMIT_CPU` on it directly before `exec()`, and `asyncio.wait_for` +
+  `os.killpg` (via `start_new_session=True`) gives the same wall-clock-timeout-and-kill
+  guarantee. Same rigor, less code, no multiprocessing pickling/spawn overhead for what's
+  fundamentally just running a CLI tool.
+- **Default `SCAD_RENDER_ENABLED=True`, safe even before the worker image is rebuilt.**
+  The compile step checks `openscad_available()` (`shutil.which`) BEFORE attempting
+  anything and treats a missing binary as a normal soft skip (Job succeeds, log says why,
+  no Issue) — so leaving the feature on by default doesn't break anything on the `:dev`
+  stack until the owner rebuilds the worker image; it just quietly no-ops until then.
+- **`openscad` costs ~370 MB of image size, confirmed by measurement, and `--no-install-
+  recommends` can't avoid it.** Debian's `openscad` binary package hard-`Depends` on the
+  full Qt5 GUI stack (`libqt5gui5`, `libqt5widgets5`, `libqt5multimedia5`, ...) even though
+  STL export (`-o out.stl`) never touches a display — those are `Depends`, not
+  `Recommends`, so `--no-install-recommends` (which already keeps VTK/OSMesa lean
+  elsewhere in this image) has no effect on them. Accepted for this first cut; a headless/
+  Manifold-only OpenSCAD build (upstream has one) is a possible future slimming pass, noted
+  in the Dockerfile comment and `docs/architecture.md`, not built now.
+- **Enqueue trigger kept minimal: import-commit + direct `.scad` upload, both gated on "no
+  existing model file yet."** Import commit (`routers/import_sessions/commit.py`) and the
+  single-file upload endpoint (`routers/items/files.py`) both enqueue
+  `compile_scad_item` only when the item's ONLY printable is the `.scad` source (no
+  `FileRole.model` file already present) — an item that bundles a real STL alongside its
+  `.scad` is left alone (the user already has a preview). **No manual "re-render preview"
+  UI action was added this cut** — deferred: the compile task is naturally idempotent and
+  re-runnable (the sha-cache in `generated_source_sha256` makes a second enqueue a cheap
+  no-op unless the source actually changed), so a future re-trigger affordance (a button, or
+  wiring it into rescan/reconcile) is a small additive follow-up, not a redesign. Flagged
+  explicitly as a judgement call in the handoff prompt; kept out to keep this cut backend-
+  only (no frontend files touched, no `tsc`/build gate needed).
+- **The derived STL's on-disk path is stable (`generated/<stem>.stl`), not sha-keyed like
+  `renders/<sha>.png`.** A recompile overwrites the same path in place rather than writing
+  a new sha-named file and orphaning the old one — simpler bookkeeping (no leftover files to
+  sweep), and it still correctly busts the render/analyze sha-cache downstream because the
+  File row's own `sha256` (of the STL bytes, recomputed on every compile) changes, which is
+  what render_item/analyze_item actually key their cache on — the path's stability doesn't
+  matter to them.
+
+## 2026-07-25 — Edit item description/tags (#47): reuse the existing PATCH endpoint, defer title, keep the tag editor deliberately simpler than the wizard
+
+**Context:** `prompts/2026-07-25-edit-item-description-tags.md` — let a user edit an
+existing item's description and add/remove tags from the item page, with a
+write-through to the sidecar that a subsequent scan treats as a legit local edit
+(v0.7.2 corruption-vs-legit-edit discipline), not drift.
+
+- **No new endpoint — `PATCH /api/items/{key}` already did the hard part.**
+  Investigation found this endpoint (existing since Phase 2) already accepts
+  `description` and `tags`, already writes through to the sidecar in the same
+  request (`_write_item_sidecar`), and already refreshes `search_vector`. The
+  reconcile baseline concern turned out to be a non-issue for this feature:
+  `_behavior_sidecar_sync` (unlike the v0.7.2 model-file hash/mtime baseline)
+  compares **timestamps** — `item.updated_at` vs. the sidecar's own recorded
+  `updated_at` vs. the sidecar file's on-disk mtime, within a 5s
+  `SIDECAR_SYNC_TOLERANCE_SECONDS`. Because the PATCH write-through updates the
+  DB row and rewrites the sidecar synchronously in one transaction, those three
+  timestamps are already within tolerance after every save — no explicit
+  "adopt baseline" step was needed, and a new reconcile test
+  (`test_reconcile_after_edit_not_flagged_as_drift`) proves zero Issues/
+  ReviewItems/ChangeLog sidecar_sync entries after an edit. The only real gap
+  was wiring a frontend UI to this endpoint at all — it was never called from
+  the app.
+- **Fixed a real gap: new tags added via this endpoint now respect
+  `tags.auto_approve`.** Before this change, `update_item`'s tag handling
+  called `_attach_tags` with the default `new_tag_status=TagStatus.active`,
+  unlike the import-commit path (`routers/import_sessions/commit.py`), which
+  reads the `tags.auto_approve` instance setting. A brand-new tag added via
+  item edit now lands `pending` unless auto-approve is on, matching import
+  behavior. Existing tags (any status) keep whatever status they already have
+  — only brand-new tag rows get the computed status.
+- **`TagOut` gained a `status` field** (`active`/`pending`) so the frontend can
+  badge a newly-added tag awaiting approval. No migration — `Tag.status`
+  already existed; this only exposes it in the response.
+- **Title is explicitly NOT editable in this UI — deferred.** The existing
+  endpoint already supports a title change (atomic directory rename, fully
+  tested), so backend support isn't the blocker. The judgment call: renaming
+  is a materially heavier operation (moves the on-disk directory, can 409 on
+  conflict) that deserves its own dedicated, clearly-labeled affordance rather
+  than being folded into a single Save button alongside description/tags,
+  where a user could trigger a directory move by accident. Scoped to
+  description + tags per the prompt's explicit fallback.
+- **The tag editor is deliberately simpler than the import wizard's
+  `TagsStep`** — chips with remove, a plain add-tag input, and a "popular
+  tags" quick-add row (reusing `api.listTags({in_use_only: true})`, same as
+  the wizard). It does NOT reproduce the wizard's AI-suggestion box, the
+  pending/reconcile accept-reject split, or the keyboard-navigable
+  autocomplete dropdown — none of those concepts apply to editing an
+  already-committed item (there's no import session, no AI-suggested-tags
+  step here). What IS reused directly, not reimplemented: the wizard's pure
+  chip-array helpers `addConfirmedTag`/`removeConfirmedTag` from
+  `lib/import-utils.ts`, so add/remove semantics stay identical.
+- **Save applies description + tags in one PATCH call**, not two independent
+  saves — a single "Edit description & tags" entry point reveals both an
+  editable textarea and editable tag chips at once, with one Save/Cancel pair
+  at the bottom of the description block. This matches the prompt's emphasis
+  on a single write-through operation and avoids two separate round trips
+  (and two separate sidecar rewrites) for what is conceptually one edit.
+- **Clearing the description sends `""`, not `null`.** `ItemUpdate` treats
+  `description: null` as "leave unchanged" (the same sentinel-free convention
+  already used for `title`/`source_url`/`license` on this endpoint — `is not
+  None` gates every field). An emptied textarea therefore sends the empty
+  string, which the endpoint treats as a real value and stores, correctly
+  clearing the field. This is a pre-existing schema limitation (no way to
+  explicitly null out a field via this endpoint) worked around on the
+  frontend rather than redesigning `ItemUpdate`'s semantics for every field,
+  which was out of scope here.
+
 ## 2026-07-25 — `.scad` header prefill: keep the title line verbatim; gate the AI action on both a staged source file and provider availability
 
 **Context:** `prompts/2026-07-25-scad-ai-describe.md` — deterministic title/description

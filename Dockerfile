@@ -32,11 +32,20 @@ FROM base AS deps
 # it only ships vtkXOpenGLRenderWindow and cannot render on a headless host.
 # libgl1: pulled in by the Mesa/OSMesa stack. libglib2.0-0 + libfreetype6: VTK / Pillow deps.
 # All CPU-only — no GPU drivers installed.
+# openscad: server-side .scad -> STL compile (issue #46). STL export
+# (`openscad -o out.stl in.scad`) itself needs no GL/xvfb/Qt display — only
+# PNG/CSG preview export does — but Debian's `openscad` binary package hard-
+# `Depends` on the full Qt5 GUI stack regardless (not a `Recommends`), so
+# --no-install-recommends CANNOT slim this one down the way it does for the
+# VTK/OSMesa stack above. Measured cost: ~370 MB installed. Accepted for this
+# first cut; a headless/Manifold-only OpenSCAD build is a possible future
+# slimming pass — see docs/decisions.md.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libosmesa6 \
         libgl1 \
         libglib2.0-0 \
         libfreetype6 \
+        openscad \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt ./

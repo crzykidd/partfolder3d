@@ -10,6 +10,19 @@ Files are resolved relative to the item's `dir_path` with strict path-traversal
 protection (resolved path must begin with the item dir).  FastAPI's `FileResponse`
 streams the file via starlette's async file streaming.
 
+Inline viewing (PDF-only)
+--------------------------
+`GET .../files/{path}?inline=true` opts into an inline `Content-Disposition` so the
+browser renders the file instead of forcing a save-as-download — used by the "View
+PDF" affordance in the DownloadsPanel. This is **PDF-only, by design**: serving
+arbitrary user-uploaded files inline, same-origin, is an XSS vector (an uploaded
+`.html`/`.svg` would execute script in the app's own origin and could read the
+session cookie). A file only gets the inline response when BOTH its extension is
+`.pdf` AND its content starts with the `%PDF-` magic number (mirrors the
+`sniff_image_ext` magic-byte pattern in `import_sessions/sessions.py` — don't trust
+the extension alone). Any other file, or `inline` absent/false, gets the existing
+`attachment` + `application/octet-stream` response, unchanged.
+
 Queued ZIP (PRD §11)
 --------------------
 POST /zip enqueues an arq task (`build_zip_bundle`) that creates a .zip of all files
@@ -86,6 +99,27 @@ def _compute_inventory_hash(files: list[File]) -> str:
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
 
+def _is_pdf_file(path: Path) -> bool:
+    """True if *path* is safe to serve as an inline PDF.
+
+    Requires BOTH a `.pdf` extension AND a leading `%PDF-` magic number. Neither
+    check alone is trustworthy: extension alone would let a renamed non-PDF (e.g.
+    an uploaded `.html`) through; magic-byte alone doesn't matter here since we
+    gate on extension first — but sniffing the content still catches a `.pdf`
+    that was renamed from something else, before it's ever handed to the browser
+    with an inline disposition. Read failures (missing/unreadable) are treated as
+    "not a PDF" so the caller falls back to the safe attachment response.
+    """
+    if path.suffix.lower() != ".pdf":
+        return False
+    try:
+        with path.open("rb") as fh:
+            header = fh.read(5)
+    except OSError:
+        return False
+    return header == b"%PDF-"
+
+
 async def _get_item_or_404(key: str, db: AsyncSession) -> Item:
     result = await db.execute(select(Item).where(Item.key == key))
     item = result.scalar_one_or_none()
@@ -105,6 +139,16 @@ async def download_file(
     path: str,
     db: Annotated[AsyncSession, Depends(get_db)],
     _user: Annotated[User, Depends(get_current_user)],
+    inline: bool = Query(
+        default=False,
+        description=(
+            "Serve the file with an inline Content-Disposition instead of forcing "
+            "a download. PDF-ONLY for safety (see module docstring): honored only "
+            "when the resolved file is a real PDF (.pdf extension + %PDF- magic "
+            "number). Any other file, or inline=false/absent, gets the existing "
+            "attachment + application/octet-stream response unchanged."
+        ),
+    ),
 ) -> FileResponse:
     """Stream a single file from the item directory.
 
@@ -127,6 +171,16 @@ async def download_file(
 
     if not requested.exists() or not requested.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found.")
+
+    if inline and _is_pdf_file(requested):
+        return FileResponse(
+            path=str(requested),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": "inline",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     return FileResponse(
         path=str(requested),

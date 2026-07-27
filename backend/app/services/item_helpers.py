@@ -112,6 +112,12 @@ async def _build_sidecar_data(
     file_result = await db.execute(
         select(File).where(File.item_id == item.id)
     )
+    # Machine-generated derived assets (e.g. the STL server-compiled from a
+    # .scad source, issue #46 — generated_from_file_id non-null) are excluded
+    # from the sidecar, same rationale as render/embedded images below: a
+    # regenerable artifact is not portable metadata, and including it would
+    # make the sidecar (and reconcile's sidecar<->DB diff) churn every time
+    # the source is recompiled.
     sidecar_files = [
         SidecarFile(
             path=f.path,
@@ -121,6 +127,7 @@ async def _build_sidecar_data(
             mtime=f.mtime.strftime("%Y-%m-%dT%H:%M:%SZ") if f.mtime else None,
         )
         for f in file_result.scalars().all()
+        if f.generated_from_file_id is None
     ]
 
     img_result = await db.execute(
@@ -315,6 +322,33 @@ async def _enqueue_analyze(
         db=db,
         task="analyze_item",
         job_type="analyze",
+        dedup_active=True,
+    )
+
+
+async def _enqueue_scad_compile(
+    item_id: int, *, pool: ArqRedis, db: AsyncSession | None = None
+) -> None:
+    """Fire-and-forget: enqueue compile_scad_item for an item with .scad source (issue #46).
+
+    Gated on ``settings.SCAD_RENDER_ENABLED`` here (not inside the task) so a
+    disabled instance never even writes a queued Job row. ``dedup_active=True``
+    (mirrors ``_enqueue_analyze``) — skips the enqueue when a queued/running
+    scad_render Job already exists for this item.
+    """
+    if not settings.SCAD_RENDER_ENABLED:
+        log.debug(
+            "_enqueue_scad_compile: SCAD_RENDER_ENABLED=false — not enqueuing for item %s",
+            item_id,
+        )
+        return
+
+    await _write_queued_row_and_enqueue(
+        item_id,
+        pool=pool,
+        db=db,
+        task="compile_scad_item",
+        job_type="scad_render",
         dedup_active=True,
     )
 

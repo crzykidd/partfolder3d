@@ -56,7 +56,7 @@ from ...models.image import Image
 from ...models.item import Item
 from ...models.job import Job
 from ...models.library import Library
-from ...models.tag import ItemTag, Tag
+from ...models.tag import ItemTag, Tag, TagStatus
 from ...models.user import User
 from ...services.item_helpers import (
     _attach_tags,
@@ -65,6 +65,7 @@ from ...services.item_helpers import (
     _update_search_vector,
     _write_item_sidecar,
 )
+from ...services.settings_service import get_tags_auto_approve
 from ...storage.inventory import inventory_item
 from ...storage.journal import MoveError, atomic_rename, move_to_trash
 from ...storage.keys import generate_unique_key
@@ -431,7 +432,21 @@ async def update_item(
     _csrf: Annotated[None, Depends(csrf_protect)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, Any]:
-    """Update item metadata.  A title change triggers an atomic directory rename."""
+    """Update item metadata.  A title change triggers an atomic directory rename.
+
+    Issue #47 (edit description / add-remove tags in-app): this is the endpoint the
+    item page's inline editor calls.  ``body.tags`` REPLACES the item's tag set — the
+    frontend sends the full desired list (existing minus removed, plus added).  Any
+    brand-new tag name lands ``pending`` unless the ``tags.auto_approve`` instance
+    setting is on (mirrors the import-commit path in
+    ``routers/import_sessions/commit.py``); existing tags (any status) are matched
+    by name and keep whatever status they already had.  The write-through to the
+    on-disk sidecar below (``needs_sidecar_refresh``) keeps ``item.updated_at`` and
+    the sidecar's own ``updated_at``/mtime in sync within
+    ``reconcile.SIDECAR_SYNC_TOLERANCE_SECONDS`` — the same mechanism every other
+    metadata-mutating endpoint on this router already relies on — so a rescan sees
+    a legitimate, already-synced edit rather than sidecar drift.
+    """
     result = await db.execute(
         select(Item)
         .options(selectinload(Item.creator))
@@ -507,7 +522,10 @@ async def update_item(
         needs_sidecar_refresh = True
 
     if body.tags is not None:
-        await _attach_tags(db, item, body.tags)
+        new_tag_status = (
+            TagStatus.active if await get_tags_auto_approve(db) else TagStatus.pending
+        )
+        await _attach_tags(db, item, body.tags, new_tag_status=new_tag_status)
         needs_sidecar_refresh = True
 
     item.updated_at = datetime.now(UTC)
