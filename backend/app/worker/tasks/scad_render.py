@@ -128,14 +128,18 @@ async def _compile_scad_item_inner(ctx: dict, item_id: int) -> None:
     from app.models.item import Item  # noqa: PLC0415
     from app.services.item_helpers import _enqueue_analyze, _enqueue_render  # noqa: PLC0415
     from app.storage.inventory import hash_file_sha256  # noqa: PLC0415
-    from app.worker.job_tracker import finish_job  # noqa: PLC0415
+    from app.worker.job_tracker import JobAlreadyTerminal, finish_job  # noqa: PLC0415
     from app.worker.scad_subprocess import (  # noqa: PLC0415
         ScadCompileError,
         ScadTimeout,
         openscad_available,
     )
 
-    job_id = await _claim_job(item_id, ctx.get("job_id"))
+    try:
+        job_id = await _claim_job(item_id, ctx.get("job_id"))
+    except JobAlreadyTerminal:
+        log.info("compile_scad_item: job row cancelled/superseded — skipping item %s", item_id)
+        return
 
     async def _finish(
         succeeded: bool, error: str | None = None, log_text: str | None = None

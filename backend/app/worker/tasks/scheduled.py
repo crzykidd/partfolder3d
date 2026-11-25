@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from .backup import _db_backup_core
 from .bundles import _cleanup_expired_bundles_core
@@ -341,12 +342,79 @@ async def _inbox_scan_core(ctx: dict) -> None:
 # exec_scheduled_job — dispatches named job; used for "run-now" from the API
 # ---------------------------------------------------------------------------
 
+async def _supersede_stale_queued_jobs(db, now: datetime, redis: Any = None) -> int:
+    """Mark ORPHANED queued Job rows older than STALE_QUEUED_JOB_HOURS as 'superseded'.
+
+    Age alone is not proof of an orphan: a very large import can legitimately keep
+    render/analyze jobs waiting for more than a day on a small worker.  So a stale
+    candidate is only superseded when arq confirms its task is gone (``not_found``)
+    or already finished (``complete``) — a task still ``queued``/``deferred``/
+    ``in_progress`` keeps its row.  Rows with no ``arq_job_id`` can never be claimed
+    and are always orphans.  Without a Redis handle (or on a Redis error for a row)
+    nothing that has an arq id is touched — conservative by design.  Returns the
+    number of rows superseded.
+    """
+    import sqlalchemy as sa  # noqa: PLC0415
+    from arq.jobs import Job as ArqJob  # noqa: PLC0415
+    from arq.jobs import JobStatus  # noqa: PLC0415
+
+    from app.config import settings as _settings  # noqa: PLC0415
+    from app.models.job import Job  # noqa: PLC0415
+
+    stale_cutoff = now - timedelta(hours=_settings.STALE_QUEUED_JOB_HOURS)
+    candidates = (
+        await db.execute(
+            sa.select(Job.id, Job.arq_job_id).where(
+                Job.status == "queued", Job.created_at < stale_cutoff
+            )
+        )
+    ).all()
+
+    orphan_ids = []
+    for job_id, arq_job_id in candidates:
+        if not arq_job_id:
+            orphan_ids.append(job_id)
+            continue
+        if redis is None:
+            continue
+        try:
+            arq_status = await ArqJob(arq_job_id, redis).status()
+        except Exception:  # noqa: BLE001 — never let one lookup break retention
+            log.warning(
+                "job_history_retention: arq status lookup failed for %s — keeping row",
+                arq_job_id,
+            )
+            continue
+        if arq_status in (JobStatus.not_found, JobStatus.complete):
+            orphan_ids.append(job_id)
+
+    if not orphan_ids:
+        log.info("job_history_retention: superseded 0 stale queued job row(s)")
+        return 0
+
+    reaped = await db.execute(
+        sa.update(Job)
+        .where(Job.id.in_(orphan_ids), Job.status == "queued")
+        .values(
+            status="superseded",
+            finished_at=now,
+            error="stale queued row — never claimed by a worker; superseded by retention",
+        )
+    )
+    log.info(
+        "job_history_retention: superseded %d stale queued job row(s)", reaped.rowcount
+    )
+    return reaped.rowcount
+
+
 async def _job_history_retention_core(_ctx: dict) -> None:
     """Hard-delete old job rows that have aged past their retention window.
 
     Succeeded jobs: deleted after JOB_RETENTION_SUCCEEDED_DAYS.
     Failed / cancelled / superseded: deleted after JOB_RETENTION_FAILED_DAYS.
-    Running / queued rows are never touched.
+    Running rows are never touched.  Queued rows older than
+    STALE_QUEUED_JOB_HOURS are first marked 'superseded' (orphans — a genuinely
+    queued job is claimed within seconds-minutes), then age out like the rest.
     """
     import sqlalchemy as sa  # noqa: PLC0415
 
@@ -359,6 +427,7 @@ async def _job_history_retention_core(_ctx: dict) -> None:
     failed_cutoff = now - timedelta(days=_settings.JOB_RETENTION_FAILED_DAYS)
 
     async with SessionLocal() as db:
+        await _supersede_stale_queued_jobs(db, now, _ctx.get("redis"))
         result = await db.execute(
             sa.delete(Job).where(
                 sa.or_(

@@ -20,6 +20,23 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Added
+
+- **Cancel queued jobs from the Job Monitor.** Queued jobs now have a **Cancel** button (previously
+  only running jobs did, so a stuck queued row had no action at all). Cancelling marks the row
+  cancelled and aborts the pending task; if the task still gets picked up, the worker skips it
+  instead of running it.
+- **`superseded` jobs are manageable.** They now get **Archive** / **Delete**, a `superseded` status
+  filter, and a "Clear superseded" bulk action (`POST /api/jobs/clear?status=superseded`).
+
+### Fixed
+
+- **Stuck "queued" jobs are cleaned up automatically.** The daily job-retention task now marks any job
+  still `queued` more than `STALE_QUEUED_JOB_HOURS` (default 24) after creation as `superseded`, **but only
+  if its background task no longer exists** (or already finished) — jobs genuinely waiting in a long backlog
+  (e.g. a huge import) are left alone. Guards against bugs like the v0.9.0 `extract_archives` one leaving
+  permanent queued rows.
+
 ## [0.9.0] — 2026-11-25
 
 ### Added

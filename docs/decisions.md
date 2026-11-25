@@ -2,6 +2,22 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-11-25 — Cancel queued jobs, superseded is terminal in the UI, stale-queued reaper
+
+**Context:** `prompts/done/2026-11-25-queued-job-cancel-and-stale-reaper.md`. Orphaned `queued` rows could not be
+removed from the Jobs page (no actions), and `superseded` rows had no Archive/Delete or filter.
+
+**Decision:** `POST /api/jobs/{id}/cancel` accepts `queued` (sets `cancelled`, best-effort arq abort). Worker guard:
+`claim_or_create_job` raises `JobAlreadyTerminal` when no queued row can be claimed but a `cancelled`/`superseded`
+row exists for the arq job id; render/analyze/scad_render/extract_archives return early (`failed`/`succeeded` rows
+deliberately do not block, since arq may re-run a job id). `superseded` is archivable (single + `/clear`) and has a UI
+filter. The daily `job_history_retention` cron first supersedes `queued` rows older than `STALE_QUEUED_JOB_HOURS`
+(default 24) **only when arq confirms the task is gone (`not_found`) or finished (`complete`)** — rows with no
+`arq_job_id` are always orphans. Age alone was rejected as the rule (orchestrator review): a huge import on a small
+worker can legitimately keep jobs queued for over a day, and superseding them would make the new worker guard skip
+real work. No Redis handle / lookup error → the row is kept. `GET /api/jobs?status=superseded` now returns superseded rows without
+`include_superseded`.
+
 ## 2026-11-25 — extract_archives must claim its queued Job row (migration 0027)
 
 **Context:** `prompts/2026-11-25-fix-extract-archives-orphan-queued.md`. After imports with ZIPs, an

@@ -130,7 +130,12 @@ function JobRow({ job, archived }: { job: api.JobOut; archived: boolean }) {
   const isRunning = job.status === 'running'
   const isFailed = job.status === 'failed'
   // terminal = can be archived/deleted in live view
-  const isTerminal = job.status === 'succeeded' || job.status === 'cancelled' || job.status === 'failed'
+  const isQueued = job.status === 'queued'
+  const isTerminal =
+    job.status === 'succeeded' ||
+    job.status === 'cancelled' ||
+    job.status === 'failed' ||
+    job.status === 'superseded'
 
   return (
     <>
@@ -201,6 +206,17 @@ function JobRow({ job, archived }: { job: api.JobOut; archived: boolean }) {
             ) : (
               /* Live view: status-gated actions */
               <>
+                {isQueued && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { clearError(); cancelMutation.mutate() }}
+                    disabled={anyPending}
+                  >
+                    <X size={11} />
+                    {cancelMutation.isPending ? 'Cancelling…' : 'Cancel'}
+                  </Button>
+                )}
                 {isRunning && (
                   <>
                     <Button
@@ -333,7 +349,7 @@ function JobRow({ job, archived }: { job: api.JobOut; archived: boolean }) {
 // Page
 // ---------------------------------------------------------------------------
 
-const STATUS_FILTERS = ['', 'running', 'queued', 'failed', 'succeeded', 'cancelled']
+const STATUS_FILTERS = ['', 'running', 'queued', 'failed', 'succeeded', 'cancelled', 'superseded']
 const STATUS_LABELS: Record<string, string> = {
   '': 'all',
   running: 'running',
@@ -341,6 +357,7 @@ const STATUS_LABELS: Record<string, string> = {
   failed: 'failed',
   succeeded: 'succeeded',
   cancelled: 'cancelled',
+  superseded: 'superseded',
 }
 
 const COLUMNS = ['ID', 'Type', 'Status', 'Progress', 'Created', 'Elapsed', 'Error', 'Actions']
@@ -354,7 +371,8 @@ export function JobsPage() {
   const queryClient = useQueryClient()
 
   const clearMutation = useMutation({
-    mutationFn: (status: 'succeeded' | 'failed' | 'cancelled') => api.clearJobsByStatus(status),
+    mutationFn: (status: 'succeeded' | 'failed' | 'cancelled' | 'superseded') =>
+      api.clearJobsByStatus(status),
     onSuccess: (data) => {
       setClearCount(data.archived)
       void queryClient.invalidateQueries({ queryKey: ['jobs'] })
@@ -385,14 +403,19 @@ export function JobsPage() {
   // Contextual clear button, keyed to the active status filter:
   //   all / succeeded → Clear succeeded · failed → Clear all failed ·
   //   cancelled → Clear cancelled · running / queued → no button.
-  const clearConfig: { status: 'succeeded' | 'failed' | 'cancelled'; label: string } | null =
+  const clearConfig: {
+    status: 'succeeded' | 'failed' | 'cancelled' | 'superseded'
+    label: string
+  } | null =
     statusFilter === '' || statusFilter === 'succeeded'
       ? { status: 'succeeded', label: 'Clear succeeded' }
       : statusFilter === 'failed'
         ? { status: 'failed', label: 'Clear all failed' }
         : statusFilter === 'cancelled'
           ? { status: 'cancelled', label: 'Clear cancelled' }
-          : null
+          : statusFilter === 'superseded'
+            ? { status: 'superseded', label: 'Clear superseded' }
+            : null
 
   const handleClear = () => {
     if (!clearConfig) return

@@ -72,7 +72,10 @@ Durable technical traps. Break one and the failure is often silent or
 image-only (invisible to local unit runs).
 
 - **Queued-row claim.** Every task enqueued via `_write_queued_row_and_enqueue` MUST use
-  `claim_or_create_job`, not `create_job`, or its queued Job row is orphaned forever.
+  `claim_or_create_job`, not `create_job`, or its queued Job row is orphaned forever. Safety nets: admins can
+  cancel `queued` rows (`POST /api/jobs/{id}/cancel`); `claim_or_create_job` raises `JobAlreadyTerminal` when the
+  row for its arq job id is already `cancelled`/`superseded` (the four claiming tasks return early); and the daily
+  `job_history_retention` cron supersedes `queued` rows older than `STALE_QUEUED_JOB_HOURS` (24h default) **only if arq reports the task `not_found`/`complete`** (a long real backlog is kept).
 
 - **Requirements split.** `backend/requirements.txt` is runtime-only (the Docker image installs just it);
   tests/lint use `backend/requirements-dev.txt`. (Re)create the local venv:

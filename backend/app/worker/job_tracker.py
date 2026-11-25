@@ -95,6 +95,20 @@ async def claim_queued_job(
     return result.scalars().first()
 
 
+class JobAlreadyTerminal(Exception):
+    """The Job row for this arq job id was cancelled/superseded before the worker ran.
+
+    Raised by :func:`claim_or_create_job`; tasks catch it and return early so a
+    cancelled queued job never does its work nor inserts a fresh running row.
+    """
+
+
+# Statuses meaning "an operator/system explicitly killed this row before it ran".
+# ('failed'/'succeeded' are deliberately excluded: arq may legitimately re-run a
+# job id after a failure, and those rows must not block the re-run.)
+_SKIP_STATUSES: tuple[str, ...] = ("cancelled", "superseded")
+
+
 async def claim_or_create_job(
     db: Any,
     job_type: str,
@@ -123,6 +137,19 @@ async def claim_or_create_job(
     claimed = await claim_queued_job(db, arq_job_id)
     if claimed is not None:
         return claimed
+
+    # Worker guard: the queued row was cancelled/superseded (e.g. admin cancel of
+    # a queued job whose arq abort did not land) — do not run or re-insert.
+    if arq_job_id:
+        from ..models.job import Job  # noqa: PLC0415
+
+        dead = await db.execute(
+            sa.select(Job.id).where(
+                Job.arq_job_id == arq_job_id, Job.status.in_(_SKIP_STATUSES)
+            )
+        )
+        if dead.scalars().first() is not None:
+            raise JobAlreadyTerminal(arq_job_id)
 
     return await create_job(
         db,

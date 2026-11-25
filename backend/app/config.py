@@ -224,6 +224,10 @@ class Settings(BaseSettings):
     JOB_RETENTION_SUCCEEDED_DAYS: int = 7
     # Days after which a failed/cancelled/superseded job row is hard-deleted.
     JOB_RETENTION_FAILED_DAYS: int = 30
+    # Hours after which a still-'queued' job row is considered an orphan and is
+    # marked 'superseded' by the daily retention cron — but only when arq reports
+    # its task not_found/complete, so a long genuine backlog is never reaped.
+    STALE_QUEUED_JOB_HOURS: int = 24
 
     # ---- Trash / orphaned-file reclamation (Fix Set 8) ----
     # Days a soft-deleted item folder survives under DATA_DIR/trash before the
