@@ -20,6 +20,64 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-11-25
+
+### Added
+
+- **Catalog multi-select + bulk actions.** A **Select** toggle in the catalog toolbar (grid and
+  list views) enters selection mode: checkboxes on every card/row, shift-click range select,
+  "select all on this page", and a selection that persists across pages, filters and sort. A
+  sticky action bar offers:
+  - **Log print** — one identical print record on every selected item, all-or-nothing
+    (`POST /api/items/bulk-print-records`). The print-record form is now a shared component used
+    by both the item page and the bulk dialog.
+  - **Tags** — add and/or remove tags across items (`POST /api/items/bulk-tags`), with the same
+    write-through as the item editor (DB + sidecar + search). New tags land pending unless
+    auto-approve is on.
+  - **Move** — move items to another library (UI for the existing `POST /api/items/move`; closes
+    the #25 follow-up).
+  - **Rescan** (max 100) and **Delete** (moves to trash; typed confirmation) —
+    `POST /api/items/bulk-rescan`, `POST /api/items/bulk-delete`.
+  Tags, move, rescan and delete are per-item partial-success; failures are listed inline and stay
+  selected for retry.
+  (Clicking a card's/row's checkbox directly now toggles it — previously only clicking the tile did.)
+
+- **Version page shows every component's build.** Each image now carries its commit, channel
+  (`dev` / `main` / `release` / `local`) and build date (CI build args). The Version page lists
+  **Frontend (browser bundle)**, **Frontend (served by nginx)**, **nginx**, **Backend** and **Worker**
+  with commit links, and warns when they're on different builds (e.g. a stale `frontend_dist` volume
+  or a container that wasn't restarted). New authenticated `GET /api/version/details`; the worker
+  reports its build via Redis; nginx serves `/build-info.json` (what's in the served volume) and
+  `/build-info/nginx.json`. `GET /api/version` is unchanged.
+
+### Security
+
+- **Backend dependency security bumps** — Pillow 11.1.0 → 13.0.0, python-multipart 0.0.20 →
+  0.0.34 (fixes a path-traversal file write reachable via uploads), cryptography 44.0.0 → 50.0.2,
+  lxml 6.1.3, PyYAML 6.0.4, plus CVE floors for transitive PyJWT, certifi, dnspython and anyio.
+  Backend image trivy CRITICAL 14 → 1 (an unreachable, no-fix-yet Debian libxml2). fastapi/starlette
+  bumps are deferred to a separate change.
+- **Dev/test tools no longer ship in the backend image.** ruff/pytest/etc. moved to the new
+  `backend/requirements-dev.txt` (`-r requirements.txt` + dev tools); CI installs the dev file. Local
+  venv: `uv venv --python 3.12 backend/.venv && uv pip install --python backend/.venv/bin/python -r backend/requirements-dev.txt`.
+- **Backend base image pinned to `python:3.12-slim-trixie`** so a future floating-tag move to Debian
+  forky (which drops `libosmesa6`) can't silently break rendering.
+- **Frontend image: alpine-only prod stage.** The published `partfolder3d-frontend` image no longer
+  ships the Node toolchain — it is `alpine:3.24` + the built `dist/` (821 MB → ~15 MB; trivy
+  CRITICAL/HIGH 4/47 → 0/0). The version banner now reads a build-time `VERSION` file instead of
+  `node`. The `dev` target is unchanged.
+- **npm in-range updates** (vite 6.4.6, react-router 7.18.7, postcss 8.5.33, nanoid, browserslist,
+  source-map-js): `npm audit` 12 → 3; the remaining advisories are in the dev-only vitest toolchain
+  (major bump, tracked separately). See `docs/security-audit-2026-11-25.md`.
+
+### Fixed
+
+- **`extract_archives` jobs no longer stay "queued" forever.** Importing an item with a ZIP left an
+  orphaned `queued` Job row alongside the real (succeeded) run, because the task inserted a new row
+  instead of claiming the queued one. The task now claims it like render/analyze/scad do, and
+  migration `0027` marks the existing orphaned rows `superseded` (only those with a later
+  `extract_archives` run for the same item).
+
 ## [0.8.1] — 2026-07-26
 
 ### Fixed
@@ -1384,7 +1442,8 @@ detail in this one file. (An earlier plan to archive closed minor series into
 <!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
      earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
 
-[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/crzykidd/partfolder3d/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/crzykidd/partfolder3d/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/crzykidd/partfolder3d/compare/v0.7.5...v0.8.0
 [0.7.5]: https://github.com/crzykidd/partfolder3d/compare/v0.7.4...v0.7.5

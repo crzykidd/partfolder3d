@@ -11,8 +11,9 @@ set -e
 log() { echo "[frontend] $*"; }
 fatal() { echo "[frontend] FATAL: $*" >&2; exit 1; }
 
-version="$(node -p "require('/app/package.json').version" 2>/dev/null || echo unknown)"
-log "PartFolder 3D frontend v${version} — uid=$(id -u) gid=$(id -g)"
+version="$(cat /app/VERSION 2>/dev/null || echo unknown)"
+label="$(cat /app/BUILD_LABEL 2>/dev/null || echo)"
+log "PartFolder 3D frontend v${version} ${label} — uid=$(id -u) gid=$(id -g)"
 
 DEST="${DIST_DIR:-/dist}"
 

@@ -18,7 +18,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.8.1-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.9.0-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 
@@ -28,15 +28,17 @@
 
 ## What's New
 
-**Latest — v0.8.1 (2026-07-26):** patch release — fixes an Internal Server Error when
-resolving a `conflict` Issue via **Keep DB** / **Keep sidecar**. The v0.8 feature batch
-(in-app description/tag editing, server-side OpenSCAD render, in-app PDF viewer, one-click
-**Clear failed**, and stlflix.com import) is summarized below.
+**Latest — v0.9.0 (2026-11-25):** **catalog multi-select with bulk actions** — select many items
+and log a print, add/remove tags, move, rescan, or delete them in one go. The **Version page**
+now shows every component's build (frontend, nginx, backend, worker) and warns on mismatches.
+Security refresh: dependency bumps, slimmer images (frontend image ~15 MB), and dev tools no
+longer ship in the backend image. Also fixes `extract_archives` jobs stuck in "queued".
 
 **Top features by minor version** — full detail for *every* release (including patch
 releases and fixes) lives in **[CHANGELOG.md](CHANGELOG.md)** and the
 [GitHub releases](https://github.com/crzykidd/partfolder3d/releases):
 
+- **v0.9** — catalog multi-select + bulk log-print/tags/move/rescan/delete · per-component build info on the Version page · security dependency + image refresh
 - **v0.8** — in-app description/tag editing · server-side OpenSCAD render · in-app PDF viewer · one-click clear-failed jobs · stlflix.com import
 - **v0.7** — OpenSCAD `.scad` source viewer + playground hand-off · prinnit.com import · built-in HTTPS/TLS at nginx · bulk review approve/reject
 - **v0.6** — Manyfold import workflow · large-model analysis hardening (isolated, memory/time-bounded subprocess)
@@ -55,7 +57,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.8.1) — see the
+> The full feature set below is **built and released** (v0.9.0) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -332,7 +334,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is in **active development** (v0.8.1).
+Honest snapshot — this project is in **active development** (v0.9.0).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -552,6 +554,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — v0.8.1 · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — v0.9.0 · built by <code>crzykidd</code></sub>
 
 </div>

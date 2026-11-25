@@ -5,7 +5,9 @@
 # The worker service overrides CMD to "python worker.py".
 
 # ---- base: Python runtime ----
-FROM python:3.12-slim AS base
+# Pinned Debian codename: the floating tag moved bookworm -> trixie, and Debian forky drops
+# libosmesa6, which vtk-osmesa needs (docs/security-audit-2026-11-25.md section 4.2).
+FROM python:3.12-slim-trixie AS base
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -60,6 +62,15 @@ COPY backend/alembic.ini ./
 COPY backend/alembic/ ./alembic/
 COPY backend/docker-entrypoint.sh ./
 RUN chmod +x ./docker-entrypoint.sh
+
+# Build info (Version page). Declared late so changing it never busts the pip layer.
+# CI passes these as build-args; local builds default to local/unknown.
+ARG GIT_SHA=unknown
+ARG BUILD_CHANNEL=local
+ARG BUILD_DATE=unknown
+ENV PF3D_GIT_SHA=${GIT_SHA} \
+    PF3D_BUILD_CHANNEL=${BUILD_CHANNEL} \
+    PF3D_BUILD_DATE=${BUILD_DATE}
 
 # Runtime-user env: set HOME and XDG_CACHE_HOME to /tmp so that libraries
 # writing to $HOME (e.g. fontconfig, matplotlib) don't fail when the container

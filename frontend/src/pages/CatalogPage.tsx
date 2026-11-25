@@ -24,7 +24,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { HardDrive, LayoutGrid, List, Maximize, Search, Star, X } from 'lucide-react'
+import { CheckSquare, HardDrive, LayoutGrid, List, Maximize, Search, Star, X } from 'lucide-react'
 
 import * as api from '@/lib/api'
 import { type TagSortMode } from '@/lib/catalog-utils'
@@ -38,6 +38,8 @@ import { TableView } from './catalog/TableView'
 import { Pagination } from './catalog/Pagination'
 import { LibraryFilter } from './catalog/LibraryFilter'
 import { AssetFilter } from './catalog/AssetFilter'
+import { BulkActionBar } from './catalog/BulkActions'
+import { useCatalogSelection, type SelectableItem } from './catalog/useCatalogSelection'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -344,6 +346,27 @@ export function CatalogPage() {
   )
 
   const items = itemsData?.items ?? []
+
+  // --- Multi-select (bulk actions) ---
+  const selection = useCatalogSelection()
+  const { active: selectActive, exit: exitSelect, click: selectClick } = selection
+  // Esc leaves select mode — unless a dialog is open (it handles its own Esc).
+  useEffect(() => {
+    if (!selectActive) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !document.querySelector('[role="dialog"]')) exitSelect()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [selectActive, exitSelect])
+
+  const pageSelectable: SelectableItem[] = items.map((i) => ({ key: i.key, title: i.title }))
+  const selectionView = {
+    active: selection.active,
+    isSelected: selection.isSelected,
+    onSelect: (item: SelectableItem, shift: boolean) =>
+      selectClick({ key: item.key, title: item.title }, pageSelectable, shift),
+  }
   const total = itemsData?.total ?? 0
   const totalPages = Math.ceil(total / perPage)
   const tags = tagsData?.tags ?? []
@@ -586,8 +609,32 @@ export function CatalogPage() {
               <AssetFilter value={urlAsset} onChange={setAsset} />
             </div>
 
-            {/* Right cluster: compact/full toggle (grid only) + view toggle */}
+            {/* Right cluster: select toggle + compact/full toggle (grid only) + view toggle */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {user && (
+                <button
+                  type="button"
+                  onClick={selection.active ? selection.exit : selection.enter}
+                  aria-pressed={selection.active}
+                  title="Select multiple items for bulk actions"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: '6px 12px',
+                    fontSize: 12,
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                    border: `1px solid ${selection.active ? 'var(--aurora-pill-border)' : 'var(--aurora-glass-border)'}`,
+                    background: selection.active ? 'var(--aurora-pill)' : 'var(--aurora-glass)',
+                    color: selection.active ? 'var(--aurora-accent)' : 'var(--aurora-text-dim)',
+                    fontWeight: selection.active ? 700 : 400,
+                  }}
+                >
+                  <CheckSquare size={13} />
+                  Select
+                </button>
+              )}
               {/* Compact / Full grid-mode toggle — shown only in grid view */}
               {urlView === 'grid' && (
                 <div
@@ -779,6 +826,7 @@ export function CatalogPage() {
               onToggleFavorite={handleToggleFavorite}
               favoritingKey={favoritingKey}
               gridMode={gridMode}
+              selection={selectionView}
             />
           )}
 
@@ -788,13 +836,17 @@ export function CatalogPage() {
               items={items}
               onToggleFavorite={handleToggleFavorite}
               favoritingKey={favoritingKey}
+              selection={selectionView}
             />
           )}
 
           {/* Pagination */}
           <Pagination page={urlPage} totalPages={totalPages} onPage={setPage} />
+          {/* Spacer so the sticky action bar never covers the pagination. */}
+          {selection.active && <div aria-hidden style={{ height: 72 }} />}
         </div>
       </div>
+      <BulkActionBar selection={selection} pageItems={pageSelectable} />
     </div>
   )
 }

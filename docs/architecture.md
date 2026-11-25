@@ -36,7 +36,7 @@ One row per subsystem. Paths are relative to repo root. Backend routers live in
 
 | Feature | Router | Model(s) | Worker task | Storage/service | API client | Page(s) | Test file(s) |
 |---|---|---|---|---|---|---|---|
-| Items / catalog | `items.py` | `item.py`, `file.py`, `image.py`, `favorite.py` | `tasks/render.py`, `tasks/analysis.py` | `storage/paths.py`, `storage/inventory.py`, `services/item_helpers.py` | `items.ts` | `CatalogPage.tsx`, `ItemPage.tsx`, `pages/item/*` (`ItemMetadata.tsx` — inline description/tags editor, issue #47) | `test_phase2_items.py`, `test_phase3_catalog.py`, `test_item_files.py`, `test_phase14_item_images.py`, `test_phase15_local_modified.py`, `test_item_edit_metadata.py`; FE `catalog.test.ts`, `carousel.test.ts`, `item-metadata-edit.test.tsx` |
+| Items / catalog | `items/` (`core.py`, `files.py`, `images.py`, `move.py` — bulk + single move, `bulk.py` — bulk tags/delete/rescan; bulk log-print lives in `print_records.py`) | `item.py`, `file.py`, `image.py`, `favorite.py` | `tasks/render.py`, `tasks/analysis.py` | `storage/paths.py`, `storage/inventory.py`, `services/item_helpers.py` | `items.ts` | `CatalogPage.tsx` (select mode: `catalog/useCatalogSelection.ts`, `catalog/BulkActions.tsx`), `ItemPage.tsx`, `pages/item/*` (`ItemMetadata.tsx` — inline description/tags editor, issue #47) | `test_phase2_items.py`, `test_phase3_catalog.py`, `test_item_files.py`, `test_phase14_item_images.py`, `test_phase15_local_modified.py`, `test_item_edit_metadata.py`, `test_bulk_item_actions.py`; FE `catalog.test.ts`, `catalog-selection.test.ts`, `catalog-bulk-actions.test.tsx`, `carousel.test.ts`, `item-metadata-edit.test.tsx` |
 | Import sessions / bulk import | `import_sessions/` (`sessions.py`, `helpers.py`, `commit.py`, `__init__.py`) | `import_session.py` (`ImportSessionFile.selected` — per-file commit toggle, Manyfold Part 2) | `tasks/import_session.py` (`_maybe_manyfold_import` — Manyfold primary path, tried BEFORE `scrape_url`/the fallback chain when the URL's domain matches an enabled `ManyfoldInstance`) | `storage/scraper.py`, `storage/archive.py`, `storage/manyfold_client.py` | `import.ts` (`patchSessionFileSelection`, Manyfold Part 3) | `ImportsPage.tsx`, `ImportWizardPage.tsx`, `pages/import-wizard/*` (`AssetsStep.tsx` — file-selection step, shown when the session has staged files, Manyfold Part 3) | `test_phase5_import.py`, `test_bulk_import.py`, `test_import_management.py`, `test_url_wizard_attach.py`, `test_manyfold_import.py`; FE `import-wizard.test.ts`, `bulk-import.test.ts`, `import-wizard-steps.test.tsx` |
 | Shares (item + site) / public share | `shares.py`, `site_capabilities.py` | `share_link.py`, `share_audit_event.py`, `site_capability.py` | — | `storage/paths.py` (traversal guards) | `shares.ts` | `PublicSharePage.tsx`, `pages/item/ShareControls.tsx`, `admin/ShareAuditPage.tsx`, `admin/SiteCapabilitiesPage.tsx` | **Share assertions span several files:** `test_phase7_sharing.py` (primary), plus expiry/revocation/privacy checks in `test_phase7_print_history.py`, `test_phase9_admin.py`, `test_phase15_local_modified.py` |
 | Issues / reconcile | `issues.py`, `changes.py` | `issue.py`, `change_log.py` | `worker/reconcile.py` (`_behavior_re_render` is the unified model-file change classifier: legit-edit → adopt hash + re-render vs bad-write/bit-rot → `corruption` Issue; `_behavior_integrity` handles the rest), `tasks/scheduled.py` | `storage/sidecar.py`, `storage/inventory.py`, `worker/render_mesh.py` (`validate_model_file`) | `issues.ts`, `changes.ts` | `admin/IssuesPage.tsx`, `admin/ChangesPage.tsx` | `test_phase6_reconcile.py`, `test_issue_resolution.py`; FE `reconcile-ui.test.ts` |
@@ -70,6 +70,13 @@ One row per subsystem. Paths are relative to repo root. Backend routers live in
 
 Durable technical traps. Break one and the failure is often silent or
 image-only (invisible to local unit runs).
+
+- **Queued-row claim.** Every task enqueued via `_write_queued_row_and_enqueue` MUST use
+  `claim_or_create_job`, not `create_job`, or its queued Job row is orphaned forever.
+
+- **Requirements split.** `backend/requirements.txt` is runtime-only (the Docker image installs just it);
+  tests/lint use `backend/requirements-dev.txt`. (Re)create the local venv:
+  `uv venv --python 3.12 backend/.venv && uv pip install --python backend/.venv/bin/python -r backend/requirements-dev.txt`.
 
 - **Render backend uses the `vtk-osmesa` wheel + `libosmesa6`** (NOT stock PyPI
   `vtk`, which is X11-only). Only verifiable in a **built image**, not a bare
@@ -143,3 +150,14 @@ image-only (invisible to local unit runs).
   missing/empty cert makes the container **fail to start** rather than silently
   serve plain HTTP. See [`docs/tls.md`](tls.md). Base image is `nginx:1.30-alpine`
   (bumped from `1.27-alpine`, issue #40).
+
+### Build info / version page
+
+- Every image is stamped by CI build-args `GIT_SHA` / `BUILD_CHANNEL` / `BUILD_DATE` (defaults `unknown`/`local`/`unknown`).
+  Backend+worker: `ENV PF3D_GIT_SHA/...` read by `app/build_info.py`. Frontend: `VITE_GIT_SHA/...` baked into the
+  bundle (`src/lib/buildInfo.ts`) and written to `/app/dist/build-info.json`. nginx: baked `/usr/share/nginx/build-info/nginx.json`.
+- Worker publishes its build to Redis `pf3d:build:worker` (TTL 180s, refreshed every minute by `cron_build_info_heartbeat`).
+- `GET /api/version` stays public/unchanged; `GET /api/version/details` (auth) returns `{backend, worker, error}`.
+- **Stale-volume check:** the frontend publish step copies `build-info.json` into the `frontend_dist` volume, so nginx
+  `/build-info.json` (no-store) shows the build of the assets it is really serving. `VersionPage` compares bundle vs
+  served vs nginx vs backend vs worker commits and warns on a mismatch. Dev nginx 404s both files.

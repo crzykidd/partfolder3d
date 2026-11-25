@@ -37,7 +37,7 @@ jobs:
           # Pin ruff to the project's version so CI matches local dev (an
           # unpinned install drifts to the latest ruff, which enforces newer
           # rules like UP042 that our pinned version + config don't).
-          pip install "$(grep -iE '^ruff==' backend/requirements.txt)"
+          pip install "$(grep -iE '^ruff==' backend/requirements-dev.txt)"
           ruff check backend/
 
   frontend:
@@ -120,9 +120,11 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
       - name: Install backend deps
-        run: pip install -r backend/requirements.txt
+        run: pip install -r backend/requirements-dev.txt
       - name: Run migrations to head
         env:
           DATABASE_URL: postgresql+asyncpg://partfolder3d:ci_test_password@localhost:5432/partfolder3d
@@ -191,9 +193,11 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
       - name: Install backend deps
-        run: pip install -r backend/requirements.txt
+        run: pip install -r backend/requirements-dev.txt
       - name: Apply migrations to base DB (serial-run fallback)
         env:
           DATABASE_URL: postgresql+asyncpg://partfolder3d:ci_test_password@localhost:5432/partfolder3d

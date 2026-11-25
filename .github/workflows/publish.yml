@@ -60,6 +60,16 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}
 
+      - name: Compute build info
+        id: buildinfo
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then channel=release
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then channel=main
+          elif [ "${{ github.ref }}" = "refs/heads/dev" ]; then channel=dev
+          else channel=local; fi
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: ${{ matrix.context }}
@@ -68,5 +78,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            BUILD_CHANNEL=${{ steps.buildinfo.outputs.channel }}
+            BUILD_DATE=${{ steps.buildinfo.outputs.date }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}

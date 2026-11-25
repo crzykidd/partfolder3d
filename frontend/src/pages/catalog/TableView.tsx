@@ -17,6 +17,7 @@ import { Box, Star } from 'lucide-react'
 
 import type * as api from '@/lib/api'
 import { CARD_STYLE } from './styles'
+import type { SelectionViewProps } from './useCatalogSelection'
 
 const colHelper = createColumnHelper<api.ItemSummary>()
 
@@ -24,9 +25,11 @@ interface TableViewProps {
   items: api.ItemSummary[]
   onToggleFavorite: (key: string, favorited: boolean) => void
   favoritingKey: string | null
+  selection?: SelectionViewProps
 }
 
-export function TableView({ items, onToggleFavorite, favoritingKey }: TableViewProps) {
+export function TableView({ items, onToggleFavorite, favoritingKey, selection }: TableViewProps) {
+  const selectMode = !!selection?.active
   const navigate = useNavigate()
   const [sorting, setSorting] = useState<SortingState>([])
 
@@ -188,6 +191,13 @@ export function TableView({ items, onToggleFavorite, favoritingKey }: TableViewP
     manualSorting: false,
   })
 
+  const rowBg = (key: string, hover: boolean) =>
+    selectMode && selection!.isSelected(key)
+      ? 'var(--aurora-pill)'
+      : hover
+        ? 'var(--aurora-glass-hover)'
+        : 'transparent'
+
   return (
     <div
       style={{
@@ -199,6 +209,9 @@ export function TableView({ items, onToggleFavorite, favoritingKey }: TableViewP
         <thead>
           {table.getHeaderGroups().map((hg) => (
             <tr key={hg.id} style={{ borderBottom: '1px solid var(--aurora-divider)' }}>
+              {selectMode && (
+                <th style={{ width: 36, background: 'var(--aurora-glass)' }} aria-label="Select" />
+              )}
               {hg.headers.map((header) => (
                 <th
                   key={header.id}
@@ -234,11 +247,40 @@ export function TableView({ items, onToggleFavorite, favoritingKey }: TableViewP
           {table.getRowModel().rows.map((row) => (
             <tr
               key={row.id}
-              style={{ borderTop: '1px solid var(--aurora-divider)', cursor: 'pointer', transition: 'background 0.1s' }}
+              data-testid={selectMode ? `select-row-${row.original.key}` : undefined}
+              style={{
+                borderTop: '1px solid var(--aurora-divider)',
+                cursor: 'pointer',
+                transition: 'background 0.1s',
+                background: rowBg(row.original.key, false),
+              }}
+              onClickCapture={
+                selectMode
+                  ? (e) => {
+                      if ((e.target as HTMLElement).closest('button')) return
+                      // See ItemCard: preventDefault on the checkbox cancels its native
+                      // toggle and leaves it visually unchecked.
+                      if (!(e.target as HTMLElement).matches('input[type="checkbox"]')) e.preventDefault()
+                      e.stopPropagation()
+                      selection!.onSelect(row.original, e.shiftKey)
+                    }
+                  : undefined
+              }
               onClick={() => navigate(`/items/${row.original.key}`)}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = 'var(--aurora-glass-hover)' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = 'transparent' }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = rowBg(row.original.key, true) }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = rowBg(row.original.key, false) }}
             >
+              {selectMode && (
+                <td style={{ padding: '10px 0 10px 14px', width: 36 }}>
+                  <input
+                    type="checkbox"
+                    checked={selection!.isSelected(row.original.key)}
+                    onChange={() => {}}
+                    aria-label={`Select ${row.original.title}`}
+                    style={{ width: 18, height: 18, cursor: 'pointer', accentColor: 'var(--aurora-accent)' }}
+                  />
+                </td>
+              )}
               {row.getVisibleCells().map((cell) => (
                 <td key={cell.id} style={{ padding: '10px 14px' }}>
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -249,7 +291,7 @@ export function TableView({ items, onToggleFavorite, favoritingKey }: TableViewP
           {items.length === 0 && (
             <tr>
               <td
-                colSpan={columns.length}
+                colSpan={columns.length + (selectMode ? 1 : 0)}
                 style={{ padding: '48px 14px', textAlign: 'center', fontSize: 13, color: 'var(--aurora-muted)', fontStyle: 'italic' }}
               >
                 No items found.

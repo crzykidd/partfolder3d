@@ -158,9 +158,9 @@ async def _recover_orphaned_jobs(
     so a half-finished side-effecting job is surfaced rather than silently
     repeated.
 
-    'queued' rows are intentionally NOT touched: no code path writes them today
-    (issue #20), and once one does, a queued row may still be a live entry in the
-    Redis queue that will run normally after the restart.
+    'queued' rows are intentionally NOT touched: the enqueue helpers write them
+    (issues #20/#30), and a queued row may still be a live entry in the Redis
+    queue that will run normally after the restart.
 
     Args:
         ctx:  arq worker context dict (must contain 'redis' key when there are
@@ -285,6 +285,13 @@ async def _recover_orphaned_jobs(
             log.info("startup: re-enqueued %s for item_id=%d", task_name, item_id)
 
 
+async def cron_build_info_heartbeat(ctx: dict) -> None:
+    """Refresh the worker's build-info Redis key (TTL'd) every minute."""
+    from app.build_info import publish_worker_build_info, utcnow_iso  # noqa: PLC0415
+
+    await publish_worker_build_info(ctx["redis"], ctx.get("build_started_at") or utcnow_iso())
+
+
 async def startup(ctx: dict) -> None:
     """Seed the ScheduledJob table, apply thread caps, and recover orphaned jobs."""
     import sqlalchemy as sa  # noqa: PLC0415
@@ -309,6 +316,12 @@ async def startup(ctx: dict) -> None:
     ):
         os.environ[_var] = thread_count
     log.info("startup: render thread caps set to %s", thread_count)
+
+    # --- Build info self-report (Version page) ---
+    from app.build_info import publish_worker_build_info, utcnow_iso  # noqa: PLC0415
+
+    ctx["build_started_at"] = utcnow_iso()
+    await publish_worker_build_info(ctx["redis"], ctx["build_started_at"])
 
     # --- Seed scheduled jobs ---
     async with SessionLocal() as db:
@@ -357,6 +370,8 @@ class WorkerSettings:
     ]
 
     cron_jobs = [
+        # Every minute (arq: second=0 default, other fields wildcard).
+        cron(cron_build_info_heartbeat, run_at_startup=False),
         cron(cron_expired_zip_cleanup, hour=0, minute=0, run_at_startup=False),
         cron(cron_share_link_expiry_cleanup, hour=1, minute=0, run_at_startup=False),
         cron(cron_inbox_scan, hour=2, minute=0, run_at_startup=False),

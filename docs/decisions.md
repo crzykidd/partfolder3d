@@ -2,6 +2,83 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-11-25 — extract_archives must claim its queued Job row (migration 0027)
+
+**Context:** `prompts/2026-11-25-fix-extract-archives-orphan-queued.md`. After imports with ZIPs, an
+`extract_archives` job stayed `queued` forever in the Jobs page.
+
+**Cause:** `_enqueue_extract_archives` writes a `queued` row via `_write_queued_row_and_enqueue`, but the task
+called `create_job` (a second row) instead of `claim_or_create_job`; startup recovery skips `queued` rows by
+design, so the orphan never cleared.
+
+**Decision:** task now uses `claim_or_create_job`. Migration `0027` (data-only, idempotent, no-op downgrade)
+marks `superseded` only queued `extract_archives` rows that have a LATER `extract_archives` row for the same
+item (provably orphaned); lone queued rows are left alone as possibly genuinely pending.
+
+## 2026-11-25 — Per-component build info + Version page Components table
+
+**Context:** `prompts/2026-11-25-build-info-version-page.md`. `/api/version` returned only `0.8.1`, identical
+for `:dev` and `:latest`, so a stale nginx `frontend_dist` volume was invisible in the app.
+
+- **Shape everywhere:** `{version, commit (full sha), channel, build_date}`; channel = `dev`/`main`/`release`
+  (CI) or `local`. CI passes `GIT_SHA`/`BUILD_CHANNEL`/`BUILD_DATE` build-args to all three images.
+- **`/api/version` unchanged and public** (nav shells, first-run). New authenticated `/api/version/details`
+  returns backend + worker; never 500s on Redis trouble (`worker: null` + `error`).
+- **Worker self-report** via Redis key `pf3d:build:worker` (JSON, TTL 180s) written at startup and refreshed by a
+  per-minute arq cron. Single-key (not per-host hash): one worker is the supported deployment; last writer wins.
+- **nginx reports two things:** baked `/build-info/nginx.json` (the image) and `/build-info.json` from the
+  `frontend_dist` volume (what is actually served) — the latter is the stale-volume check. Dev nginx returns 404
+  for both (not the SPA fallback); the UI shows "unavailable".
+- nginx.json carries no `version` (the nginx image has no app version); the UI shows a dash.
+
+## 2026-11-25 — Backend security pins 2a, dev/runtime requirements split, trixie base pin
+
+**Context:** `prompts/2026-11-25-backend-security-pins-trixie.md` (audit Tasks 2a + 3).
+
+- **2a/2b split:** 2a bumps only the low-risk set (Pillow 13.0.0, python-multipart 0.0.34, cryptography
+  50.0.2, lxml 6.1.3, PyYAML 6.0.4, floors for PyJWT/certifi/dnspython/anyio). fastapi/starlette/uvicorn
+  (starlette 0.x -> 1.x) stay pinned for 2b with its own full verify.
+- **Dev split:** `backend/requirements.txt` is runtime-only (the image installs only it); test/lint tools
+  (ruff 0.8.4, pytest*, anyio[trio]) live in `backend/requirements-dev.txt` (`-r requirements.txt`).
+  httpx and `pydantic[email]` stay runtime because app code imports them. CI installs the dev file and
+  greps the ruff pin from it.
+- **Base pinned to `python:3.12-slim-trixie`:** the floating tag already moved bookworm -> trixie; Debian
+  forky drops `libosmesa6`, which `vtk-osmesa` needs, so an unpinned tag could silently break rendering.
+- Local venv: `uv venv --python 3.12 backend/.venv && uv pip install --python backend/.venv/bin/python -r backend/requirements-dev.txt`.
+
+## 2026-11-25 — Frontend prod image is alpine-only (VERSION file)
+
+**Context:** security audit Task 4 (`docs/security-audit-2026-11-25.md`). The `prod` stage was
+`FROM builder`, shipping node, npm and node_modules (821 MB, 4 CRIT / 47 HIGH) just to `cp` four static
+files into the `frontend_dist` volume.
+
+- `prod` is now `FROM alpine:3.24` with only `/app/dist`, `/app/VERSION` and `docker-entrypoint.sh`
+  (15 MB, trivy 0/0). `deps`/`builder`/`dev` unchanged (builder stays `node:22-alpine`; the 24 bump is optional).
+- The entrypoint's `node -p` version lookup is replaced by a `/app/VERSION` file the builder stage writes
+  from package.json (no sed-parsing of JSON at runtime). `/dist` 0777 and the CMD contract are unchanged.
+- Alongside this, `npm update` (in-range only) cleared 9 of 12 npm advisories; only the vitest/tinypool
+  pair (semver-major, audit Task 6) remains.
+
+## 2026-11-25 — Bulk item actions backend (print records / tags / delete / rescan)
+
+**Context:** `prompts/done/2026-11-25-bulk-item-actions-backend.md` — catalog multi-select.
+
+- **Single-segment paths** (`/api/items/bulk-tags|bulk-delete|bulk-rescan|bulk-print-records`):
+  `/bulk/rescan` would be captured by `POST /{key}/rescan`. Bulk router is included right after
+  `move` and before `core`.
+- **Print records are all-or-nothing** (one transaction via `get_db`; any missing key returns 404
+  `{"detail": "Items not found.", "missing": [...]}` as a `JSONResponse` and creates nothing). Tags /
+  delete / rescan are partial-success with a fresh `SessionLocal` per item (same as bulk move) and
+  share one `{succeeded, failed:[{key,error}]}` shape (`BulkItemResult`); move's wire format untouched.
+- **Shared helpers instead of copies:** `_new_print_record` (print_records.py), `_trash_and_delete_item`
+  (items/core.py, used by `DELETE /{key}`), `_resolve_new_tag_status` + `_add_remove_tags` +
+  `_normalize_tag_names` (services/item_helpers.py). `_attach_tags` (replace semantics) is left as-is so
+  `PATCH /{key}` behavior cannot change; bulk tags is add/remove, not replace (add wins if a name is in both).
+- **Rescan runs inline, sequentially (cap 100), not enqueued:** no existing arq task runs a per-item
+  reconcile, so it reuses `reconcile_one_item` exactly like `POST /{key}/rescan`, with the same
+  `source="per_item_rescan"` (no new ChangeLog source value) and a fire-and-forget analyze enqueue per item.
+- Key lists are de-duplicated (order preserved) *before* the 1..500 (rescan 1..100) bound is checked.
+
 ## 2026-07-26 — Sidecar-writer creator guard moved into `_write_item_sidecar` (keep_db/keep_sidecar greenlet crash)
 
 **Context:** on prod, resolving conflict Issue #15 via **Keep DB** 500'd with

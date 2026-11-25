@@ -41,15 +41,15 @@ async def extract_archives(ctx: dict, item_id: int) -> None:
     from app.models.item import Item  # noqa: PLC0415
     from app.services.item_helpers import _enqueue_analyze, _enqueue_render  # noqa: PLC0415
     from app.storage.archive import ArchiveError, extract_zip  # noqa: PLC0415
-    from app.worker.job_tracker import create_job, finish_job  # noqa: PLC0415
+    from app.worker.job_tracker import claim_or_create_job, finish_job  # noqa: PLC0415
 
     # ------------------------------------------------------------------ #
-    # Create Job row so extraction is visible in the Jobs monitor          #
+    # Claim the queued Job row (or create one) so extraction is visible    #
     # ------------------------------------------------------------------ #
     job_id = None
     try:
         async with SessionLocal() as db:
-            job_id = await create_job(
+            job_id = await claim_or_create_job(
                 db,
                 "extract_archives",
                 payload={"item_id": item_id},

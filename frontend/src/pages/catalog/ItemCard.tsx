@@ -8,20 +8,45 @@ import { Box, Star } from 'lucide-react'
 
 import type * as api from '@/lib/api'
 import { CARD_STYLE } from './styles'
+import type { SelectionViewProps } from './useCatalogSelection'
 
 interface ItemCardProps {
   item: api.ItemSummary
   onToggleFavorite: (key: string, favorited: boolean) => void
   isFavoriting: boolean
   gridMode: 'compact' | 'full'
+  selection?: SelectionViewProps
 }
 
-export function ItemCard({ item, onToggleFavorite, isFavoriting, gridMode }: ItemCardProps) {
+export function ItemCard({ item, onToggleFavorite, isFavoriting, gridMode, selection }: ItemCardProps) {
   const imgHeight = gridMode === 'compact' ? 160 : 260
+  const selectMode = !!selection?.active
+  const selected = selectMode && selection!.isSelected(item.key)
   return (
     <div
+      data-testid={selectMode ? `select-card-${item.key}` : undefined}
+      // In select mode every click on the card toggles selection instead of
+      // navigating (capture so the cover/title <Link>s never see it). The
+      // favorite star is left alone.
+      onClickCapture={
+        selectMode
+          ? (e) => {
+              if ((e.target as HTMLElement).closest('[data-fav-button]')) return
+              // Never preventDefault on the checkbox itself: that cancels the native
+              // toggle and the browser reverts it after React re-renders, leaving the
+              // box visually unchecked. Elsewhere it stops the cover/title <Link>s.
+              if (!(e.target as HTMLElement).matches('input[type="checkbox"]')) e.preventDefault()
+              e.stopPropagation()
+              selection!.onSelect(item, e.shiftKey)
+            }
+          : undefined
+      }
       style={{
         ...CARD_STYLE,
+        position: 'relative',
+        ...(selected
+          ? { borderColor: 'var(--aurora-accent)', boxShadow: '0 0 0 2px var(--aurora-accent)' }
+          : {}),
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
@@ -36,11 +61,30 @@ export function ItemCard({ item, onToggleFavorite, isFavoriting, gridMode }: Ite
       }}
       onMouseLeave={(e) => {
         const el = e.currentTarget as HTMLDivElement
-        el.style.borderColor = 'var(--aurora-card-border)'
-        el.style.boxShadow = 'none'
+        el.style.borderColor = selected ? 'var(--aurora-accent)' : 'var(--aurora-card-border)'
+        el.style.boxShadow = selected ? '0 0 0 2px var(--aurora-accent)' : 'none'
         el.style.transform = 'none'
       }}
     >
+      {selectMode && (
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => {}}
+          aria-label={`Select ${item.title}`}
+          style={{
+            position: 'absolute',
+            top: 8,
+            left: 8,
+            zIndex: 2,
+            width: 20,
+            height: 20,
+            cursor: 'pointer',
+            accentColor: 'var(--aurora-accent)',
+          }}
+        />
+      )}
+
       {/* Cover image */}
       <Link
         to={`/items/${item.key}`}
@@ -117,6 +161,7 @@ export function ItemCard({ item, onToggleFavorite, isFavoriting, gridMode }: Ite
               </span>
             )}
             <button
+              data-fav-button
               onClick={() => onToggleFavorite(item.key, item.favorited)}
               disabled={isFavoriting}
               style={{

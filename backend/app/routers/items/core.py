@@ -56,16 +56,16 @@ from ...models.image import Image
 from ...models.item import Item
 from ...models.job import Job
 from ...models.library import Library
-from ...models.tag import ItemTag, Tag, TagStatus
+from ...models.tag import ItemTag, Tag
 from ...models.user import User
 from ...services.item_helpers import (
     _attach_tags,
     _enqueue_analyze,
     _enqueue_render,
+    _resolve_new_tag_status,
     _update_search_vector,
     _write_item_sidecar,
 )
-from ...services.settings_service import get_tags_auto_approve
 from ...storage.inventory import inventory_item
 from ...storage.journal import MoveError, atomic_rename, move_to_trash
 from ...storage.keys import generate_unique_key
@@ -522,9 +522,7 @@ async def update_item(
         needs_sidecar_refresh = True
 
     if body.tags is not None:
-        new_tag_status = (
-            TagStatus.active if await get_tags_auto_approve(db) else TagStatus.pending
-        )
+        new_tag_status = await _resolve_new_tag_status(db)
         await _attach_tags(db, item, body.tags, new_tag_status=new_tag_status)
         needs_sidecar_refresh = True
 
@@ -586,6 +584,12 @@ async def delete_item(
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found.")
 
+    await _trash_and_delete_item(db, item)
+
+
+async def _trash_and_delete_item(db: AsyncSession, item: Item) -> None:
+    """Move *item*'s directory to trash and delete its DB row (shared single + bulk)."""
+    key = item.key
     item_dir = Path(item.dir_path)
 
     # Move to trash (only if the dir exists)

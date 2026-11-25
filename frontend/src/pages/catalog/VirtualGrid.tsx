@@ -9,6 +9,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import type * as api from '@/lib/api'
 import { computeCols, GRID_GAP_PX } from '@/lib/catalog-utils'
 import { ItemCard } from './ItemCard'
+import type { SelectionViewProps } from './useCatalogSelection'
 
 /** Minimum card width (px) for compact grid mode — dense layout. */
 const MIN_CARD_WIDTH_COMPACT = 220
@@ -34,9 +35,10 @@ interface VirtualGridProps {
   onToggleFavorite: (key: string, favorited: boolean) => void
   favoritingKey: string | null
   gridMode: 'compact' | 'full'
+  selection?: SelectionViewProps
 }
 
-export function VirtualGrid({ items, onToggleFavorite, favoritingKey, gridMode }: VirtualGridProps) {
+export function VirtualGrid({ items, onToggleFavorite, favoritingKey, gridMode, selection }: VirtualGridProps) {
   const parentRef = useRef<HTMLDivElement>(null)
 
   // --- Responsive column count via ResizeObserver ---
@@ -123,6 +125,7 @@ export function VirtualGrid({ items, onToggleFavorite, favoritingKey, gridMode }
                     onToggleFavorite={onToggleFavorite}
                     isFavoriting={favoritingKey === item.key}
                     gridMode={gridMode}
+                    selection={selection}
                   />
                 ))}
               </div>

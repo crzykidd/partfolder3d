@@ -18,6 +18,16 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: Record<string, ReleaseNote> = {
+  '0.9.0': {
+    title: "What's New in v0.9.0",
+    bullets: [
+      'Catalog multi-select: click "Select" in the catalog toolbar, pick items (shift-click for a range — selection survives paging and filters), then log a print, add/remove tags, move, rescan, or delete them all at once',
+      'The Version page now lists every component\'s build — browser bundle, the frontend nginx is serving, nginx, backend and worker — with commit links, and warns when they don\'t match (e.g. a stale frontend volume)',
+      'Security refresh: patched backend dependencies (Pillow, python-multipart, cryptography, lxml and more), dev/test tools removed from the backend image, and a much smaller frontend image',
+      'Fixed: "extract_archives" jobs no longer stay stuck in "queued" after importing an item with a ZIP — existing stuck entries are cleaned up automatically on upgrade',
+    ],
+    githubReleaseUrl: 'https://github.com/crzykidd/partfolder3d/releases/tag/v0.9.0',
+  },
   '0.8.1': {
     title: "What's New in v0.8.1",
     bullets: [

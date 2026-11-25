@@ -31,7 +31,8 @@ from typing import Annotated
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -105,6 +106,23 @@ class PrintRecordOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class BulkPrintRecordsIn(BaseModel):
+    keys: list[str]
+    record: PrintRecordIn
+
+    @field_validator("keys")
+    @classmethod
+    def _check_keys(cls, v: list[str]) -> list[str]:
+        from .items.schemas import _dedupe_keys  # noqa: PLC0415
+
+        return _dedupe_keys(v)
+
+
+class BulkPrintRecordsOut(BaseModel):
+    created: int
+    records: list[PrintRecordOut]
+
+
 class PrintStatsOut(BaseModel):
     total_prints: int
     success_count: int
@@ -171,6 +189,25 @@ def _record_to_out(rec: PrintRecord, item: Item) -> PrintRecordOut:
     )
 
 
+def _new_print_record(item_id: int, user_id: int | None, body: PrintRecordIn) -> PrintRecord:
+    """Map a PrintRecordIn onto a new PrintRecord (shared by single + bulk create)."""
+    return PrintRecord(
+        item_id=item_id,
+        logged_by_id=user_id,
+        note=body.note,
+        visibility=body.visibility,
+        date=body.date,
+        printer=body.printer,
+        material=body.material,
+        filament_color=body.filament_color,
+        nozzle_diameter=body.nozzle_diameter,
+        layer_height=body.layer_height,
+        supports=body.supports,
+        success=body.success,
+        rating=body.rating,
+    )
+
+
 def _require_record_owner_or_admin(rec: PrintRecord, user: User) -> None:
     """Reject writes to a print record not owned by *user* (admins exempt).
 
@@ -215,25 +252,47 @@ async def create_print_record(
     _validate_visibility(body.visibility)
     item = await _get_item_or_404(key, db)
 
-    rec = PrintRecord(
-        item_id=item.id,
-        logged_by_id=user.id,
-        note=body.note,
-        visibility=body.visibility,
-        date=body.date,
-        printer=body.printer,
-        material=body.material,
-        filament_color=body.filament_color,
-        nozzle_diameter=body.nozzle_diameter,
-        layer_height=body.layer_height,
-        supports=body.supports,
-        success=body.success,
-        rating=body.rating,
-    )
+    rec = _new_print_record(item.id, user.id, body)
     db.add(rec)
     await db.flush()
     await db.refresh(rec)
     return _record_to_out(rec, item)
+
+
+@router.post("/api/items/bulk-print-records", response_model=BulkPrintRecordsOut, status_code=201)
+async def bulk_create_print_records(
+    body: BulkPrintRecordsIn,
+    user: Annotated[User, Depends(get_current_user)],
+    _csrf: Annotated[None, Depends(csrf_protect)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> BulkPrintRecordsOut | JSONResponse:
+    """Log the same print against many items — all-or-nothing in one transaction.
+
+    If any key does not exist, 404 ``{"detail": "Items not found.", "missing": [...]}``
+    and nothing is created.
+    """
+    _validate_visibility(body.record.visibility)
+
+    result = await db.execute(select(Item).where(Item.key.in_(body.keys)))
+    by_key = {it.key: it for it in result.scalars().all()}
+    missing = [k for k in body.keys if k not in by_key]
+    if missing:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"detail": "Items not found.", "missing": missing},
+        )
+
+    pairs: list[tuple[PrintRecord, Item]] = []
+    for k in body.keys:
+        item = by_key[k]
+        rec = _new_print_record(item.id, user.id, body.record)
+        db.add(rec)
+        pairs.append((rec, item))
+    await db.flush()
+    for rec, _ in pairs:
+        await db.refresh(rec)
+    out = [_record_to_out(rec, item) for rec, item in pairs]
+    return BulkPrintRecordsOut(created=len(out), records=out)
 
 
 @router.get("/api/items/{key}/print-records", response_model=list[PrintRecordOut])

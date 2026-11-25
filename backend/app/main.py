@@ -20,18 +20,24 @@ Phase 13: AI usage tracking — record token counts per call, 24h/7d/30d usage
           summary with estimated cost in the admin UI.
 """
 
+import json
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated, Any
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from .auth.deps import get_current_user
+from .build_info import WORKER_BUILD_KEY, get_build_info
 from .config import settings
 from .crypto import ensure_key
+from .models.user import User
 from .version import __version__
+from .worker.arq_pool import get_arq_pool
 
 log = logging.getLogger(__name__)
 
@@ -236,3 +242,24 @@ async def health() -> dict[str, str]:
 async def version() -> dict[str, str]:
     """Return the running application version."""
     return {"version": __version__}
+
+
+@app.get("/api/version/details", tags=["meta"])
+async def version_details(
+    _user: Annotated[User, Depends(get_current_user)],
+    arq: Annotated[Any, Depends(get_arq_pool)],
+) -> dict[str, Any]:
+    """Per-component build info (backend + worker). Any logged-in user.
+
+    The worker self-reports to Redis (``pf3d:build:worker``); ``worker`` is null
+    when the key is missing/expired or Redis is unreachable (``error`` is set).
+    """
+    worker: dict[str, Any] | None = None
+    error: str | None = None
+    try:
+        raw = await arq.get(WORKER_BUILD_KEY)
+        if raw:
+            worker = json.loads(raw)
+    except Exception as exc:  # noqa: BLE001 — never 500 on Redis trouble
+        error = f"worker build info unavailable: {type(exc).__name__}"
+    return {"backend": get_build_info(), "worker": worker, "error": error}

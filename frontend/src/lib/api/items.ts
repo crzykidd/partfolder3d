@@ -638,3 +638,34 @@ export const listAllTags = (params: {
   const qs = sp.toString()
   return apiFetch<PaginatedTags>(`/api/tags${qs ? `?${qs}` : ''}`)
 }
+
+// ---------------------------------------------------------------------------
+// Bulk item actions (catalog multi-select)
+// ---------------------------------------------------------------------------
+
+/** Max keys accepted by the bulk endpoints (rescan: BULK_RESCAN_MAX_KEYS). */
+export const BULK_MAX_KEYS = 500
+export const BULK_RESCAN_MAX_KEYS = 100
+
+export interface BulkItemResult {
+  succeeded: string[]
+  failed: { key: string; error: string }[]
+}
+
+const postBulk = (path: string, body: unknown): Promise<BulkItemResult> =>
+  apiFetch<BulkItemResult>(path, { method: 'POST', body: JSON.stringify(body) })
+
+/** Add/remove tags on many items. New tags may land pending approval. */
+export const bulkTagItems = (
+  keys: string[],
+  add: string[],
+  remove: string[],
+): Promise<BulkItemResult> => postBulk('/api/items/bulk-tags', { keys, add, remove })
+
+/** Delete many items (moved to trash, recoverable). Per-item partial success. */
+export const bulkDeleteItems = (keys: string[]): Promise<BulkItemResult> =>
+  postBulk('/api/items/bulk-delete', { keys })
+
+/** Rescan many items (max 100 keys). Per-item partial success. */
+export const bulkRescanItems = (keys: string[]): Promise<BulkItemResult> =>
+  postBulk('/api/items/bulk-rescan', { keys })

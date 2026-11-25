@@ -6,7 +6,8 @@ import { X as XIcon } from 'lucide-react'
 import * as api from '@/lib/api'
 import { formatPrintTime, formatFilamentLength, formatFilamentWeight, renderStars } from '@/lib/print-utils'
 
-import { AURORA_INPUT, AURORA_BTN_PRIMARY, AURORA_BTN_GHOST } from './styles'
+import { AURORA_BTN_PRIMARY, AURORA_BTN_GHOST } from './styles'
+import { PrintRecordFields } from './PrintRecordFields'
 
 // ---------------------------------------------------------------------------
 // Print record form (inline modal overlay)
@@ -66,16 +67,6 @@ function PrintRecordForm({ itemKey, existing, onClose, onSaved }: PrintRecordFor
     } else {
       createMutation.mutate(body)
     }
-  }
-
-  const labelStyle: React.CSSProperties = {
-    fontSize: 10,
-    fontWeight: 700,
-    color: 'var(--aurora-muted)',
-    textTransform: 'uppercase',
-    letterSpacing: '0.08em',
-    display: 'block',
-    marginBottom: 5,
   }
 
   return createPortal(
@@ -142,169 +133,7 @@ function PrintRecordForm({ itemKey, existing, onClose, onSaved }: PrintRecordFor
         </div>
 
         <form onSubmit={handleSubmit} style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Visibility + Date */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={labelStyle}>Visibility</label>
-              <select
-                value={form.visibility}
-                onChange={(e) => setForm((f) => ({ ...f, visibility: e.target.value }))}
-                style={AURORA_INPUT}
-              >
-                <option value="private">Private</option>
-                <option value="public">Public</option>
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Date</label>
-              <input
-                type="date"
-                value={form.date ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, date: e.target.value || null }))}
-                style={AURORA_INPUT}
-              />
-            </div>
-          </div>
-
-          {/* Outcome + Rating */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={labelStyle}>Outcome</label>
-              <select
-                value={form.success == null ? '' : form.success ? 'true' : 'false'}
-                onChange={(e) => {
-                  const v = e.target.value
-                  setForm((f) => ({
-                    ...f,
-                    success: v === '' ? null : v === 'true',
-                  }))
-                }}
-                style={AURORA_INPUT}
-              >
-                <option value="">Not recorded</option>
-                <option value="true">Success</option>
-                <option value="false">Failed</option>
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Rating (1–5)</label>
-              <select
-                value={form.rating ?? ''}
-                onChange={(e) => {
-                  const v = e.target.value
-                  setForm((f) => ({ ...f, rating: v === '' ? null : Number(v) }))
-                }}
-                style={AURORA_INPUT}
-              >
-                <option value="">None</option>
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <option key={n} value={n}>{n} — {renderStars(n)}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Printer + Material */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={labelStyle}>Printer</label>
-              <input
-                type="text"
-                value={form.printer ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, printer: e.target.value }))}
-                placeholder="e.g. Bambu X1C"
-                style={AURORA_INPUT}
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>Material</label>
-              <input
-                type="text"
-                value={form.material ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, material: e.target.value }))}
-                placeholder="e.g. PLA"
-                style={AURORA_INPUT}
-              />
-            </div>
-          </div>
-
-          {/* Filament color + Supports */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={labelStyle}>Filament color</label>
-              <input
-                type="text"
-                value={form.filament_color ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, filament_color: e.target.value }))}
-                placeholder="e.g. Black"
-                style={AURORA_INPUT}
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>Supports</label>
-              <select
-                value={form.supports == null ? '' : form.supports ? 'true' : 'false'}
-                onChange={(e) => {
-                  const v = e.target.value
-                  setForm((f) => ({
-                    ...f,
-                    supports: v === '' ? null : v === 'true',
-                  }))
-                }}
-                style={AURORA_INPUT}
-              >
-                <option value="">Not recorded</option>
-                <option value="true">Yes</option>
-                <option value="false">No</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Nozzle + Layer height */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={labelStyle}>Nozzle (mm)</label>
-              <input
-                type="number"
-                step="0.1"
-                min="0"
-                value={form.nozzle_diameter ?? ''}
-                onChange={(e) => {
-                  const v = e.target.value
-                  setForm((f) => ({ ...f, nozzle_diameter: v === '' ? null : Number(v) }))
-                }}
-                placeholder="0.4"
-                style={AURORA_INPUT}
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>Layer height (mm)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={form.layer_height ?? ''}
-                onChange={(e) => {
-                  const v = e.target.value
-                  setForm((f) => ({ ...f, layer_height: v === '' ? null : Number(v) }))
-                }}
-                placeholder="0.20"
-                style={AURORA_INPUT}
-              />
-            </div>
-          </div>
-
-          {/* Note */}
-          <div>
-            <label style={labelStyle}>Note</label>
-            <textarea
-              rows={3}
-              value={form.note ?? ''}
-              onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
-              placeholder="Any notes about this print…"
-              style={{ ...AURORA_INPUT, resize: 'none', lineHeight: 1.5 }}
-            />
-          </div>
+          <PrintRecordFields form={form} setForm={setForm} />
 
           {submitError && (
             <p style={{ fontSize: 12, color: 'var(--aurora-danger)', margin: 0 }}>{submitError}</p>
