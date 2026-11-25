@@ -138,6 +138,19 @@ describe('CatalogPage bulk selection', () => {
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0)
   })
 
+  it('clicking the checkbox itself toggles selection without cancelling the native toggle', async () => {
+    renderCatalog()
+    await enterSelectMode()
+    // fireEvent.click returns false if any handler called preventDefault — which in a
+    // real browser reverts the checkbox visually (the original bug: box never ticks).
+    expect(fireEvent.click(checkbox('Model B'))).toBe(true)
+    expect(checkbox('Model B')).toBeChecked()
+    expect(screen.getByText('1 selected')).toBeInTheDocument()
+    expect(fireEvent.click(checkbox('Model B'))).toBe(true)
+    expect(checkbox('Model B')).not.toBeChecked()
+    expect(screen.getByText('0 selected')).toBeInTheDocument()
+  })
+
   it('clicking a row toggles selection and does NOT navigate; outside the mode it still navigates', async () => {
     renderCatalog()
     await enterSelectMode()

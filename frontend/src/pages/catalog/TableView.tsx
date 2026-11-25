@@ -258,7 +258,9 @@ export function TableView({ items, onToggleFavorite, favoritingKey, selection }:
                 selectMode
                   ? (e) => {
                       if ((e.target as HTMLElement).closest('button')) return
-                      e.preventDefault()
+                      // See ItemCard: preventDefault on the checkbox cancels its native
+                      // toggle and leaves it visually unchecked.
+                      if (!(e.target as HTMLElement).matches('input[type="checkbox"]')) e.preventDefault()
                       e.stopPropagation()
                       selection!.onSelect(row.original, e.shiftKey)
                     }

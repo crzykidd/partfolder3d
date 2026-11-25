@@ -38,6 +38,7 @@ prefix appears only on git tags and GitHub releases.
     `POST /api/items/bulk-rescan`, `POST /api/items/bulk-delete`.
   Tags, move, rescan and delete are per-item partial-success; failures are listed inline and stay
   selected for retry.
+  (Clicking a card's/row's checkbox directly now toggles it — previously only clicking the tile did.)
 
 ### Security
 

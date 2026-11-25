@@ -32,7 +32,10 @@ export function ItemCard({ item, onToggleFavorite, isFavoriting, gridMode, selec
         selectMode
           ? (e) => {
               if ((e.target as HTMLElement).closest('[data-fav-button]')) return
-              e.preventDefault()
+              // Never preventDefault on the checkbox itself: that cancels the native
+              // toggle and the browser reverts it after React re-renders, leaving the
+              // box visually unchecked. Elsewhere it stops the cover/title <Link>s.
+              if (!(e.target as HTMLElement).matches('input[type="checkbox"]')) e.preventDefault()
               e.stopPropagation()
               selection!.onSelect(item, e.shiftKey)
             }
