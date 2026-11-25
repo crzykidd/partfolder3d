@@ -5,7 +5,9 @@
 # The worker service overrides CMD to "python worker.py".
 
 # ---- base: Python runtime ----
-FROM python:3.12-slim AS base
+# Pinned Debian codename: the floating tag moved bookworm -> trixie, and Debian forky drops
+# libosmesa6, which vtk-osmesa needs (docs/security-audit-2026-11-25.md section 4.2).
+FROM python:3.12-slim-trixie AS base
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

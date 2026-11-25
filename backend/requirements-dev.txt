@@ -1,0 +1,10 @@
+# PartFolder 3D backend — dev / test / lint dependencies (NOT installed in the Docker image).
+# Runtime deps live in requirements.txt; this file layers test + lint tooling on top.
+# Local venv: uv venv --python 3.12 backend/.venv && uv pip install --python backend/.venv/bin/python -r backend/requirements-dev.txt
+-r requirements.txt
+
+ruff==0.8.4
+pytest==8.3.4
+pytest-asyncio==0.25.0
+pytest-xdist==3.8.0
+anyio[trio]>=4.14.2

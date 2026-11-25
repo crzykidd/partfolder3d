@@ -39,6 +39,26 @@ prefix appears only on git tags and GitHub releases.
   Tags, move, rescan and delete are per-item partial-success; failures are listed inline and stay
   selected for retry.
 
+### Security
+
+- **Backend dependency security bumps** — Pillow 11.1.0 → 13.0.0, python-multipart 0.0.20 →
+  0.0.34 (fixes a path-traversal file write reachable via uploads), cryptography 44.0.0 → 50.0.2,
+  lxml 6.1.3, PyYAML 6.0.4, plus CVE floors for transitive PyJWT, certifi, dnspython and anyio.
+  Backend image trivy CRITICAL 14 → 1 (an unreachable, no-fix-yet Debian libxml2). fastapi/starlette
+  bumps are deferred to a separate change.
+- **Dev/test tools no longer ship in the backend image.** ruff/pytest/etc. moved to the new
+  `backend/requirements-dev.txt` (`-r requirements.txt` + dev tools); CI installs the dev file. Local
+  venv: `uv venv --python 3.12 backend/.venv && uv pip install --python backend/.venv/bin/python -r backend/requirements-dev.txt`.
+- **Backend base image pinned to `python:3.12-slim-trixie`** so a future floating-tag move to Debian
+  forky (which drops `libosmesa6`) can't silently break rendering.
+- **Frontend image: alpine-only prod stage.** The published `partfolder3d-frontend` image no longer
+  ships the Node toolchain — it is `alpine:3.24` + the built `dist/` (821 MB → ~15 MB; trivy
+  CRITICAL/HIGH 4/47 → 0/0). The version banner now reads a build-time `VERSION` file instead of
+  `node`. The `dev` target is unchanged.
+- **npm in-range updates** (vite 6.4.6, react-router 7.18.7, postcss 8.5.33, nanoid, browserslist,
+  source-map-js): `npm audit` 12 → 3; the remaining advisories are in the dev-only vitest toolchain
+  (major bump, tracked separately). See `docs/security-audit-2026-11-25.md`.
+
 ## [0.8.1] — 2026-07-26
 
 ### Fixed

@@ -2,6 +2,34 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-11-25 — Backend security pins 2a, dev/runtime requirements split, trixie base pin
+
+**Context:** `prompts/2026-11-25-backend-security-pins-trixie.md` (audit Tasks 2a + 3).
+
+- **2a/2b split:** 2a bumps only the low-risk set (Pillow 13.0.0, python-multipart 0.0.34, cryptography
+  50.0.2, lxml 6.1.3, PyYAML 6.0.4, floors for PyJWT/certifi/dnspython/anyio). fastapi/starlette/uvicorn
+  (starlette 0.x -> 1.x) stay pinned for 2b with its own full verify.
+- **Dev split:** `backend/requirements.txt` is runtime-only (the image installs only it); test/lint tools
+  (ruff 0.8.4, pytest*, anyio[trio]) live in `backend/requirements-dev.txt` (`-r requirements.txt`).
+  httpx and `pydantic[email]` stay runtime because app code imports them. CI installs the dev file and
+  greps the ruff pin from it.
+- **Base pinned to `python:3.12-slim-trixie`:** the floating tag already moved bookworm -> trixie; Debian
+  forky drops `libosmesa6`, which `vtk-osmesa` needs, so an unpinned tag could silently break rendering.
+- Local venv: `uv venv --python 3.12 backend/.venv && uv pip install --python backend/.venv/bin/python -r backend/requirements-dev.txt`.
+
+## 2026-11-25 — Frontend prod image is alpine-only (VERSION file)
+
+**Context:** security audit Task 4 (`docs/security-audit-2026-11-25.md`). The `prod` stage was
+`FROM builder`, shipping node, npm and node_modules (821 MB, 4 CRIT / 47 HIGH) just to `cp` four static
+files into the `frontend_dist` volume.
+
+- `prod` is now `FROM alpine:3.24` with only `/app/dist`, `/app/VERSION` and `docker-entrypoint.sh`
+  (15 MB, trivy 0/0). `deps`/`builder`/`dev` unchanged (builder stays `node:22-alpine`; the 24 bump is optional).
+- The entrypoint's `node -p` version lookup is replaced by a `/app/VERSION` file the builder stage writes
+  from package.json (no sed-parsing of JSON at runtime). `/dist` 0777 and the CMD contract are unchanged.
+- Alongside this, `npm update` (in-range only) cleared 9 of 12 npm advisories; only the vitest/tinypool
+  pair (semver-major, audit Task 6) remains.
+
 ## 2026-11-25 — Bulk item actions backend (print records / tags / delete / rescan)
 
 **Context:** `prompts/done/2026-11-25-bulk-item-actions-backend.md` — catalog multi-select.

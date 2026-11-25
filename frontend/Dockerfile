@@ -7,11 +7,18 @@ RUN npm ci
 # ---- build: compile the Vite app ----
 FROM deps AS builder
 COPY . .
-RUN npm run build
+RUN npm run build \
+ && node -p "require('./package.json').version" > /app/VERSION
 
 # ---- prod: export the dist/ for consumption by nginx ----
 # When used in docker-compose, cmd copies dist to the shared named volume.
-FROM builder AS prod
+# Alpine-only: no node/npm/node_modules in the shipped image (it only `cp`s static
+# files, so the toolchain was pure CVE surface). Version banner reads /app/VERSION.
+FROM alpine:3.24 AS prod
+WORKDIR /app
+COPY --from=builder /app/dist /app/dist
+COPY --from=builder /app/VERSION /app/VERSION
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 # 0777 on /dist so any UID (set via compose user: PUID:PGID) can write the
 # named volume — Docker copies this mode when initialising a new named volume.
 RUN mkdir -p /dist && chmod 0777 /dist

@@ -71,6 +71,10 @@ One row per subsystem. Paths are relative to repo root. Backend routers live in
 Durable technical traps. Break one and the failure is often silent or
 image-only (invisible to local unit runs).
 
+- **Requirements split.** `backend/requirements.txt` is runtime-only (the Docker image installs just it);
+  tests/lint use `backend/requirements-dev.txt`. (Re)create the local venv:
+  `uv venv --python 3.12 backend/.venv && uv pip install --python backend/.venv/bin/python -r backend/requirements-dev.txt`.
+
 - **Render backend uses the `vtk-osmesa` wheel + `libosmesa6`** (NOT stock PyPI
   `vtk`, which is X11-only). Only verifiable in a **built image**, not a bare
   local run.
