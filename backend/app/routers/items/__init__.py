@@ -8,6 +8,8 @@ submodules, mirroring the ``routers/import_sessions/`` precedent:
   core.py     — item CRUD + listing + rescan + default-image + modified-override + jobs
   images.py   — image upload / delete
   files.py    — file upload / delete / rename
+  move.py     — move item(s) between libraries (single + bulk)
+  bulk.py     — bulk tags / delete / rescan (multi-select)
 
 Each submodule owns an ``APIRouter(prefix="/api/items", tags=["items"])``; this
 package combines them onto one router so ``main.py``'s existing
@@ -23,6 +25,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from .bulk import router as _bulk_router
 from .core import router as _core_router
 from .files import router as _files_router
 from .helpers import _effective_is_modified  # noqa: F401 (re-exported for shares.py + tests)
@@ -33,6 +36,7 @@ from .move import router as _move_router
 # ``POST /api/items/move`` is registered ahead of any ``/{key}`` patterns.
 router = APIRouter()
 router.include_router(_move_router)
+router.include_router(_bulk_router)
 router.include_router(_core_router)
 router.include_router(_images_router)
 router.include_router(_files_router)

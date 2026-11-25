@@ -44,6 +44,11 @@ export interface PrintRecordIn {
 
 export type PrintRecordPatch = PrintRecordIn
 
+export interface BulkPrintRecordsResult {
+  created: number
+  records: PrintRecord[]
+}
+
 export interface MostPrintedItem {
   item_id: number
   item_key: string | null
@@ -118,3 +123,13 @@ export const uploadPrintPhoto = (
 
 export const getPrintStats = (): Promise<PrintStats> =>
   apiFetch<PrintStats>('/api/print-stats')
+
+/** Log one identical print record against many items (all-or-nothing; 404 if any key missing). */
+export const bulkCreatePrintRecords = (
+  keys: string[],
+  record: PrintRecordIn,
+): Promise<BulkPrintRecordsResult> =>
+  apiFetch<BulkPrintRecordsResult>('/api/items/bulk-print-records', {
+    method: 'POST',
+    body: JSON.stringify({ keys, record }),
+  })

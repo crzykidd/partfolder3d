@@ -188,3 +188,63 @@ class PaginatedItems(BaseModel):
 
 class RenameFileRequest(BaseModel):
     name: str  # new basename only — no path separators
+
+
+# ---------------------------------------------------------------------------
+# Bulk item actions (multi-select) — tags / delete / rescan
+# ---------------------------------------------------------------------------
+
+BULK_MAX_KEYS = 500
+BULK_RESCAN_MAX_KEYS = 100
+
+
+def _dedupe_keys(keys: list[str]) -> list[str]:
+    """De-duplicate preserving order; 1..BULK_MAX_KEYS unique keys."""
+    seen: set[str] = set()
+    out = [k for k in keys if not (k in seen or seen.add(k))]
+    if not out:
+        raise ValueError("keys must contain at least one item key")
+    if len(out) > BULK_MAX_KEYS:
+        raise ValueError(f"keys must contain at most {BULK_MAX_KEYS} item keys")
+    return out
+
+
+class BulkKeysRequest(BaseModel):
+    keys: list[str]
+
+    @field_validator("keys")
+    @classmethod
+    def _check_keys(cls, v: list[str]) -> list[str]:
+        return _dedupe_keys(v)
+
+
+class BulkRescanRequest(BulkKeysRequest):
+    @field_validator("keys")
+    @classmethod
+    def _check_rescan_cap(cls, v: list[str]) -> list[str]:
+        if len(v) > BULK_RESCAN_MAX_KEYS:
+            raise ValueError(f"keys must contain at most {BULK_RESCAN_MAX_KEYS} item keys")
+        return v
+
+
+class BulkTagsRequest(BulkKeysRequest):
+    add: list[str] = []
+    remove: list[str] = []
+
+    @model_validator(mode="after")
+    def _need_one(self) -> BulkTagsRequest:
+        self.add = [n.strip() for n in self.add if n.strip()]
+        self.remove = [n.strip() for n in self.remove if n.strip()]
+        if not self.add and not self.remove:
+            raise ValueError("at least one of add / remove must be non-empty")
+        return self
+
+
+class BulkItemFailure(BaseModel):
+    key: str
+    error: str
+
+
+class BulkItemResult(BaseModel):
+    succeeded: list[str]
+    failed: list[BulkItemFailure]

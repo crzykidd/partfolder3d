@@ -2,6 +2,26 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-11-25 — Bulk item actions backend (print records / tags / delete / rescan)
+
+**Context:** `prompts/done/2026-11-25-bulk-item-actions-backend.md` — catalog multi-select.
+
+- **Single-segment paths** (`/api/items/bulk-tags|bulk-delete|bulk-rescan|bulk-print-records`):
+  `/bulk/rescan` would be captured by `POST /{key}/rescan`. Bulk router is included right after
+  `move` and before `core`.
+- **Print records are all-or-nothing** (one transaction via `get_db`; any missing key returns 404
+  `{"detail": "Items not found.", "missing": [...]}` as a `JSONResponse` and creates nothing). Tags /
+  delete / rescan are partial-success with a fresh `SessionLocal` per item (same as bulk move) and
+  share one `{succeeded, failed:[{key,error}]}` shape (`BulkItemResult`); move's wire format untouched.
+- **Shared helpers instead of copies:** `_new_print_record` (print_records.py), `_trash_and_delete_item`
+  (items/core.py, used by `DELETE /{key}`), `_resolve_new_tag_status` + `_add_remove_tags` +
+  `_normalize_tag_names` (services/item_helpers.py). `_attach_tags` (replace semantics) is left as-is so
+  `PATCH /{key}` behavior cannot change; bulk tags is add/remove, not replace (add wins if a name is in both).
+- **Rescan runs inline, sequentially (cap 100), not enqueued:** no existing arq task runs a per-item
+  reconcile, so it reuses `reconcile_one_item` exactly like `POST /{key}/rescan`, with the same
+  `source="per_item_rescan"` (no new ChangeLog source value) and a fire-and-forget analyze enqueue per item.
+- Key lists are de-duplicated (order preserved) *before* the 1..500 (rescan 1..100) bound is checked.
+
 ## 2026-07-26 — Sidecar-writer creator guard moved into `_write_item_sidecar` (keep_db/keep_sidecar greenlet crash)
 
 **Context:** on prod, resolving conflict Issue #15 via **Keep DB** 500'd with

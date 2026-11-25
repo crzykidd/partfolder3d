@@ -68,6 +68,75 @@ async def _attach_tags(
     await db.flush()
 
 
+async def _resolve_new_tag_status(db: AsyncSession) -> TagStatus:
+    """Status given to brand-new tag names minted by an interactive edit.
+
+    ``pending`` (admin approval queue) unless the ``tags.auto_approve`` instance
+    setting is on.  Shared by ``PATCH /api/items/{key}`` and the bulk-tags endpoint.
+    """
+    from .settings_service import get_tags_auto_approve  # noqa: PLC0415
+
+    return TagStatus.active if await get_tags_auto_approve(db) else TagStatus.pending
+
+
+def _normalize_tag_names(names: list[str]) -> list[str]:
+    """Strip, drop empties, de-duplicate (order-preserving) — same as ``_attach_tags``."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for n in names:
+        n = n.strip()
+        if n and n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out
+
+
+async def _add_remove_tags(
+    db: AsyncSession,
+    item: Item,
+    add: list[str],
+    remove: list[str],
+    new_tag_status: TagStatus = TagStatus.pending,
+) -> bool:
+    """Apply add/remove (NOT replace) tag semantics: new set = (current - remove) | add.
+
+    New tag names are created with *new_tag_status*; existing tags (any status) are
+    matched by name and keep their status.  A name in both lists ends up present
+    (add wins).  Returns True if the item's tag set actually changed.
+    """
+    add_names = _normalize_tag_names(add)
+    remove_names = set(_normalize_tag_names(remove))
+
+    cur_result = await db.execute(
+        select(Tag.id, Tag.name)
+        .join(ItemTag, Tag.id == ItemTag.tag_id)
+        .where(ItemTag.item_id == item.id)
+    )
+    current = {name: tag_id for tag_id, name in cur_result.all()}
+
+    changed = False
+    to_remove = [
+        tid
+        for name, tid in current.items()
+        if name in remove_names and name not in add_names
+    ]
+    if to_remove:
+        await db.execute(
+            ItemTag.__table__.delete().where(  # type: ignore[attr-defined]
+                ItemTag.item_id == item.id, ItemTag.tag_id.in_(to_remove)
+            )
+        )
+        changed = True
+    for name in add_names:
+        if name in current:
+            continue
+        tag = await _get_or_create_tag(db, name, status=new_tag_status)
+        db.add(ItemTag(item_id=item.id, tag_id=tag.id))
+        changed = True
+    await db.flush()
+    return changed
+
+
 async def _update_search_vector(
     db: AsyncSession,
     item_id: int,

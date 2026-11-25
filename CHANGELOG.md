@@ -20,6 +20,25 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+### Added
+
+- **Catalog multi-select + bulk actions.** A **Select** toggle in the catalog toolbar (grid and
+  list views) enters selection mode: checkboxes on every card/row, shift-click range select,
+  "select all on this page", and a selection that persists across pages, filters and sort. A
+  sticky action bar offers:
+  - **Log print** — one identical print record on every selected item, all-or-nothing
+    (`POST /api/items/bulk-print-records`). The print-record form is now a shared component used
+    by both the item page and the bulk dialog.
+  - **Tags** — add and/or remove tags across items (`POST /api/items/bulk-tags`), with the same
+    write-through as the item editor (DB + sidecar + search). New tags land pending unless
+    auto-approve is on.
+  - **Move** — move items to another library (UI for the existing `POST /api/items/move`; closes
+    the #25 follow-up).
+  - **Rescan** (max 100) and **Delete** (moves to trash; typed confirmation) —
+    `POST /api/items/bulk-rescan`, `POST /api/items/bulk-delete`.
+  Tags, move, rescan and delete are per-item partial-success; failures are listed inline and stay
+  selected for retry.
+
 ## [0.8.1] — 2026-07-26
 
 ### Fixed
