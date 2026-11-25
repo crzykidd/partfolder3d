@@ -31,8 +31,23 @@
 **Latest — v0.9.0 (2026-11-25):** **catalog multi-select with bulk actions** — select many items
 and log a print, add/remove tags, move, rescan, or delete them in one go. The **Version page**
 now shows every component's build (frontend, nginx, backend, worker) and warns on mismatches.
-Security refresh: dependency bumps, slimmer images (frontend image ~15 MB), and dev tools no
-longer ship in the backend image. Also fixes `extract_archives` jobs stuck in "queued".
+Also fixes `extract_archives` jobs stuck in "queued".
+
+> [!IMPORTANT]
+> **v0.9.0 is a recommended security update — upgrade all images.** A full scan of the
+> v0.8.1 images found **23 critical / 190 high** CVEs across the stack; v0.9.0 removes most of
+> them:
+> - **Backend:** patched Pillow, python-multipart (fixes a path-traversal file write reachable
+>   via uploads), cryptography, lxml and transitive deps — critical CVEs **14 → 1** (the one
+>   left is an unreachable Debian library with no fix yet). Test/lint tools no longer ship in
+>   the image, and the base is pinned to `python:3.12-slim-trixie`.
+> - **Frontend:** the published image is now Alpine + static files only — **821 MB → 15 MB**,
+>   critical/high **4/47 → 0/0**.
+> - **nginx:** rebuilt on the patched 1.30 line — critical/high **6/35 → 0/0**.
+>
+> Pull `:latest` (or `:0.9.0`) for **all** services and recreate them, including the one-shot
+> `frontend` container, then confirm on the **Version page** that every component shows
+> v0.9.0. Full findings: [`docs/security-audit-2026-11-25.md`](docs/security-audit-2026-11-25.md).
 
 **Top features by minor version** — full detail for *every* release (including patch
 releases and fixes) lives in **[CHANGELOG.md](CHANGELOG.md)** and the
