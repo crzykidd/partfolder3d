@@ -2,6 +2,22 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-11-25 — Per-component build info + Version page Components table
+
+**Context:** `prompts/2026-11-25-build-info-version-page.md`. `/api/version` returned only `0.8.1`, identical
+for `:dev` and `:latest`, so a stale nginx `frontend_dist` volume was invisible in the app.
+
+- **Shape everywhere:** `{version, commit (full sha), channel, build_date}`; channel = `dev`/`main`/`release`
+  (CI) or `local`. CI passes `GIT_SHA`/`BUILD_CHANNEL`/`BUILD_DATE` build-args to all three images.
+- **`/api/version` unchanged and public** (nav shells, first-run). New authenticated `/api/version/details`
+  returns backend + worker; never 500s on Redis trouble (`worker: null` + `error`).
+- **Worker self-report** via Redis key `pf3d:build:worker` (JSON, TTL 180s) written at startup and refreshed by a
+  per-minute arq cron. Single-key (not per-host hash): one worker is the supported deployment; last writer wins.
+- **nginx reports two things:** baked `/build-info/nginx.json` (the image) and `/build-info.json` from the
+  `frontend_dist` volume (what is actually served) — the latter is the stale-volume check. Dev nginx returns 404
+  for both (not the SPA fallback); the UI shows "unavailable".
+- nginx.json carries no `version` (the nginx image has no app version); the UI shows a dash.
+
 ## 2026-11-25 — Backend security pins 2a, dev/runtime requirements split, trixie base pin
 
 **Context:** `prompts/2026-11-25-backend-security-pins-trixie.md` (audit Tasks 2a + 3).

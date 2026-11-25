@@ -63,6 +63,15 @@ COPY backend/alembic/ ./alembic/
 COPY backend/docker-entrypoint.sh ./
 RUN chmod +x ./docker-entrypoint.sh
 
+# Build info (Version page). Declared late so changing it never busts the pip layer.
+# CI passes these as build-args; local builds default to local/unknown.
+ARG GIT_SHA=unknown
+ARG BUILD_CHANNEL=local
+ARG BUILD_DATE=unknown
+ENV PF3D_GIT_SHA=${GIT_SHA} \
+    PF3D_BUILD_CHANNEL=${BUILD_CHANNEL} \
+    PF3D_BUILD_DATE=${BUILD_DATE}
+
 # Runtime-user env: set HOME and XDG_CACHE_HOME to /tmp so that libraries
 # writing to $HOME (e.g. fontconfig, matplotlib) don't fail when the container
 # runs as an arbitrary UID that has no passwd entry.  PUID/PGID are applied at

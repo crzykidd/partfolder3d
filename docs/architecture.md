@@ -147,3 +147,14 @@ image-only (invisible to local unit runs).
   missing/empty cert makes the container **fail to start** rather than silently
   serve plain HTTP. See [`docs/tls.md`](tls.md). Base image is `nginx:1.30-alpine`
   (bumped from `1.27-alpine`, issue #40).
+
+### Build info / version page
+
+- Every image is stamped by CI build-args `GIT_SHA` / `BUILD_CHANNEL` / `BUILD_DATE` (defaults `unknown`/`local`/`unknown`).
+  Backend+worker: `ENV PF3D_GIT_SHA/...` read by `app/build_info.py`. Frontend: `VITE_GIT_SHA/...` baked into the
+  bundle (`src/lib/buildInfo.ts`) and written to `/app/dist/build-info.json`. nginx: baked `/usr/share/nginx/build-info/nginx.json`.
+- Worker publishes its build to Redis `pf3d:build:worker` (TTL 180s, refreshed every minute by `cron_build_info_heartbeat`).
+- `GET /api/version` stays public/unchanged; `GET /api/version/details` (auth) returns `{backend, worker, error}`.
+- **Stale-volume check:** the frontend publish step copies `build-info.json` into the `frontend_dist` volume, so nginx
+  `/build-info.json` (no-store) shows the build of the assets it is really serving. `VersionPage` compares bundle vs
+  served vs nginx vs backend vs worker commits and warns on a mismatch. Dev nginx 404s both files.

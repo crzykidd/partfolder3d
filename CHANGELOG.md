@@ -40,6 +40,14 @@ prefix appears only on git tags and GitHub releases.
   selected for retry.
   (Clicking a card's/row's checkbox directly now toggles it — previously only clicking the tile did.)
 
+- **Version page shows every component's build.** Each image now carries its commit, channel
+  (`dev` / `main` / `release` / `local`) and build date (CI build args). The Version page lists
+  **Frontend (browser bundle)**, **Frontend (served by nginx)**, **nginx**, **Backend** and **Worker**
+  with commit links, and warns when they're on different builds (e.g. a stale `frontend_dist` volume
+  or a container that wasn't restarted). New authenticated `GET /api/version/details`; the worker
+  reports its build via Redis; nginx serves `/build-info.json` (what's in the served volume) and
+  `/build-info/nginx.json`. `GET /api/version` is unchanged.
+
 ### Security
 
 - **Backend dependency security bumps** — Pillow 11.1.0 → 13.0.0, python-multipart 0.0.20 →

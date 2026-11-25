@@ -12,7 +12,8 @@ log() { echo "[frontend] $*"; }
 fatal() { echo "[frontend] FATAL: $*" >&2; exit 1; }
 
 version="$(cat /app/VERSION 2>/dev/null || echo unknown)"
-log "PartFolder 3D frontend v${version} — uid=$(id -u) gid=$(id -g)"
+label="$(cat /app/BUILD_LABEL 2>/dev/null || echo)"
+log "PartFolder 3D frontend v${version} ${label} — uid=$(id -u) gid=$(id -g)"
 
 DEST="${DIST_DIR:-/dist}"
 

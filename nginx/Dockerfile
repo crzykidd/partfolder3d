@@ -31,6 +31,16 @@ RUN chmod +x /docker-entrypoint.d/40-partfolder-tls.sh
 # Served under /img/ via the location block in nginx.conf.
 COPY docs/images/ /usr/share/nginx/img/
 
+# Build info (Version page): CI passes build-args; local builds default to local/unknown.
+# Baked OUTSIDE the frontend_dist volume and served at /build-info/nginx.json.
+ARG GIT_SHA=unknown
+ARG BUILD_CHANNEL=local
+ARG BUILD_DATE=unknown
+RUN mkdir -p /usr/share/nginx/build-info \
+ && printf '{"commit":"%s","channel":"%s","build_date":"%s"}\n' \
+      "${GIT_SHA}" "${BUILD_CHANNEL}" "${BUILD_DATE}" \
+      > /usr/share/nginx/build-info/nginx.json
+
 # Validate the baked config at build time — fail fast on any syntax error.
 # The runtime-generated :443 tls.conf is NOT baked (it doesn't exist yet at
 # build time), so this only covers the :80/common config — that's expected;
