@@ -68,6 +68,14 @@ prefix appears only on git tags and GitHub releases.
   source-map-js): `npm audit` 12 → 3; the remaining advisories are in the dev-only vitest toolchain
   (major bump, tracked separately). See `docs/security-audit-2026-11-25.md`.
 
+### Fixed
+
+- **`extract_archives` jobs no longer stay "queued" forever.** Importing an item with a ZIP left an
+  orphaned `queued` Job row alongside the real (succeeded) run, because the task inserted a new row
+  instead of claiming the queued one. The task now claims it like render/analyze/scad do, and
+  migration `0027` marks the existing orphaned rows `superseded` (only those with a later
+  `extract_archives` run for the same item).
+
 ## [0.8.1] — 2026-07-26
 
 ### Fixed

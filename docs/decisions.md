@@ -2,6 +2,19 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-11-25 — extract_archives must claim its queued Job row (migration 0027)
+
+**Context:** `prompts/2026-11-25-fix-extract-archives-orphan-queued.md`. After imports with ZIPs, an
+`extract_archives` job stayed `queued` forever in the Jobs page.
+
+**Cause:** `_enqueue_extract_archives` writes a `queued` row via `_write_queued_row_and_enqueue`, but the task
+called `create_job` (a second row) instead of `claim_or_create_job`; startup recovery skips `queued` rows by
+design, so the orphan never cleared.
+
+**Decision:** task now uses `claim_or_create_job`. Migration `0027` (data-only, idempotent, no-op downgrade)
+marks `superseded` only queued `extract_archives` rows that have a LATER `extract_archives` row for the same
+item (provably orphaned); lone queued rows are left alone as possibly genuinely pending.
+
 ## 2026-11-25 — Per-component build info + Version page Components table
 
 **Context:** `prompts/2026-11-25-build-info-version-page.md`. `/api/version` returned only `0.8.1`, identical

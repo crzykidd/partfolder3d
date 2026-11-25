@@ -71,6 +71,9 @@ One row per subsystem. Paths are relative to repo root. Backend routers live in
 Durable technical traps. Break one and the failure is often silent or
 image-only (invisible to local unit runs).
 
+- **Queued-row claim.** Every task enqueued via `_write_queued_row_and_enqueue` MUST use
+  `claim_or_create_job`, not `create_job`, or its queued Job row is orphaned forever.
+
 - **Requirements split.** `backend/requirements.txt` is runtime-only (the Docker image installs just it);
   tests/lint use `backend/requirements-dev.txt`. (Re)create the local venv:
   `uv venv --python 3.12 backend/.venv && uv pip install --python backend/.venv/bin/python -r backend/requirements-dev.txt`.

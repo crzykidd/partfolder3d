@@ -158,9 +158,9 @@ async def _recover_orphaned_jobs(
     so a half-finished side-effecting job is surfaced rather than silently
     repeated.
 
-    'queued' rows are intentionally NOT touched: no code path writes them today
-    (issue #20), and once one does, a queued row may still be a live entry in the
-    Redis queue that will run normally after the restart.
+    'queued' rows are intentionally NOT touched: the enqueue helpers write them
+    (issues #20/#30), and a queued row may still be a live entry in the Redis
+    queue that will run normally after the restart.
 
     Args:
         ctx:  arq worker context dict (must contain 'redis' key when there are
