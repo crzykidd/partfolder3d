@@ -20,6 +20,8 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-11-25
+
 ### Added
 
 - **Catalog multi-select + bulk actions.** A **Select** toggle in the catalog toolbar (grid and
@@ -1440,7 +1442,8 @@ detail in this one file. (An earlier plan to archive closed minor series into
 <!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
      earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
 
-[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/crzykidd/partfolder3d/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/crzykidd/partfolder3d/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/crzykidd/partfolder3d/compare/v0.7.5...v0.8.0
 [0.7.5]: https://github.com/crzykidd/partfolder3d/compare/v0.7.4...v0.7.5
