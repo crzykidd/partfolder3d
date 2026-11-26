@@ -309,3 +309,66 @@ async def test_filter_has_asset_composes_with_library_filter(
     assert item_a_without["key"] not in keys
     assert item_b_with["key"] not in keys
     assert data["total"] == 1
+
+
+# ---------------------------------------------------------------------------
+# has_print_record flag
+# ---------------------------------------------------------------------------
+
+
+async def _log_print(
+    client: AsyncClient, csrf: str, key: str, visibility: str
+) -> None:
+    resp = await client.post(
+        f"/api/items/{key}/print-records",
+        json={"visibility": visibility},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 201, resp.text
+
+
+async def _flag(client: AsyncClient, lib_id: int, key: str) -> bool:
+    resp = await client.get("/api/items", params={"library_ids": lib_id})
+    assert resp.status_code == 200
+    return next(i for i in resp.json()["items"] if i["key"] == key)["has_print_record"]
+
+
+@pytest.mark.asyncio
+async def test_has_print_record_flag(client: AsyncClient, tmp_path: Path) -> None:
+    """False with no records; True for private and public records.
+
+    Mirrors list_print_records: authenticated users see all records, so another
+    user's private record still counts (private only hides from anonymous shares).
+    """
+    csrf = await _login_admin(client, tmp_path)
+    lib_id = await _create_lib(client, tmp_path, csrf, "lib_pr")
+    none_item = await _create_item(client, csrf, "No Prints", lib_id)
+    priv_item = await _create_item(client, csrf, "Private Print", lib_id)
+    pub_item = await _create_item(client, csrf, "Public Print", lib_id)
+
+    await _log_print(client, csrf, priv_item["key"], "private")
+    await _log_print(client, csrf, pub_item["key"], "public")
+
+    assert await _flag(client, lib_id, none_item["key"]) is False
+    assert await _flag(client, lib_id, priv_item["key"]) is True
+    assert await _flag(client, lib_id, pub_item["key"]) is True
+
+
+@pytest.mark.asyncio
+async def test_has_print_record_other_users_private_record(
+    client: AsyncClient, tmp_path: Path, db_session: AsyncSession
+) -> None:
+    """A record logged by a different user (private) still lights the flag."""
+    from app.models.print_record import PrintRecord  # noqa: PLC0415
+
+    csrf = await _login_admin(client, tmp_path)
+    lib_id = await _create_lib(client, tmp_path, csrf, "lib_pr_other")
+    item = await _create_item(client, csrf, "Other Print", lib_id)
+
+    db_session.add(
+        PrintRecord(item_id=item["id"], logged_by_id=None, visibility="private")
+    )
+    await db_session.flush()
+    db_session.expire_all()
+
+    assert await _flag(client, lib_id, item["key"]) is True

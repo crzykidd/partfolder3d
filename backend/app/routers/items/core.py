@@ -56,6 +56,7 @@ from ...models.image import Image
 from ...models.item import Item
 from ...models.job import Job
 from ...models.library import Library
+from ...models.print_record import PrintRecord
 from ...models.tag import ItemTag, Tag
 from ...models.user import User
 from ...services.item_helpers import (
@@ -368,6 +369,13 @@ async def list_items(
     )
     has_asset_ids: set[int] = {row[0] for row in asset_result.all()}
 
+    # Batch-load has_print_record flags. Mirrors list_print_records: authenticated
+    # users see all records (public + private); anonymous callers only public.
+    pr_query = select(PrintRecord.item_id).distinct().where(PrintRecord.item_id.in_(item_ids))
+    if user is None:
+        pr_query = pr_query.where(PrintRecord.visibility == "public")
+    print_record_ids: set[int] = {row[0] for row in (await db.execute(pr_query)).all()}
+
     items_out = [
         ItemSummary(
             id=item.id,
@@ -383,6 +391,7 @@ async def list_items(
             tag_names=tags_by_item.get(item.id, []),
             favorited=item.id in favorited_ids,
             has_asset=item.id in has_asset_ids,
+            has_print_record=item.id in print_record_ids,
         )
         for item in items
     ]

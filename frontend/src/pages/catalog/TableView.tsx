@@ -13,7 +13,7 @@ import {
   createColumnHelper,
   type SortingState,
 } from '@tanstack/react-table'
-import { Box, Star } from 'lucide-react'
+import { Box, Printer, Star } from 'lucide-react'
 
 import type * as api from '@/lib/api'
 import { CARD_STYLE } from './styles'
@@ -93,6 +93,16 @@ export function TableView({ items, onToggleFavorite, favoritingKey, selection }:
                   style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}
                 >
                   <Box size={11} style={{ color: 'var(--aurora-muted)' }} />
+                </span>
+              )}
+              {item.has_print_record && (
+                <span
+                  role="img"
+                  aria-label="Printed before"
+                  title="Printed before"
+                  style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}
+                >
+                  <Printer size={11} style={{ color: 'var(--aurora-muted)' }} />
                 </span>
               )}
             </div>

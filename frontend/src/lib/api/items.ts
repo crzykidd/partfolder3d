@@ -19,6 +19,7 @@ export interface ItemSummary {
   favorited: boolean
   /** True when the item has at least one model or gcode file. */
   has_asset: boolean
+  has_print_record: boolean
 }
 
 export interface TagOut {

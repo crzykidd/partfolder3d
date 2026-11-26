@@ -79,6 +79,7 @@ function makeItem(overrides: Partial<api.ItemSummary> & { key: string; title: st
     tag_names: [],
     favorited: false,
     has_asset: false,
+    has_print_record: false,
     ...overrides,
   }
 }
@@ -349,5 +350,18 @@ describe('CatalogPage', () => {
 
     // Exactly one "Print files attached" icon should appear (for the has_asset=true item only).
     expect(screen.getAllByTitle('Print files attached')).toHaveLength(1)
+  })
+
+  it('shows "Printed before" badge only for has_print_record=true items', async () => {
+    vi.mocked(api.listItems).mockResolvedValue(
+      itemsResponse([
+        makeItem({ key: 'aaa1111', title: 'Printed One', has_print_record: true }),
+        makeItem({ key: 'bbb2222', title: 'Never Printed', has_print_record: false }),
+      ]),
+    )
+
+    renderCatalog('/catalog?view=table')
+    await waitFor(() => expect(screen.getByText('Printed One')).toBeInTheDocument())
+    expect(screen.getAllByTitle('Printed before')).toHaveLength(1)
   })
 })

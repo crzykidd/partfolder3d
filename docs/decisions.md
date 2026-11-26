@@ -2,6 +2,13 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-11-26 — `has_print_record` catalog flag ignores per-user visibility
+
+**Decision:** the catalog list's `has_print_record` mirrors `list_print_records`: any authenticated user sees all
+records (public + private), since "private" only hides records from anonymous share viewers. The prompt assumed
+another user's private record should not light the icon; that would contradict the item page, so it was not done.
+Anonymous callers of the list endpoint (optional auth) count public records only.
+
 ## 2026-11-25 — Cancel queued jobs, superseded is terminal in the UI, stale-queued reaper
 
 **Context:** `prompts/done/2026-11-25-queued-job-cancel-and-stale-reaper.md`. Orphaned `queued` rows could not be

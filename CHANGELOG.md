@@ -22,6 +22,8 @@ prefix appears only on git tags and GitHub releases.
 
 ### Added
 
+- **Printed-before badge in the catalog.** Items with a logged print show a small printer icon
+  next to the files badge and favorite star (grid and table views).
 - **Cancel queued jobs from the Job Monitor.** Queued jobs now have a **Cancel** button (previously
   only running jobs did, so a stuck queued row had no action at all). Cancelling marks the row
   cancelled and aborts the pending task; if the task still gets picked up, the worker skips it
