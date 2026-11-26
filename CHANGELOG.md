@@ -23,7 +23,7 @@ prefix appears only on git tags and GitHub releases.
 ### Added
 
 - **Printer profiles.** Save named printer/material/nozzle/layer presets in Settings (one can be the
-  default) and load them into the Log-print form from a dropdown — single and bulk.
+  default) and load them into the Log-print form from a dropdown — single and bulk — or save the current settings as a new profile right from the form.
 - **Printed-before badge in the catalog.** Items with a logged print show a small printer icon
   next to the files badge and favorite star (grid and table views).
 - **Cancel queued jobs from the Job Monitor.** Queued jobs now have a **Cancel** button (previously

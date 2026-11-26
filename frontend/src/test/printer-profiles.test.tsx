@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 vi.mock('@/lib/api', async () => {
@@ -140,5 +140,75 @@ describe('PrintRecordFields profile select', () => {
     await screen.findByLabelText('Load from profile')
     expect(screen.getByPlaceholderText('e.g. PLA')).toHaveValue('ABS')
     expect(screen.getByLabelText('Load from profile')).toHaveValue('')
+  })
+})
+
+describe('PrintRecordFields save as profile', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  function FormHarness({ onSubmit }: { onSubmit: () => void }) {
+    const [form, setForm] = useState<api.PrintRecordIn>(() => ({
+      ...blankPrintRecord(), printer: 'My Printer', material: 'ABS', nozzle_diameter: 0.6,
+    }))
+    return (
+      <form onSubmit={(e) => { e.preventDefault(); onSubmit() }}>
+        <PrintRecordFields form={form} setForm={setForm} />
+      </form>
+    )
+  }
+
+  it('button is present with zero profiles', async () => {
+    vi.mocked(api.listPrinterProfiles).mockResolvedValue([])
+    wrap(<Harness applyDefault />)
+    await waitFor(() => expect(api.listPrinterProfiles).toHaveBeenCalled())
+    expect(screen.getByRole('button', { name: /Save as profile/ })).toBeInTheDocument()
+  })
+
+  it('creates a profile from the current fields without submitting the form', async () => {
+    vi.mocked(api.listPrinterProfiles).mockResolvedValue([])
+    vi.mocked(api.createPrinterProfile).mockResolvedValue(prof({ id: 9, name: 'My Printer' }))
+    const onSubmit = vi.fn()
+    wrap(<FormHarness onSubmit={onSubmit} />)
+    fireEvent.click(screen.getByRole('button', { name: /Save as profile/ }))
+    const name = screen.getByLabelText('New profile name')
+    expect(name).toHaveValue('My Printer')
+    fireEvent.click(screen.getByLabelText('Make default'))
+    fireEvent.keyDown(name, { key: 'Enter' })
+    await waitFor(() =>
+      expect(api.createPrinterProfile).toHaveBeenCalledWith({
+        name: 'My Printer', printer: 'My Printer', material: 'ABS', filament_color: null,
+        nozzle_diameter: 0.6, layer_height: null, supports: null, is_default: true,
+      }),
+    )
+    expect(await screen.findByText('Saved')).toBeInTheDocument()
+    expect(onSubmit).not.toHaveBeenCalled()
+    // form values unchanged
+    expect(screen.getByPlaceholderText('e.g. PLA')).toHaveValue('ABS')
+  })
+
+  it('disables Save for a blank name or empty settings', async () => {
+    vi.mocked(api.listPrinterProfiles).mockResolvedValue([])
+    wrap(<FormHarness onSubmit={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: /Save as profile/ }))
+    fireEvent.change(screen.getByLabelText('New profile name'), { target: { value: '  ' } })
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    cleanup()
+
+    wrap(<Harness applyDefault />)
+    fireEvent.click(screen.getByRole('button', { name: /Save as profile/ }))
+    fireEvent.change(screen.getByLabelText('New profile name'), { target: { value: 'Named' } })
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(screen.getByText(/at least one printer setting/)).toBeInTheDocument()
+  })
+
+  it('shows the duplicate message on 409', async () => {
+    vi.mocked(api.listPrinterProfiles).mockResolvedValue([])
+    vi.mocked(api.createPrinterProfile).mockRejectedValue(
+      Object.assign(new Error('409 Conflict'), { status: 409 }),
+    )
+    wrap(<FormHarness onSubmit={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: /Save as profile/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('A profile with that name already exists.')).toBeInTheDocument()
   })
 })

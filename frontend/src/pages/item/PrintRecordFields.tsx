@@ -7,7 +7,8 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Save } from 'lucide-react'
 
 import * as api from '@/lib/api'
 import { renderStars } from '@/lib/print-utils'
@@ -103,6 +104,59 @@ export function PrintRecordFields({
   const profiles = profilesQ.data ?? []
   const [selectedId, setSelectedId] = useState('')
   const autoApplied = useRef(false)
+  const qc = useQueryClient()
+  const [saveOpen, setSaveOpen] = useState(false)
+  const [saveName, setSaveName] = useState('')
+  const [saveDefault, setSaveDefault] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [savedNote, setSavedNote] = useState(false)
+  const nothingToSave = settingsAreBlank(form)
+
+  function openSave() {
+    setSaveName(form.printer ?? '')
+    setSaveDefault(false)
+    setSaveError(null)
+    setSavedNote(false)
+    setSaveOpen(true)
+  }
+
+  async function handleSaveProfile() {
+    const name = saveName.trim()
+    if (!name || nothingToSave || saving) return
+    setSaving(true)
+    setSaveError(null)
+    try {
+      const created = await api.createPrinterProfile({
+        name,
+        printer: form.printer || null,
+        material: form.material || null,
+        filament_color: form.filament_color || null,
+        nozzle_diameter: form.nozzle_diameter ?? null,
+        layer_height: form.layer_height ?? null,
+        supports: form.supports ?? null,
+        is_default: saveDefault,
+      })
+      qc.setQueryData<api.PrinterProfile[]>(['printer-profiles'], (old) => [
+        ...(old ?? []).map((p) => (saveDefault ? { ...p, is_default: false } : p)),
+        created,
+      ])
+      void qc.invalidateQueries({ queryKey: ['printer-profiles'] })
+      setSelectedId(String(created.id))
+      setSaveOpen(false)
+      setSavedNote(true)
+    } catch (err) {
+      const status = (err as { status?: number } | null)?.status
+      const msg = err instanceof Error ? err.message : ''
+      setSaveError(
+        status === 409 || /409|already exists/i.test(msg)
+          ? 'A profile with that name already exists.'
+          : 'Could not save the profile. Please try again.',
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
 
   // Apply the default profile once, only if the user hasn't typed anything yet
   // (handles the profiles query resolving after the form opened).
@@ -123,25 +177,99 @@ export function PrintRecordFields({
 
   return (
     <>
-      {/* Load from printer profile */}
-      {profiles.length > 0 && (
-        <div>
-          <label style={labelStyle} htmlFor="print-profile-select">Load from profile</label>
-          <select
-            id="print-profile-select"
-            value={selectedId}
-            onChange={(e) => handleProfileChange(e.target.value)}
-            style={AURORA_INPUT}
+      {/* Load from printer profile / save as profile */}
+      <div>
+        {profiles.length > 0 && (
+          <>
+            <label style={labelStyle} htmlFor="print-profile-select">Load from profile</label>
+            <select
+              id="print-profile-select"
+              value={selectedId}
+              onChange={(e) => handleProfileChange(e.target.value)}
+              style={AURORA_INPUT}
+            >
+              <option value="">Select a printer profile…</option>
+              {profiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}{p.is_default ? ' (default)' : ''}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: profiles.length > 0 ? 6 : 0 }}>
+          <button
+            type="button"
+            onClick={() => (saveOpen ? setSaveOpen(false) : openSave())}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12,
+              padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+              background: 'transparent', color: 'var(--aurora-muted)',
+              border: '1px solid var(--aurora-border, currentColor)',
+            }}
           >
-            <option value="">Select a printer profile…</option>
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}{p.is_default ? ' (default)' : ''}
-              </option>
-            ))}
-          </select>
+            <Save size={13} aria-hidden="true" />
+            Save as profile
+          </button>
+          {savedNote && !saveOpen && (
+            <span role="status" style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>Saved</span>
+          )}
         </div>
-      )}
+        {saveOpen && (
+          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <input
+              type="text"
+              aria-label="New profile name"
+              value={saveName}
+              onChange={(e) => setSaveName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  void handleSaveProfile()
+                }
+              }}
+              placeholder="Profile name"
+              maxLength={100}
+              style={AURORA_INPUT}
+            />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+              <input
+                type="checkbox"
+                checked={saveDefault}
+                onChange={(e) => setSaveDefault(e.target.checked)}
+              />
+              Make default
+            </label>
+            {nothingToSave && (
+              <span style={{ fontSize: 12, color: 'var(--aurora-muted)' }}>
+                Fill in at least one printer setting to save a profile.
+              </span>
+            )}
+            {saveError && (
+              <span role="alert" style={{ fontSize: 12, color: 'var(--aurora-danger, #e5484d)' }}>
+                {saveError}
+              </span>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                disabled={!saveName.trim() || nothingToSave || saving}
+                onClick={() => void handleSaveProfile()}
+                style={{ fontSize: 12, padding: '4px 12px', borderRadius: 6, cursor: 'pointer' }}
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSaveOpen(false)}
+                style={{ fontSize: 12, padding: '4px 12px', borderRadius: 6, cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Visibility + Date */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
