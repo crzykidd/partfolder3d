@@ -261,3 +261,8 @@ export function computeCols(
   if (containerWidth <= 0) return 1
   return Math.max(1, Math.floor((containerWidth + gap) / (minCardWidth + gap)))
 }
+
+/** Tooltip / aria-label for the catalog "printed before" badge. */
+export function printedLabel(count: number): string {
+  return `Printed ${count} time${count === 1 ? '' : 's'}`
+}

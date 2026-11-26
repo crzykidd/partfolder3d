@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom'
 import { Box, Printer, Star } from 'lucide-react'
 
 import type * as api from '@/lib/api'
+import { printedLabel } from '@/lib/catalog-utils'
 import { CARD_STYLE } from './styles'
 import type { SelectionViewProps } from './useCatalogSelection'
 
@@ -160,11 +161,11 @@ export function ItemCard({ item, onToggleFavorite, isFavoriting, gridMode, selec
                 <Box size={12} style={{ color: 'var(--aurora-muted)' }} />
               </span>
             )}
-            {item.has_print_record && (
+            {item.print_count > 0 && (
               <span
                 role="img"
-                aria-label="Printed before"
-                title="Printed before"
+                aria-label={printedLabel(item.print_count)}
+                title={printedLabel(item.print_count)}
                 style={{ display: 'flex', alignItems: 'center' }}
               >
                 <Printer size={12} style={{ color: 'var(--aurora-muted)' }} />

@@ -80,6 +80,7 @@ function makeItem(overrides: Partial<api.ItemSummary> & { key: string; title: st
     favorited: false,
     has_asset: false,
     has_print_record: false,
+    print_count: 0,
     ...overrides,
   }
 }
@@ -352,16 +353,19 @@ describe('CatalogPage', () => {
     expect(screen.getAllByTitle('Print files attached')).toHaveLength(1)
   })
 
-  it('shows "Printed before" badge only for has_print_record=true items', async () => {
+  it('shows "Printed N times" badge only for items with prints', async () => {
     vi.mocked(api.listItems).mockResolvedValue(
       itemsResponse([
-        makeItem({ key: 'aaa1111', title: 'Printed One', has_print_record: true }),
-        makeItem({ key: 'bbb2222', title: 'Never Printed', has_print_record: false }),
+        makeItem({ key: 'aaa1111', title: 'Printed One', has_print_record: true, print_count: 1 }),
+        makeItem({ key: 'ccc3333', title: 'Printed Many', has_print_record: true, print_count: 3 }),
+        makeItem({ key: 'bbb2222', title: 'Never Printed', has_print_record: false, print_count: 0 }),
       ]),
     )
 
     renderCatalog('/catalog?view=table')
     await waitFor(() => expect(screen.getByText('Printed One')).toBeInTheDocument())
-    expect(screen.getAllByTitle('Printed before')).toHaveLength(1)
+    expect(screen.getAllByTitle('Printed 1 time')).toHaveLength(1)
+    expect(screen.getAllByTitle('Printed 3 times')).toHaveLength(1)
+    expect(screen.queryByTitle(/^Printed 0/)).toBeNull()
   })
 })

@@ -20,6 +20,7 @@ export interface ItemSummary {
   /** True when the item has at least one model or gcode file. */
   has_asset: boolean
   has_print_record: boolean
+  print_count: number
 }
 
 export interface TagOut {

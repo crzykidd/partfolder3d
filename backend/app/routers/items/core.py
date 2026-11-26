@@ -369,12 +369,17 @@ async def list_items(
     )
     has_asset_ids: set[int] = {row[0] for row in asset_result.all()}
 
-    # Batch-load has_print_record flags. Mirrors list_print_records: authenticated
-    # users see all records (public + private); anonymous callers only public.
-    pr_query = select(PrintRecord.item_id).distinct().where(PrintRecord.item_id.in_(item_ids))
+    # Batch-load print counts (one grouped query). Mirrors list_print_records:
+    # authenticated users see all records (public + private); anonymous callers
+    # only public.
+    pr_query = (
+        select(PrintRecord.item_id, func.count())
+        .where(PrintRecord.item_id.in_(item_ids))
+        .group_by(PrintRecord.item_id)
+    )
     if user is None:
         pr_query = pr_query.where(PrintRecord.visibility == "public")
-    print_record_ids: set[int] = {row[0] for row in (await db.execute(pr_query)).all()}
+    print_counts: dict[int, int] = {row[0]: row[1] for row in (await db.execute(pr_query)).all()}
 
     items_out = [
         ItemSummary(
@@ -391,7 +396,8 @@ async def list_items(
             tag_names=tags_by_item.get(item.id, []),
             favorited=item.id in favorited_ids,
             has_asset=item.id in has_asset_ids,
-            has_print_record=item.id in print_record_ids,
+            has_print_record=print_counts.get(item.id, 0) > 0,
+            print_count=print_counts.get(item.id, 0),
         )
         for item in items
     ]

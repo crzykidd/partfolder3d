@@ -25,7 +25,8 @@ prefix appears only on git tags and GitHub releases.
 - **Printer profiles.** Save named printer/material/nozzle/layer presets in Settings (one can be the
   default) and load them into the Log-print form from a dropdown — single and bulk — or save the current settings as a new profile right from the form.
 - **Printed-before badge in the catalog.** Items with a logged print show a small printer icon
-  next to the files badge and favorite star (grid and table views).
+  next to the files badge and favorite star (grid and table views); hovering it shows how many
+  times the item has been printed ("Printed 3 times").
 - **Cancel queued jobs from the Job Monitor.** Queued jobs now have a **Cancel** button (previously
   only running jobs did, so a stuck queued row had no action at all). Cancelling marks the row
   cancelled and aborts the pending task; if the task still gets picked up, the worker skips it

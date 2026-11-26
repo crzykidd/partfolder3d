@@ -73,6 +73,7 @@ function makeItem(key: string, title: string): api.ItemSummary {
     favorited: false,
     has_asset: false,
     has_print_record: false,
+    print_count: 0,
   }
 }
 

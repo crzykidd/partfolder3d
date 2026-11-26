@@ -333,6 +333,12 @@ async def _flag(client: AsyncClient, lib_id: int, key: str) -> bool:
     return next(i for i in resp.json()["items"] if i["key"] == key)["has_print_record"]
 
 
+async def _count(client: AsyncClient, lib_id: int, key: str) -> int:
+    resp = await client.get("/api/items", params={"library_ids": lib_id})
+    assert resp.status_code == 200
+    return next(i for i in resp.json()["items"] if i["key"] == key)["print_count"]
+
+
 @pytest.mark.asyncio
 async def test_has_print_record_flag(client: AsyncClient, tmp_path: Path) -> None:
     """False with no records; True for private and public records.
@@ -352,6 +358,29 @@ async def test_has_print_record_flag(client: AsyncClient, tmp_path: Path) -> Non
     assert await _flag(client, lib_id, none_item["key"]) is False
     assert await _flag(client, lib_id, priv_item["key"]) is True
     assert await _flag(client, lib_id, pub_item["key"]) is True
+    assert await _count(client, lib_id, none_item["key"]) == 0
+    assert await _count(client, lib_id, priv_item["key"]) == 1
+    assert await _count(client, lib_id, pub_item["key"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_print_count_multiple_records(client: AsyncClient, tmp_path: Path) -> None:
+    """print_count counts every record; anonymous callers only see public ones."""
+    csrf = await _login_admin(client, tmp_path)
+    lib_id = await _create_lib(client, tmp_path, csrf, "lib_pr_count")
+    item = await _create_item(client, csrf, "Many Prints", lib_id)
+    for vis in ("private", "public", "public"):
+        await _log_print(client, csrf, item["key"], vis)
+
+    assert await _count(client, lib_id, item["key"]) == 3
+
+    # Anonymous callers only count public records.
+    await client.post("/api/auth/logout")
+    resp = await client.get("/api/items", params={"library_ids": lib_id})
+    assert resp.status_code == 200
+    row = next((i for i in resp.json()["items"] if i["key"] == item["key"]), None)
+    assert row is not None
+    assert row["print_count"] == 2
 
 
 @pytest.mark.asyncio
