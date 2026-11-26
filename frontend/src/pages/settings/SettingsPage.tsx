@@ -24,6 +24,7 @@ import {
   setRenderMode,
   setDefaultImportLibrary,
 } from '@/lib/api/settings'
+import { PrinterProfilesSection } from './PrinterProfilesSection'
 import { detectOS, rewriteLocalPath } from '@/lib/catalog-utils'
 import {
   AdminPage, PageHeader,
@@ -723,6 +724,9 @@ export function SettingsPage() {
 
       {/* Per-library × per-OS path prefixes */}
       <PathPrefixesSection />
+
+      {/* Per-user printer profiles */}
+      <PrinterProfilesSection />
 
       {/* Instance settings (admin only) */}
       {isAdmin && (

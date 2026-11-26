@@ -276,7 +276,7 @@ function PrintDialog({ keys, titleOf, onClose, onOutcome }: DialogProps) {
         </p>
       ) : (
         <>
-          <PrintRecordFields form={form} setForm={setForm} />
+          <PrintRecordFields form={form} setForm={setForm} applyDefaultProfile />
           <p style={{ margin: 0, fontSize: 11, color: 'var(--aurora-muted)' }}>
             One identical record is created per item. All-or-nothing: if any item is missing, none are logged.
           </p>

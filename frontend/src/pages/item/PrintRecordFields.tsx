@@ -6,9 +6,10 @@
  * (gap 14) container.
  */
 
-import React from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 
-import type * as api from '@/lib/api'
+import * as api from '@/lib/api'
 import { renderStars } from '@/lib/print-utils'
 
 import { AURORA_INPUT } from './styles'
@@ -51,15 +52,97 @@ export function normalizePrintRecord(form: api.PrintRecordIn): api.PrintRecordIn
   }
 }
 
+/** Copy a profile's non-null settings into the form (null fields leave the form alone). */
+export function applyPrinterProfile(
+  form: api.PrintRecordIn,
+  profile: api.PrinterProfile,
+): api.PrintRecordIn {
+  const next = { ...form }
+  if (profile.printer != null) next.printer = profile.printer
+  if (profile.material != null) next.material = profile.material
+  if (profile.filament_color != null) next.filament_color = profile.filament_color
+  if (profile.nozzle_diameter != null) next.nozzle_diameter = profile.nozzle_diameter
+  if (profile.layer_height != null) next.layer_height = profile.layer_height
+  if (profile.supports != null) next.supports = profile.supports
+  return next
+}
+
+/** True when none of the six profile-controlled settings fields has a value. */
+function settingsAreBlank(f: api.PrintRecordIn): boolean {
+  return (
+    !f.printer &&
+    !f.material &&
+    !f.filament_color &&
+    f.nozzle_diameter == null &&
+    f.layer_height == null &&
+    f.supports == null
+  )
+}
+
 interface PrintRecordFieldsProps {
   form: api.PrintRecordIn
   setForm: React.Dispatch<React.SetStateAction<api.PrintRecordIn>>
+  /**
+   * When true (new-record forms only), pre-fill the settings from the user's
+   * default printer profile once, if the settings fields are still blank.
+   */
+  applyDefaultProfile?: boolean
 }
 
-export function PrintRecordFields({ form, setForm }: PrintRecordFieldsProps) {
+export function PrintRecordFields({
+  form,
+  setForm,
+  applyDefaultProfile = false,
+}: PrintRecordFieldsProps) {
   const labelStyle = PRINT_FIELD_LABEL_STYLE
+  const profilesQ = useQuery({
+    queryKey: ['printer-profiles'],
+    queryFn: api.listPrinterProfiles,
+    staleTime: 60_000,
+  })
+  const profiles = profilesQ.data ?? []
+  const [selectedId, setSelectedId] = useState('')
+  const autoApplied = useRef(false)
+
+  // Apply the default profile once, only if the user hasn't typed anything yet
+  // (handles the profiles query resolving after the form opened).
+  useEffect(() => {
+    if (!applyDefaultProfile || autoApplied.current || !profilesQ.data) return
+    autoApplied.current = true
+    const def = profilesQ.data.find((p) => p.is_default)
+    if (!def) return
+    setSelectedId(String(def.id))
+    setForm((f) => (settingsAreBlank(f) ? applyPrinterProfile(f, def) : f))
+  }, [applyDefaultProfile, profilesQ.data, setForm])
+
+  function handleProfileChange(v: string) {
+    setSelectedId(v)
+    const profile = profiles.find((p) => String(p.id) === v)
+    if (profile) setForm((f) => applyPrinterProfile(f, profile))
+  }
+
   return (
     <>
+      {/* Load from printer profile */}
+      {profiles.length > 0 && (
+        <div>
+          <label style={labelStyle} htmlFor="print-profile-select">Load from profile</label>
+          <select
+            id="print-profile-select"
+            value={selectedId}
+            onChange={(e) => handleProfileChange(e.target.value)}
+            style={AURORA_INPUT}
+          >
+            <option value="">Select a printer profile…</option>
+            {profiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}{p.is_default ? ' (default)' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Visibility + Date */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <div>

@@ -29,6 +29,7 @@ from .library import Library
 from .manyfold import ManyfoldInstance
 from .password_reset import PasswordResetToken
 from .print_record import PrintRecord
+from .printer_profile import PrinterProfile
 from .review_item import ReviewItem, ReviewStatus
 from .scheduled_job import ScheduledJob
 from .scraper_usage import ScraperUsage
@@ -92,6 +93,7 @@ __all__ = [
     "ReviewStatus",
     # Phase 7
     "PrintRecord",
+    "PrinterProfile",
     "ShareLink",
     "ShareAuditEvent",
     # Manyfold connector (Part 1 of 3)

@@ -174,6 +174,7 @@ from .routers import (  # noqa: E402  # noqa: E402
     me,
     password_reset,
     print_records,
+    printer_profiles,
     reviews,
     setup,
     shares,
@@ -198,6 +199,7 @@ app.include_router(items.router)
 app.include_router(tags.router)
 app.include_router(creators.router)
 app.include_router(me.router)
+app.include_router(printer_profiles.router)
 app.include_router(downloads.router)
 # Phase 4
 app.include_router(jobs.router)

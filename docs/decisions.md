@@ -2,6 +2,14 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-11-26 — Printer profiles: per-user presets, default auto-fill only on create
+
+**Decision:** profiles live in their own router (`routers/printer_profiles.py`, `/api/me/printer-profiles`) rather
+than `me.py`, which is already large. One default per user is enforced by a partial unique index and by the API
+clearing other defaults in the same transaction. The default auto-fills only new-record forms (`applyDefaultProfile`
+prop; `PrintHistory` passes `!existing`, bulk dialog always), applied once and only if the six settings fields are
+still blank, so a late-resolving profiles query never clobbers typed values. Picking a profile copies only its non-null fields.
+
 ## 2026-11-26 — `has_print_record` catalog flag ignores per-user visibility
 
 **Decision:** the catalog list's `has_print_record` mirrors `list_print_records`: any authenticated user sees all
