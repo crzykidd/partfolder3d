@@ -6,91 +6,87 @@ It is NOT a full reference: durable rules live in `CLAUDE.md`, the module map + 
 `docs/architecture.md`, history in `CHANGELOG.md` / `docs/decisions.md`. Keep it LEAN; refresh
 "Current state" + "Next phases" before every `/clear`.
 
-**Last updated:** 2026-11-25 — **`v0.9.0` RELEASED** (latest). Tag `v0.9.0` cut on `main`,
-GitHub release published, `release`-triggered image build **succeeded** (`:latest`/`:0.9.0`/`:0`
-for backend, frontend, nginx). README security callout followed via docs PR #52 (merged).
-`dev` == `main` in content (main is 2 merge commits ahead; nothing unreleased).
+**Last updated:** 2026-11-27 — **`v0.10.0` RELEASED** (latest). PR #53 merged, tag `v0.10.0` cut on
+`main`, GitHub release published, `release`-triggered image build **succeeded** (`:latest`/`:0.10.0`/`:0`
+for backend, frontend, nginx). `dev` == `main` in content (nothing unreleased).
 
 > **⏭️ NO RELEASE IN FLIGHT, no forced next task.** Next pickup is an owner **choice**. Open issue:
-> **[#41](https://github.com/crzykidd/partfolder3d/issues/41)** ACME at nginx. Strongest candidates are
-> the **remaining security-audit tasks** (see Next phases): **#1 weekly rebuild + trivy in CI** (needs
-> owner answer: may a scheduled rebuild republish `:latest` without a release?) and **#2b
-> fastapi/starlette bump** (medium risk, starlette 0.x→1.x).
+> **[#41](https://github.com/crzykidd/partfolder3d/issues/41)** ACME at nginx. Security audit's required
+> work is **done** (2b shipped in v0.10.0); remaining audit items are **#1** (needs owner decision) and
+> optional #6–#8 — see Next phases.
 
-> **⚠️ DEPLOY NOTE (v0.9.0):** prod must pull `:latest` (or `:0.9.0`) for **all** services and recreate
+> **⚠️ DEPLOY NOTE (v0.10.0):** prod must pull `:latest` (or `:0.10.0`) for **all** services and recreate
 > them — **including the one-shot `frontend` container** (it copies assets into the `frontend_dist`
-> volume; if it doesn't re-run, nginx keeps serving the old UI — this bit the owner today). Migration
-> **`0027`** auto-runs on backend start. Then check the **Version page**: every row should show v0.9.0 /
-> `release`; a mismatch banner means a stale volume or an un-restarted container. Prod was running the
-> `:dev` channel during testing — move it back to `:latest`/`:0.9.0`.
+> volume; if it doesn't re-run, nginx keeps serving the old UI). Migration **`0028`** (printer_profiles)
+> auto-runs on backend start. Then check the **Version page**: every row v0.10.0 / `release`, no mismatch
+> banner. Owner should smoke **uploads** (Add Asset, import wizard) on prod — starlette 1.x changed form
+> parsing (built-image smoke passed: 200 MB multipart OK, Range → 206).
 
 ## Current state
 
-- **Latest release `v0.9.0`** (2026-11-25). Full detail: `CHANGELOG.md` `[0.9.0]`, `docs/decisions.md`.
-  - **Catalog multi-select + bulk actions** (`feat:`). Select-mode toggle (grid + list), shift-click
-    range, selection persists across pages/filters (key→title map). Sticky bar: **Log print** (one
-    identical record per item, all-or-nothing, `POST /api/items/bulk-print-records`), **Tags** add/remove
-    (`bulk-tags`, same write-through as PATCH), **Move** (existing `POST /api/items/move` — closes the #25
-    follow-up), **Rescan** (≤100, inline) and **Delete** (trash, typed confirm). Partial-success
-    `{succeeded, failed[]}` for tags/delete/rescan. Single-segment `bulk-*` paths on purpose
-    (`/bulk/rescan` would be captured by `/{key}/rescan`). Code: `routers/items/bulk.py`,
-    `pages/catalog/{useCatalogSelection.ts,BulkActions.tsx}`, shared `pages/item/PrintRecordFields.tsx`.
-    Follow-up fix shipped in-release: never `preventDefault` on the checkbox click (it reverted the native
-    toggle — jsdom can't show it; test asserts the click isn't cancelled).
-  - **Per-component build info** (`feat:`). CI build-args stamp commit/channel/date into all 3 images;
-    `GET /api/version/details` (auth) = backend + worker (worker self-reports to Redis
-    `pf3d:build:worker`, 180 s TTL, 1-min heartbeat); nginx serves `/build-info/nginx.json` (baked) and
-    `/build-info.json` (**from the served `frontend_dist` volume** — the stale-volume check). Version page
-    shows 5 rows + mismatch banner. `GET /api/version` unchanged/public.
-  - **Security** (`chore:`) from `docs/security-audit-2026-11-25.md` (audit tasks 2a, 3, 4, 5): Pillow
-    13, python-multipart 0.0.34 (reachable path-traversal fix), cryptography 50, lxml 6.1.3, PyYAML,
-    CVE floors (PyJWT/certifi/dnspython/anyio); **`backend/requirements-dev.txt`** split (dev tools out
-    of the image; CI installs the dev file); base pinned **`python:3.12-slim-trixie`** (forky drops
-    `libosmesa6`); frontend prod stage **alpine-only** (821 MB → 15 MB, 0/0); npm in-range update
-    (audit 12 → 3, only vitest left). Backend image CRIT 14 → 1 (unreachable no-fix Debian libxml2).
-  - **fix: `extract_archives` orphaned `queued` Job rows** — the task used `create_job` instead of
-    `claim_or_create_job`; migration **`0027`** supersedes provable orphans (queued row with a later
-    extract run for the same item). Gotcha recorded in `docs/architecture.md`.
-- **Earlier releases** (`v0.1.1`–`v0.8.1`): `CHANGELOG.md`. Recent — v0.8.1 Keep DB/Keep sidecar
-  greenlet fix; v0.8.0 in-app description/tag edit, server-side OpenSCAD render, inline PDF, clear-failed,
-  stlflix; v0.7.x OpenSCAD viewer, MakerWorld image fix, built-in TLS, prinnit.
+- **Latest release `v0.10.0`** (2026-11-27). Full detail: `CHANGELOG.md` `[0.10.0]`, `docs/decisions.md`.
+  - **Printer profiles** (`feat:`). Per-user named presets of the six print-record settings fields
+    (printer, material, filament color, nozzle, layer height, supports); optional single **default**
+    (partial unique index `WHERE is_default` + API clears others in the same txn). Migration **`0028`**,
+    `models/printer_profile.py`, `routers/printer_profiles.py` → `/api/me/printer-profiles` (CRUD, scoped to
+    current user → foreign id 404, dup name 409). UI: `pages/settings/PrinterProfilesSection.tsx` (Settings,
+    after path prefixes); `PrintRecordFields.tsx` gets **"Load from profile"** select (copies non-null
+    fields only) + **"Save as profile"** inline mini-form (not a nested `<form>`). Default auto-fills
+    **new** forms only (`applyDefaultProfile` prop: `!existing` in `PrintHistory`, always in bulk dialog),
+    once, and only while all six fields are blank.
+  - **Printed-before catalog badge** (`feat:`). `ItemSummary.print_count` (+ legacy `has_print_record`)
+    from one grouped COUNT; lucide `Printer` between the files `Box` badge and the star; tooltip
+    "Printed N time(s)" (`printedLabel` in `lib/catalog-utils.ts`). **Visibility mirrors
+    `list_print_records`:** any authenticated user counts all records (private only hides from anonymous
+    share viewers); anonymous callers count public only.
+  - **Cancel queued jobs / manage superseded / auto-supersede stale queued rows** (`fc0e931`,
+    `STALE_QUEUED_JOB_HOURS`, default 24, only when the arq task is gone).
+  - **Security — audit task 2b** (`chore:`): fastapi 0.165.0, starlette 1.10.0 (floor `>=1.3.1`),
+    uvicorn 0.54.0. No removed-API usage; renamed `HTTP_422_UNPROCESSABLE_ENTITY` →
+    `HTTP_422_UNPROCESSABLE_CONTENT` (22 files). pip-audit on runtime reqs: **0** (vtk-osmesa unauditable,
+    not on PyPI). Code-scanning #61 (`py/log-injection`, agentql.py, admin-only `%r`) **dismissed** as FP.
+- **Earlier releases** (`v0.1.1`–`v0.9.0`): `CHANGELOG.md`. Recent — v0.9.0 catalog multi-select + bulk
+  actions, per-component build info, security refresh; v0.8.x in-app edit, server-side OpenSCAD render,
+  inline PDF, stlflix.
 - **Prod deploy facts** (compose in `~/projects/docker-compose/apps/partfolder3d/` on this host,
   deployed elsewhere via Komodo): Traefik ingress (`partfolder3d.crzynet.com`), NFS library,
   `user: 2000:66000`, worker capped `cpus:2 / 6G`. **Verify which build is live via the Version page**,
   or on the host: `docker image inspect <img> --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'`.
 - **The dev docker stack on THIS host** is currently **down** (`docker compose -f docker-compose.dev.yml
-  {up -d,stop}`); backend/frontend hot-reload, the worker does NOT (`make worker-restart`).
-- **Local venv was rebuilt 2026-11-25** — host system Python moved 3.12 → **3.14**, which broke the old
-  venv's interpreter symlink. Recreate with:
+  {up -d,stop}`); backend/frontend hot-reload, the worker does NOT (`make worker-restart`). Owner tested
+  the v0.10.0 features on `:dev` before release.
+- **Local venv** is Python 3.12 (host system Python is 3.14). Recreate if broken:
   `uv venv --python 3.12 backend/.venv && uv pip install --python backend/.venv/bin/python -r backend/requirements-dev.txt`.
-- **CI vs local gotcha (recurring):** local vitest can flake under host load (`waitFor` timeouts, no
-  real failures) — re-run the named files with `--no-file-parallelism`; CI is authoritative. (Today's
-  runs were all clean.) Note `CI` runs on **pull_request only**; push-to-`main` runs only the publish.
+- **Dependabot alerts are DISABLED** on the repo — dependency checks are local only:
+  `uvx pip-audit -r backend/requirements.txt` and `(cd frontend && npm audit)`. (Owner could enable it in
+  Settings → Code security.) npm audit = 3 (vitest/tinypool/@vitest/mocker, dev-only → audit #6).
+- **CI vs local gotcha (recurring):** local vitest can flake under host load (`waitFor` timeouts) —
+  re-run named files with `--no-file-parallelism`; CI is authoritative. `CI` runs on **pull_request
+  only**; push-to-`main` runs only the publish.
 
 ## Next phases (roadmap)
 
-- **Remaining security-audit tasks** (`docs/security-audit-2026-11-25.md` §5):
+- **Remaining security-audit tasks** (`docs/security-audit-2026-11-25.md` §5; 2a/2b/3/4/5 done):
   - **#1 Weekly rebuild + trivy scan in CI** — highest leverage (stale images were the main CVE source).
     **Owner decision needed:** may a scheduled rebuild republish `:latest` without a release?
-  - **#2b fastapi/starlette (+uvicorn) bump** — medium risk (starlette 1.x removed deprecated APIs;
-    check `on_event`, `TemplateResponse` arg order, `request.form()` limits on upload routes). Clears the
-    remaining starlette HIGHs. Full verify + built-image upload/render smoke.
-  - #6 (opt) vitest 5 major (dev-only; clears last 2 npm crits). #7 (opt, later) PyPI `vtk` ≥9.7 over EGL
-    replacing `vtk-osmesa` (unblocks Py 3.13 / post-trixie; audit proved stock vtk renders headless — the
-    Dockerfile/requirements comments saying otherwise are stale). #8 (opt) headless OpenSCAD build
-    (−8 HIGH, −180 MB; agent couldn't measure — external source compile blocked by permissions).
-  - postgres:16-alpine carries 1/26 from upstream `gosu` (17/18 identical) — nothing to do but watch.
+  - #6 (opt) vitest 5 major (dev-only; clears the last npm crits). #7 (opt, later) PyPI `vtk` ≥9.7 over EGL
+    replacing `vtk-osmesa` (unblocks Py 3.13 / post-trixie; stale Dockerfile/requirements comments say
+    otherwise). #8 (opt) headless OpenSCAD build (−8 HIGH, −180 MB). Minor: starlette's TestClient warns to
+    move to `httpx2` eventually.
+  - postgres:16-alpine carries 1/26 from upstream `gosu` — nothing to do but watch.
 - **Automatic Let's Encrypt/ACME at nginx** ([#41](https://github.com/crzykidd/partfolder3d/issues/41)).
-- **Other bulk actions** not yet built: bulk **set creator**, bulk **export/download**; "select all
-  matching filter" (server-side) was deliberately skipped.
-- **Deferred v0.8.0 follow-ups:** refresh a `.3mf`'s embedded thumbnail on in-place edit (route via
-  `_enqueue_analyze`); manual "re-render `.scad`" button; optionally subprocess-isolate
-  `validate_model_file`'s STL/OBJ/PLY path.
-- **Small polish noticed:** print-record form labels aren't linked to inputs (a11y, pre-existing);
-  nav shells show plain version only (could append short sha on non-release channels).
-- **Next release:** `/release-prep 0.9.1` (patch) or `0.10.0` (feature batch). Standing gotchas: CodeQL
-  path-injection FPs on `routers/downloads.py` (dismiss, matching #3/#4/#5/#37/#62/#63); never pipe
-  `make verify` (masks exit code) — run it in a background task writing to a log.
+- **Printer-profile follow-ups (not requested yet):** profiles are per-user only (shared/admin profiles
+  were an offered option, owner chose per-user); no reorder; badge counts others' private prints for
+  logged-in users (offered "own prints only" — owner didn't ask).
+- **Other bulk actions** not yet built: bulk **set creator**, bulk **export/download**.
+- **Deferred v0.8.0 follow-ups:** refresh a `.3mf`'s embedded thumbnail on in-place edit; manual
+  "re-render `.scad`" button; optionally subprocess-isolate `validate_model_file`'s STL/OBJ/PLY path.
+- **Small polish:** print-record form labels aren't linked to inputs (a11y); nav shells show plain version
+  only (could append short sha on non-release channels).
+- **Next release:** `/release-prep 0.10.1` (patch) or `0.11.0`. Standing gotchas: CodeQL path-injection FPs
+  on `routers/downloads.py` (dismiss); never pipe `make verify` (masks exit code) — run it in a background
+  task writing to a log; **don't `pkill -f pytest` from a command line that itself contains "pytest"** (it
+  kills its own shell, exit 144).
 
 ## How we work (recap — full rules in `CLAUDE.md`)
 
@@ -119,7 +115,7 @@ for backend, frontend, nginx). README security callout followed via docs PR #52 
 ## Backlog (themes — `gh issue list` is the source of truth for what we build **now**, not the PRD)
 
 - **Open issues:** only [#41](https://github.com/crzykidd/partfolder3d/issues/41) ACME at nginx.
-- **Needs owner decision:** audit #1 (scheduled `:latest` republish?); #41 approach; whether the security
+- **Needs owner decision:** audit #1 (scheduled `:latest` republish?); #41 approach; whether security
   follow-ups / v0.8.0 follow-ups / extra bulk actions get filed as issues.
 - Older PRD §18 notes: real slicing for filament estimates, trash-purge UI, `.bgcode`/multi-filament gcode.
 
