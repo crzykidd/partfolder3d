@@ -59,7 +59,7 @@ export const restartJob = (jobId: string): Promise<{ queued: boolean }> =>
   apiFetch<{ queued: boolean }>(`/api/jobs/${jobId}/restart`, { method: 'POST' })
 
 export const clearJobsByStatus = (
-  status: 'succeeded' | 'failed' | 'cancelled',
+  status: 'succeeded' | 'failed' | 'cancelled' | 'superseded',
 ): Promise<{ archived: number }> =>
   apiFetch<{ archived: number }>(`/api/jobs/clear?status=${status}`, { method: 'POST' })
 

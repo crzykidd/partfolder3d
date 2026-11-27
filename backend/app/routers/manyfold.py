@@ -114,18 +114,18 @@ def _normalize_base_url(raw: str) -> tuple[str, str]:
     raw = (raw or "").strip()
     if not raw:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="base_url is required.",
         )
     parsed = urlparse(raw)
     if parsed.scheme not in ("http", "https"):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="base_url must start with http:// or https://.",
         )
     if not parsed.hostname:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="base_url must include a host.",
         )
 

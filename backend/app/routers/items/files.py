@@ -95,7 +95,7 @@ async def upload_file(
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in _ALLOWED_FILE_EXTENSIONS:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 f"Unsupported file type {suffix!r}. "
                 f"Allowed: {', '.join(sorted(_ALLOWED_FILE_EXTENSIONS))}"
@@ -265,12 +265,12 @@ async def rename_file(
 
     if not new_name or "/" in new_name or "\\" in new_name or ".." in new_name:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Invalid filename: must be a plain name with no path separators.",
         )
     if len(new_name) > 255:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Filename too long (max 255 characters).",
         )
 

@@ -128,7 +128,7 @@ async def upsert_setting(
         allowed = _KEY_ALLOWED_VALUES[key]
         if not isinstance(body.value, str) or body.value not in allowed:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=(
                     f"Invalid value for {key!r}: {body.value!r}. "
                     f"Must be one of {sorted(allowed)}."
@@ -139,7 +139,7 @@ async def upsert_setting(
     # a subclass of int, so this check must come before any int handling.
     if key in _BOOL_KEYS and not isinstance(body.value, bool):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Invalid value for {key!r}: must be a boolean (true or false).",
         )
 
@@ -150,7 +150,7 @@ async def upsert_setting(
         if body.value is not None:
             if not isinstance(body.value, int) or isinstance(body.value, bool):
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="import.default_library_id must be an integer or null.",
                 )
             lib_res = await db.execute(
@@ -160,7 +160,7 @@ async def upsert_setting(
             )
             if lib_res.scalar_one_or_none() is None:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail=f"Library {body.value} not found or not enabled.",
                 )
 
@@ -197,7 +197,7 @@ async def update_theme(
 ) -> ThemeResponse:
     if body.theme_pref not in _VALID_THEMES:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Invalid theme: {body.theme_pref!r}. Must be one of {sorted(_VALID_THEMES)}",
         )
     # Re-fetch within this session's unit of work
@@ -250,7 +250,7 @@ async def update_nav_layout(
 
     if body.nav_layout is not None and body.nav_layout not in _VALID_LAYOUTS:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 f"Invalid nav_layout: {body.nav_layout!r}. "
                 f"Must be one of {sorted(_VALID_LAYOUTS)} or null."
@@ -345,7 +345,7 @@ async def update_dashboard_layout(
     # Validate density
     if body.dashboard_layout.stats.density not in ("comfortable", "compact"):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 f"Invalid density: {body.dashboard_layout.stats.density!r}. "
                 "Must be 'comfortable' or 'compact'."

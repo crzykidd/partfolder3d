@@ -127,6 +127,10 @@ class ItemSummary(BaseModel):
     favorited: bool = False
     # has_asset: True when the item has at least one model or gcode file.
     has_asset: bool = False
+    # has_print_record: True when the item has at least one print record.
+    has_print_record: bool = False
+    # print_count: number of print records visible to the caller.
+    print_count: int = 0
 
     model_config = {"from_attributes": False}
 

@@ -500,7 +500,7 @@ async def commit_import_session(
     title = session.confirmed_title or session.suggested_title
     if not title:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="confirmed_title must be set before committing.",
         )
 
@@ -508,7 +508,7 @@ async def commit_import_session(
     library = await _resolve_import_library(None, session.library_id, db)
     if library is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 "library_id must be set (or a default import library configured) "
                 "before committing."

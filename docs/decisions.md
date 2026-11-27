@@ -2,6 +2,45 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-11-26 — fastapi/starlette major bump (security task 2b)
+
+**Decision:** fastapi 0.165.0 / starlette 1.10.0 / uvicorn 0.54.0, with an explicit `starlette>=1.3.1` floor. No code
+used removed starlette APIs (no `on_event`, `TemplateResponse`, direct `request.form()`; uploads go through
+FastAPI `UploadFile` params), so no explicit form limits were set; starlette's defaults (max_files/max_fields 1000,
+1 MB cap on non-file fields only) accept our real uploads. Renamed `HTTP_422_UNPROCESSABLE_ENTITY` to
+`HTTP_422_UNPROCESSABLE_CONTENT` (deprecation). Remaining warning: starlette TestClient wants `httpx2` eventually.
+
+## 2026-11-26 — Printer profiles: per-user presets, default auto-fill only on create
+
+**Decision:** profiles live in their own router (`routers/printer_profiles.py`, `/api/me/printer-profiles`) rather
+than `me.py`, which is already large. One default per user is enforced by a partial unique index and by the API
+clearing other defaults in the same transaction. The default auto-fills only new-record forms (`applyDefaultProfile`
+prop; `PrintHistory` passes `!existing`, bulk dialog always), applied once and only if the six settings fields are
+still blank, so a late-resolving profiles query never clobbers typed values. Picking a profile copies only its non-null fields.
+
+## 2026-11-26 — `has_print_record` catalog flag ignores per-user visibility
+
+**Decision:** the catalog list's `has_print_record` mirrors `list_print_records`: any authenticated user sees all
+records (public + private), since "private" only hides records from anonymous share viewers. The prompt assumed
+another user's private record should not light the icon; that would contradict the item page, so it was not done.
+Anonymous callers of the list endpoint (optional auth) count public records only.
+
+## 2026-11-25 — Cancel queued jobs, superseded is terminal in the UI, stale-queued reaper
+
+**Context:** `prompts/done/2026-11-25-queued-job-cancel-and-stale-reaper.md`. Orphaned `queued` rows could not be
+removed from the Jobs page (no actions), and `superseded` rows had no Archive/Delete or filter.
+
+**Decision:** `POST /api/jobs/{id}/cancel` accepts `queued` (sets `cancelled`, best-effort arq abort). Worker guard:
+`claim_or_create_job` raises `JobAlreadyTerminal` when no queued row can be claimed but a `cancelled`/`superseded`
+row exists for the arq job id; render/analyze/scad_render/extract_archives return early (`failed`/`succeeded` rows
+deliberately do not block, since arq may re-run a job id). `superseded` is archivable (single + `/clear`) and has a UI
+filter. The daily `job_history_retention` cron first supersedes `queued` rows older than `STALE_QUEUED_JOB_HOURS`
+(default 24) **only when arq confirms the task is gone (`not_found`) or finished (`complete`)** — rows with no
+`arq_job_id` are always orphans. Age alone was rejected as the rule (orchestrator review): a huge import on a small
+worker can legitimately keep jobs queued for over a day, and superseding them would make the new worker guard skip
+real work. No Redis handle / lookup error → the row is kept. `GET /api/jobs?status=superseded` now returns superseded rows without
+`include_superseded`.
+
 ## 2026-11-25 — extract_archives must claim its queued Job row (migration 0027)
 
 **Context:** `prompts/2026-11-25-fix-extract-archives-orphan-queued.md`. After imports with ZIPs, an

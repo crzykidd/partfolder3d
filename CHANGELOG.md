@@ -20,6 +20,37 @@ prefix appears only on git tags and GitHub releases.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-11-27
+
+### Added
+
+- **Printer profiles.** Save named printer/material/nozzle/layer presets in Settings (one can be the
+  default) and load them into the Log-print form from a dropdown — single and bulk — or save the current settings as a new profile right from the form.
+- **Printed-before badge in the catalog.** Items with a logged print show a small printer icon
+  next to the files badge and favorite star (grid and table views); hovering it shows how many
+  times the item has been printed ("Printed 3 times").
+- **Cancel queued jobs from the Job Monitor.** Queued jobs now have a **Cancel** button (previously
+  only running jobs did, so a stuck queued row had no action at all). Cancelling marks the row
+  cancelled and aborts the pending task; if the task still gets picked up, the worker skips it
+  instead of running it.
+- **`superseded` jobs are manageable.** They now get **Archive** / **Delete**, a `superseded` status
+  filter, and a "Clear superseded" bulk action (`POST /api/jobs/clear?status=superseded`).
+
+### Fixed
+
+- **Stuck "queued" jobs are cleaned up automatically.** The daily job-retention task now marks any job
+  still `queued` more than `STALE_QUEUED_JOB_HOURS` (default 24) after creation as `superseded`, **but only
+  if its background task no longer exists** (or already finished) — jobs genuinely waiting in a long backlog
+  (e.g. a huge import) are left alone. Guards against bugs like the v0.9.0 `extract_archives` one leaving
+  permanent queued rows.
+
+### Security
+
+- **fastapi 0.115.6 → 0.165.0, starlette 0.41.3 → 1.10.0 (new floor `>=1.3.1`), uvicorn 0.32.1 → 0.54.0.**
+  Clears all 14 starlette advisories, including the Range-header DoS on `FileResponse` downloads/shares and
+  ignored `request.form()` limits on uploads. Also renamed the removed `HTTP_422_UNPROCESSABLE_ENTITY` constant
+  to `HTTP_422_UNPROCESSABLE_CONTENT` (same 422 status).
+
 ## [0.9.0] — 2026-11-25
 
 ### Added
@@ -1442,7 +1473,8 @@ detail in this one file. (An earlier plan to archive closed minor series into
 <!-- Reference links: comparison ranges per release. v0.1.0 shipped untagged, so the
      earliest tag is v0.1.1 (no v0.2.1 was ever tagged). -->
 
-[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/crzykidd/partfolder3d/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/crzykidd/partfolder3d/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/crzykidd/partfolder3d/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/crzykidd/partfolder3d/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/crzykidd/partfolder3d/compare/v0.7.5...v0.8.0

@@ -254,6 +254,7 @@ async def _render_item_inner(ctx: dict, item_id: int, retry_of_job_id: str | Non
     from app.models.item import Item  # noqa: PLC0415
     from app.models.setting import Setting  # noqa: PLC0415
     from app.worker.job_tracker import (  # noqa: PLC0415
+        JobAlreadyTerminal,
         claim_or_create_job,
         finish_job,
         update_job_progress,
@@ -309,16 +310,20 @@ async def _render_item_inner(ctx: dict, item_id: int, retry_of_job_id: str | Non
 
     # Claim the queued Job row written at enqueue time (→ running); if none
     # exists (retry / scheduled / direct enqueue) insert a fresh running row.
-    async with SessionLocal() as db:
-        job_id = await claim_or_create_job(
-            db,
-            "render",
-            payload={"item_id": item_id},
-            item_id=item_id,
-            arq_job_id=ctx.get("job_id"),
-            retry_of_job_id=retry_of_job_id,
-        )
-        await db.commit()
+    try:
+        async with SessionLocal() as db:
+            job_id = await claim_or_create_job(
+                db,
+                "render",
+                payload={"item_id": item_id},
+                item_id=item_id,
+                arq_job_id=ctx.get("job_id"),
+                retry_of_job_id=retry_of_job_id,
+            )
+            await db.commit()
+    except JobAlreadyTerminal:
+        log.info("render_item: job row already cancelled/superseded — skipping item %s", item_id)
+        return
 
     _job_finalized = False
 

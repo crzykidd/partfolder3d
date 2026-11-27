@@ -256,7 +256,7 @@ async def update_agentql_settings(
     if body.free_allowance is not None:
         if body.free_allowance < 0:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="free_allowance must be >= 0.",
             )
         await _set_setting(db, _KEY_FREE_ALLOWANCE, body.free_allowance)
@@ -264,7 +264,7 @@ async def update_agentql_settings(
     if body.budget_mode is not None:
         if body.budget_mode not in ("free_only", "cap"):
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="budget_mode must be 'free_only' or 'cap'.",
             )
         await _set_setting(db, _KEY_BUDGET_MODE, body.budget_mode)
@@ -275,7 +275,7 @@ async def update_agentql_settings(
     if body.per_call_usd is not None:
         if body.per_call_usd < 0:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="per_call_usd must be >= 0.",
             )
         await _set_setting(db, _KEY_PER_CALL_USD, body.per_call_usd)
@@ -283,7 +283,7 @@ async def update_agentql_settings(
     if body.priority is not None:
         if body.priority < 1:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="priority must be >= 1.",
             )
         await _set_setting(db, _KEY_AQL_PRIORITY, body.priority)
@@ -291,7 +291,7 @@ async def update_agentql_settings(
     if body.timeout_s is not None:
         if body.timeout_s < 1:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="timeout_s must be >= 1.",
             )
         await _set_setting(db, _KEY_AQL_TIMEOUT_S, body.timeout_s)
@@ -339,7 +339,7 @@ async def update_flaresolverr_settings(
     if body.timeout_s is not None:
         if body.timeout_s < 1:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="timeout_s must be >= 1.",
             )
         await _set_setting(db, _KEY_FS_TIMEOUT_S, body.timeout_s)
@@ -347,7 +347,7 @@ async def update_flaresolverr_settings(
     if body.priority is not None:
         if body.priority < 1:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="priority must be >= 1.",
             )
         await _set_setting(db, _KEY_FS_PRIORITY, body.priority)

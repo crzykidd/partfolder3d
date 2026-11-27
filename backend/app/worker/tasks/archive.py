@@ -41,7 +41,11 @@ async def extract_archives(ctx: dict, item_id: int) -> None:
     from app.models.item import Item  # noqa: PLC0415
     from app.services.item_helpers import _enqueue_analyze, _enqueue_render  # noqa: PLC0415
     from app.storage.archive import ArchiveError, extract_zip  # noqa: PLC0415
-    from app.worker.job_tracker import claim_or_create_job, finish_job  # noqa: PLC0415
+    from app.worker.job_tracker import (  # noqa: PLC0415
+        JobAlreadyTerminal,
+        claim_or_create_job,
+        finish_job,
+    )
 
     # ------------------------------------------------------------------ #
     # Claim the queued Job row (or create one) so extraction is visible    #
@@ -57,6 +61,9 @@ async def extract_archives(ctx: dict, item_id: int) -> None:
                 arq_job_id=ctx.get("job_id"),
             )
             await db.commit()
+    except JobAlreadyTerminal:
+        log.info("extract_archives: job row cancelled/superseded — skipping item %s", item_id)
+        return
     except Exception:
         log.exception(
             "extract_archives: failed to create Job row for item %s — continuing without tracking",

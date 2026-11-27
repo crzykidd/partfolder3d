@@ -84,7 +84,7 @@ async def upload_image(
     suffix = Path(file.filename or "").suffix.lower()
     if content_type not in _ALLOWED_IMAGE_TYPES and suffix not in _ALLOWED_IMAGE_EXTS:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Unsupported image type.  Allowed: png, jpg, jpeg, webp, gif.",
         )
 

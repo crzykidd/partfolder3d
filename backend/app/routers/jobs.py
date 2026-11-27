@@ -5,10 +5,10 @@ GET    /api/jobs                  → paginated list (admin); default excludes a
                                     ?include_superseded=true → show superseded rows
 GET    /api/jobs/{id}             → single job detail (admin)
 POST   /api/jobs/{id}/retry       → re-enqueue a failed job (admin + CSRF)
-POST   /api/jobs/{id}/cancel      → cancel a running job (admin + CSRF)
+POST   /api/jobs/{id}/cancel      → cancel a queued or running job (admin + CSRF)
 POST   /api/jobs/{id}/restart     → restart a job of any status (admin + CSRF)
 POST   /api/jobs/clear?status=X   → archive all non-archived jobs of a terminal status
-                                    (succeeded|failed|cancelled) (admin + CSRF)
+                                    (succeeded|failed|cancelled|superseded) (admin + CSRF)
 POST   /api/jobs/{id}/archive     → archive one terminal job (admin + CSRF)
 DELETE /api/jobs/{id}             → hard-delete one job row (admin + CSRF)
 
@@ -99,7 +99,7 @@ def _enqueue_args_for(job: Job) -> tuple[str, list[Any]]:
         item_id = (job.payload or {}).get("item_id")
         if item_id is None:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Job payload is missing 'item_id'; cannot retry.",
             )
         return "render_item", [int(item_id)]
@@ -139,7 +139,7 @@ async def _resolve_job(db: AsyncSession, job_id: str) -> Job:
         job_uuid = uuid.UUID(job_id)
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Invalid job ID format (expected UUID)",
         ) from exc
 
@@ -195,7 +195,7 @@ async def list_jobs(
         # Default view: exclude archived rows
         query = query.where(Job.archived_at.is_(None))
         # Exclude superseded unless the caller explicitly asks for them
-        if not include_superseded:
+        if not include_superseded and status_filter != "superseded":
             query = query.where(Job.status != "superseded")
 
     if status_filter and status_filter in _VALID_STATUSES:
@@ -222,7 +222,7 @@ async def list_jobs(
 
 
 # Terminal statuses that can be bulk-cleared (archived) by status.
-_ARCHIVABLE_STATUSES = {"succeeded", "failed", "cancelled"}
+_ARCHIVABLE_STATUSES = {"succeeded", "failed", "cancelled", "superseded"}
 
 
 @router.post("/clear", response_model=ArchiveOut)
@@ -234,12 +234,12 @@ async def clear_jobs_by_status(
 ) -> ArchiveOut:
     """Archive (set archived_at=now) all non-archived jobs of a terminal status.
 
-    ``status`` must be one of: succeeded, failed, cancelled.  Returns the count
+    ``status`` must be one of: succeeded, failed, cancelled, superseded.  Returns the count
     archived.  422 if the status is not bulk-clearable.
     """
     if status_filter not in _ARCHIVABLE_STATUSES:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 f"Cannot clear status {status_filter!r}. "
                 f"Must be one of {sorted(_ARCHIVABLE_STATUSES)}."
@@ -323,7 +323,7 @@ async def cancel_job(
     db: Annotated[AsyncSession, Depends(get_db)],
     arq: Annotated[ArqRedis, Depends(get_arq_pool)],
 ) -> JobOut:
-    """Cancel a running job.
+    """Cancel a queued or running job.
 
     Sets status to 'cancelled' and best-effort aborts the arq task.  The abort
     signal tells the worker to stop the task's coroutine; the task's
@@ -332,10 +332,12 @@ async def cancel_job(
     """
     job = await _resolve_job(db, job_id)
 
-    if job.status != "running":
+    if job.status not in ("queued", "running"):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Only running jobs can be cancelled; this job is '{job.status}'.",
+            detail=(
+                f"Only queued or running jobs can be cancelled; this job is '{job.status}'."
+            ),
         )
 
     # Set 'cancelled' FIRST so finish_job (from the arq BaseException handler)

@@ -133,7 +133,7 @@ function PrintRecordForm({ itemKey, existing, onClose, onSaved }: PrintRecordFor
         </div>
 
         <form onSubmit={handleSubmit} style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <PrintRecordFields form={form} setForm={setForm} />
+          <PrintRecordFields form={form} setForm={setForm} applyDefaultProfile={!existing} />
 
           {submitError && (
             <p style={{ fontSize: 12, color: 'var(--aurora-danger)', margin: 0 }}>{submitError}</p>

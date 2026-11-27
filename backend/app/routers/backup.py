@@ -165,7 +165,7 @@ async def update_backup_settings(
     """Update the number of backup archives to keep (default 10)."""
     if body.retention_count < 1:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="retention_count must be >= 1",
         )
     result = await db.execute(

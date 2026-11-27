@@ -662,3 +662,215 @@ async def test_retention_old_cancelled_superseded_deleted(
     for gone_id in (j_cancelled, j_superseded):
         r = await db_session.execute(select(Job).where(Job.id == gone_id))
         assert r.scalar_one_or_none() is None, f"job {gone_id} must be gone"
+
+
+# ---------------------------------------------------------------------------
+# §8 — cancel queued, worker guard, superseded archivable, stale reaper
+# ---------------------------------------------------------------------------
+
+
+async def _make_queued(db: AsyncSession, arq_id: str, age_hours: float = 0) -> Any:
+    job = Job(
+        type="extract_archives",
+        status="queued",
+        progress=0,
+        payload={"item_id": 1},
+        arq_job_id=arq_id,
+        created_at=datetime.now(UTC) - timedelta(hours=age_hours),
+    )
+    db.add(job)
+    await db.flush()
+    return job.id
+
+
+@pytest.mark.asyncio
+async def test_cancel_queued_job_aborts_arq(
+    client: AsyncClient, db_session: AsyncSession, tmp_path: Path
+) -> None:
+    from unittest.mock import AsyncMock, MagicMock, patch  # noqa: PLC0415
+
+    jid = await _make_queued(db_session, "arq:queued-1")
+    await db_session.commit()
+    csrf = await _setup_and_login(client, tmp_path)
+
+    mock_arq_job = MagicMock()
+    mock_arq_job.abort = AsyncMock(return_value=True)
+    with patch("arq.jobs.Job", return_value=mock_arq_job):
+        resp = await client.post(f"/api/jobs/{jid}/cancel", headers={"X-CSRF-Token": csrf})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "cancelled"
+    assert resp.json()["finished_at"] is not None
+    mock_arq_job.abort.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_cancel_succeeded_job_still_409(
+    client: AsyncClient, db_session: AsyncSession, tmp_path: Path
+) -> None:
+    from app.worker.job_tracker import create_job, finish_job  # noqa: PLC0415
+
+    jid = await create_job(db_session, "render", payload={"item_id": 3})
+    await finish_job(db_session, jid, succeeded=True)
+    await db_session.commit()
+    csrf = await _setup_and_login(client, tmp_path)
+
+    resp = await client.post(f"/api/jobs/{jid}/cancel", headers={"X-CSRF-Token": csrf})
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_claim_or_create_raises_when_row_cancelled(db_session: AsyncSession) -> None:
+    from app.worker.job_tracker import JobAlreadyTerminal, claim_or_create_job  # noqa: PLC0415
+
+    jid = await _make_queued(db_session, "arq:dead-1")
+    job = (await db_session.execute(select(Job).where(Job.id == jid))).scalar_one()
+    job.status = "cancelled"
+    await db_session.flush()
+
+    with pytest.raises(JobAlreadyTerminal):
+        await claim_or_create_job(
+            db_session, "extract_archives", payload={}, arq_job_id="arq:dead-1"
+        )
+    rows = (
+        await db_session.execute(select(Job).where(Job.arq_job_id == "arq:dead-1"))
+    ).scalars().all()
+    assert len(rows) == 1 and rows[0].status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_claim_or_create_failed_row_does_not_block_rerun(
+    db_session: AsyncSession,
+) -> None:
+    from app.worker.job_tracker import claim_or_create_job  # noqa: PLC0415
+
+    jid = await _make_queued(db_session, "arq:failed-1")
+    job = (await db_session.execute(select(Job).where(Job.id == jid))).scalar_one()
+    job.status = "failed"
+    await db_session.flush()
+
+    new_id = await claim_or_create_job(
+        db_session, "extract_archives", payload={}, arq_job_id="arq:failed-1"
+    )
+    assert new_id != jid
+
+
+@pytest.mark.asyncio
+async def test_extract_archives_skips_when_row_cancelled(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The task returns early (no work, no new row) when its row is already cancelled."""
+    import app.db as app_db  # noqa: PLC0415
+    from app.worker.tasks.archive import extract_archives  # noqa: PLC0415
+
+    jid = await _make_queued(db_session, "arq:dead-2")
+    job = (await db_session.execute(select(Job).where(Job.id == jid))).scalar_one()
+    job.status = "cancelled"
+    await db_session.flush()
+
+    class _Sess:
+        async def __aenter__(self) -> AsyncSession:
+            return db_session
+
+        async def __aexit__(self, *a: Any) -> None:
+            return None
+
+    monkeypatch.setattr(app_db, "SessionLocal", lambda: _Sess())
+
+    await extract_archives({"job_id": "arq:dead-2"}, 999999)
+
+    rows = (
+        await db_session.execute(select(Job).where(Job.arq_job_id == "arq:dead-2"))
+    ).scalars().all()
+    assert len(rows) == 1 and rows[0].status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_superseded_archivable_single_and_clear(
+    client: AsyncClient, db_session: AsyncSession, tmp_path: Path
+) -> None:
+    ids = []
+    for n in range(2):
+        jid = await _make_queued(db_session, f"arq:sup-{n}")
+        j = (await db_session.execute(select(Job).where(Job.id == jid))).scalar_one()
+        j.status = "superseded"
+        j.finished_at = datetime.now(UTC)
+        ids.append(jid)
+    await db_session.commit()
+    csrf = await _setup_and_login(client, tmp_path)
+
+    # superseded filter shows them in the default (non-archived) view
+    lst = await client.get("/api/jobs?status=superseded")
+    assert lst.json()["total"] == 2
+
+    r1 = await client.post(f"/api/jobs/{ids[0]}/archive", headers={"X-CSRF-Token": csrf})
+    assert r1.status_code == 200, r1.text
+    assert r1.json()["archived_at"] is not None
+
+    r2 = await client.post("/api/jobs/clear?status=superseded", headers={"X-CSRF-Token": csrf})
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["archived"] == 1
+
+
+@pytest.mark.asyncio
+async def test_stale_queued_reaper_only_old_queued(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only OLD queued rows whose arq task is gone/finished are superseded.
+
+    A day-old queued row whose arq task is still queued/deferred/in-progress (a
+    long backlog from a huge import) must be kept, or the worker guard would skip
+    real work.  Without a Redis handle nothing with an arq id is touched.
+    """
+    from arq.jobs import JobStatus  # noqa: PLC0415
+
+    from app.worker.job_tracker import create_job  # noqa: PLC0415
+    from app.worker.tasks.scheduled import _supersede_stale_queued_jobs  # noqa: PLC0415
+
+    gone = await _make_queued(db_session, "arq:gone", age_hours=48)
+    done = await _make_queued(db_session, "arq:done", age_hours=48)
+    backlog = await _make_queued(db_session, "arq:backlog", age_hours=48)
+    fresh = await _make_queued(db_session, "arq:fresh", age_hours=1)
+    no_arq = await _make_queued(db_session, "", age_hours=48)
+    running = await create_job(db_session, "render", payload={"item_id": 7})
+    await db_session.flush()
+    r = (await db_session.execute(select(Job).where(Job.id == running))).scalar_one()
+    r.created_at = datetime.now(UTC) - timedelta(hours=48)
+    await db_session.flush()
+
+    statuses = {
+        "arq:gone": JobStatus.not_found,
+        "arq:done": JobStatus.complete,
+        "arq:backlog": JobStatus.queued,
+    }
+
+    class _FakeArqJob:
+        def __init__(self, job_id: str, _redis: Any) -> None:
+            self.job_id = job_id
+
+        async def status(self) -> Any:
+            return statuses[self.job_id]
+
+    import arq.jobs  # noqa: PLC0415
+
+    monkeypatch.setattr(arq.jobs, "Job", _FakeArqJob)
+
+    async def _get(i: Any) -> Job:
+        return (await db_session.execute(select(Job).where(Job.id == i))).scalar_one()
+
+    # No Redis handle: only the row with no arq id (unclaimable) is reaped.
+    n0 = await _supersede_stale_queued_jobs(db_session, datetime.now(UTC), None)
+    assert n0 == 1
+    assert (await _get(no_arq)).status == "superseded"
+    assert (await _get(gone)).status == "queued"
+
+    n = await _supersede_stale_queued_jobs(db_session, datetime.now(UTC), object())
+    assert n == 2
+
+    o = await _get(gone)
+    assert o.status == "superseded" and o.finished_at is not None
+    assert "stale queued row" in (o.error or "")
+    assert (await _get(done)).status == "superseded"
+    assert (await _get(backlog)).status == "queued"
+    assert (await _get(fresh)).status == "queued"
+    assert (await _get(running)).status == "running"

@@ -160,7 +160,7 @@ async def _load_session_owned(
         sid = uuid.UUID(session_id)
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Invalid session ID",
         ) from exc
 

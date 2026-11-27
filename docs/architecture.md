@@ -42,6 +42,7 @@ One row per subsystem. Paths are relative to repo root. Backend routers live in
 | Issues / reconcile | `issues.py`, `changes.py` | `issue.py`, `change_log.py` | `worker/reconcile.py` (`_behavior_re_render` is the unified model-file change classifier: legit-edit → adopt hash + re-render vs bad-write/bit-rot → `corruption` Issue; `_behavior_integrity` handles the rest), `tasks/scheduled.py` | `storage/sidecar.py`, `storage/inventory.py`, `worker/render_mesh.py` (`validate_model_file`) | `issues.ts`, `changes.ts` | `admin/IssuesPage.tsx`, `admin/ChangesPage.tsx` | `test_phase6_reconcile.py`, `test_issue_resolution.py`; FE `reconcile-ui.test.ts` |
 | Jobs / job lifecycle | `jobs.py` | `job.py` | `worker/job_tracker.py` (create/transition) | — | `jobs.ts` | `admin/JobsPage.tsx` | `test_phase4_jobs.py`, `test_job_lifecycle.py`, `test_item_jobs_endpoint.py` |
 | Print history | `print_records.py` | `print_record.py` | — | — | `print-records.ts` | `pages/item/PrintHistory.tsx`, `admin/PrintStatsPage.tsx` | `test_phase7_print_history.py`; FE `print-history.test.ts` |
+| Printer profiles | `printer_profiles.py` (`/api/me/printer-profiles`, CRUD, per-user) | `printer_profile.py` (migration `0028`; partial unique index = one default/user) | — | — | `printer-profiles.ts` | `pages/settings/PrinterProfilesSection.tsx`; `PrintRecordFields.tsx` "Load from profile" select (`applyDefaultProfile` on create forms) | `test_printer_profiles.py`; FE `printer-profiles.test.tsx` |
 | AI tagging / AI usage | `ai_actions.py`, `ai_providers.py`, `ai_usage.py` | `ai_provider.py`, `ai_usage.py` | — (called inline) | — | `ai.ts` | `admin/AiProvidersPage.tsx`, `admin/AiUsagePage.tsx` | `test_phase8_ai.py`, `test_phase13_ai_usage.py`, `test_starter_tags_ai_status.py`; FE `ai-providers.test.ts` |
 | Scrapers / fallback backends | `agentql.py` | `scraper_usage.py`, `site_capability.py` | `tasks/import_session.py` | `storage/scraper.py` (`extract_metadata_from_html`), `storage/agentql_client.py`, `storage/flaresolverr_client.py`, `storage/ssrf_guard.py` | `agentql.ts`, `scrapers.ts` | `admin/SiteCapabilitiesPage.tsx` (AgentQL + FlareSolverr cards) | `test_agentql.py`, `test_flaresolverr.py` |
 | Manyfold connector (all 3 parts landed — config + admin API + worker import path + admin UI/wizard) | `manyfold.py` | `manyfold.py` (`ManyfoldInstance`) | `tasks/import_session.py` (`_maybe_manyfold_import`) | `storage/manyfold_client.py` (`fetch_token`/`get_access_token`/`get_cached_access_token`, `parse_model_id`, `fetch_model`, `resolve_creator`, `download_file` — OAuth2 client_credentials + model/file JSON-LD API) | `manyfold.ts` | `admin/ManyfoldPage.tsx` (instance list/add/edit/rotate-secret/test-connection, `/admin/ai/manyfold`); wizard Assets step lives in the import-sessions row above | `test_manyfold_admin.py`, `test_manyfold_import.py`; FE `manyfold-admin.test.tsx` |
@@ -72,7 +73,10 @@ Durable technical traps. Break one and the failure is often silent or
 image-only (invisible to local unit runs).
 
 - **Queued-row claim.** Every task enqueued via `_write_queued_row_and_enqueue` MUST use
-  `claim_or_create_job`, not `create_job`, or its queued Job row is orphaned forever.
+  `claim_or_create_job`, not `create_job`, or its queued Job row is orphaned forever. Safety nets: admins can
+  cancel `queued` rows (`POST /api/jobs/{id}/cancel`); `claim_or_create_job` raises `JobAlreadyTerminal` when the
+  row for its arq job id is already `cancelled`/`superseded` (the four claiming tasks return early); and the daily
+  `job_history_retention` cron supersedes `queued` rows older than `STALE_QUEUED_JOB_HOURS` (24h default) **only if arq reports the task `not_found`/`complete`** (a long real backlog is kept).
 
 - **Requirements split.** `backend/requirements.txt` is runtime-only (the Docker image installs just it);
   tests/lint use `backend/requirements-dev.txt`. (Re)create the local venv:

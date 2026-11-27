@@ -151,13 +151,13 @@ async def create_import_session(
     src = body.source_type.lower()
     if src not in ("url", "upload"):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="source_type must be 'url' or 'upload'",
         )
 
     if src == "url" and not body.source_url:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="source_url is required when source_type='url'",
         )
 
@@ -178,7 +178,7 @@ async def create_import_session(
                 # so we don't leak internal-network topology to the importing user.
                 log.warning("create_import_session: SSRF-blocked source URL: %s", exc)
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="URL is not allowed.",
                 ) from exc
 
@@ -265,7 +265,7 @@ async def upload_session_files(
 
     if session.source_type not in (ImportSourceType.upload, ImportSourceType.url):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="File upload only supported for source_type='upload' or 'url'.",
         )
     if session.status not in (ImportSessionStatus.draft, ImportSessionStatus.pending_wizard):
@@ -566,7 +566,7 @@ async def upload_session_image(
         )
     if not session.staging_dir:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Session has no staging area for images.",
         )
 
@@ -575,7 +575,7 @@ async def upload_session_image(
     suffix = Path(file.filename or "").suffix.lower()
     if content_type not in _ALLOWED_IMAGE_TYPES and suffix not in _ALLOWED_IMAGE_EXTS:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Unsupported image type.  Allowed: png, jpg, jpeg, webp, gif.",
         )
 

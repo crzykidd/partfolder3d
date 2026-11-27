@@ -247,6 +247,7 @@ async def _analyze_item_inner(ctx: dict, item_id: int) -> None:
     """
     from app.db import SessionLocal  # noqa: PLC0415
     from app.worker.job_tracker import (  # noqa: PLC0415
+        JobAlreadyTerminal,
         claim_or_create_job,
         finish_job,
         mark_superseded,
@@ -266,6 +267,9 @@ async def _analyze_item_inner(ctx: dict, item_id: int) -> None:
                 arq_job_id=ctx.get("job_id"),
             )
             await db.commit()
+    except JobAlreadyTerminal:
+        log.info("analyze_item: job row already cancelled/superseded — skipping item %s", item_id)
+        return
     except Exception:
         log.exception(
             "analyze_item: failed to claim/create Job row for item %s"
