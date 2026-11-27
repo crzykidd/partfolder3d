@@ -99,7 +99,7 @@ def _enqueue_args_for(job: Job) -> tuple[str, list[Any]]:
         item_id = (job.payload or {}).get("item_id")
         if item_id is None:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Job payload is missing 'item_id'; cannot retry.",
             )
         return "render_item", [int(item_id)]
@@ -139,7 +139,7 @@ async def _resolve_job(db: AsyncSession, job_id: str) -> Job:
         job_uuid = uuid.UUID(job_id)
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Invalid job ID format (expected UUID)",
         ) from exc
 
@@ -239,7 +239,7 @@ async def clear_jobs_by_status(
     """
     if status_filter not in _ARCHIVABLE_STATUSES:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 f"Cannot clear status {status_filter!r}. "
                 f"Must be one of {sorted(_ARCHIVABLE_STATUSES)}."

@@ -124,7 +124,7 @@ async def import_from_share_link(
     share_url = body.share_url.strip()
     if not share_url:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="share_url is required.",
         )
 
@@ -132,7 +132,7 @@ async def import_from_share_link(
     token_match = _re.search(r"/share/([a-f0-9]{64})(?:/|$)", share_url)
     if not token_match:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 "Could not extract a valid share token from the URL. "
                 "Expected format: https://instance.example.com/share/<64-char-hex-token>"
@@ -155,7 +155,7 @@ async def import_from_share_link(
         # so we don't leak internal-network topology to the importing user.
         log.warning("import_from_share_link: SSRF-blocked share URL: %s", exc)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="URL is not allowed.",
         ) from exc
 

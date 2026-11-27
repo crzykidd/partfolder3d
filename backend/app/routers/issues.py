@@ -137,7 +137,7 @@ async def _action_delete(
     target = issue.target_path
     if not target:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Issue has no target_path; cannot delete.",
         )
     target_dir = Path(target)
@@ -158,7 +158,7 @@ async def _action_delete(
         for mount in library_mounts
     ):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Target directory is not within a known library mount.",
         )
 
@@ -190,7 +190,7 @@ async def _action_import(
     target = issue.target_path
     if not target:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Issue has no target_path; cannot import.",
         )
     target_dir = Path(target)
@@ -291,7 +291,7 @@ async def _action_delete_item(
     """delete_item (orphan, item_id set) — dir gone; delete DB item row."""
     if issue.item_id is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="delete_item requires item_id to be set on the issue.",
         )
     from ..models.item import Item  # noqa: PLC0415
@@ -321,7 +321,7 @@ async def _action_remove_record(
     """remove_record (missing_file) — delete the File DB row for the missing path."""
     if issue.item_id is None or not issue.target_path:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="remove_record requires item_id and target_path on the issue.",
         )
     from ..models.file import File  # noqa: PLC0415
@@ -339,7 +339,7 @@ async def _action_remove_record(
         rel_path = str(Path(issue.target_path).relative_to(Path(item.dir_path)))
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 f"target_path {issue.target_path!r} is not under item dir "
                 f"{item.dir_path!r}."
@@ -370,7 +370,7 @@ async def _action_accept(
     """accept (corruption) — recompute sha256 from disk and accept the new hash."""
     if issue.item_id is None or not issue.target_path:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="accept requires item_id and target_path on the issue.",
         )
     target_file = Path(issue.target_path)
@@ -394,7 +394,7 @@ async def _action_accept(
         rel_path = str(target_file.relative_to(Path(item.dir_path)))
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 f"target_path {issue.target_path!r} is not under item dir "
                 f"{item.dir_path!r}."
@@ -426,7 +426,7 @@ async def _action_clear_source(
     """clear_source (dead_link) — clear item.source_url."""
     if issue.item_id is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="clear_source requires item_id on the issue.",
         )
     from ..models.item import Item  # noqa: PLC0415
@@ -455,7 +455,7 @@ async def _action_keep_db(
     """keep_db (conflict) — rewrite sidecar from DB state."""
     if issue.item_id is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="keep_db requires item_id on the issue.",
         )
     from ..models.item import Item  # noqa: PLC0415
@@ -489,7 +489,7 @@ async def _action_keep_sidecar(
     """keep_sidecar (conflict) — apply on-disk sidecar fields to DB."""
     if issue.item_id is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="keep_sidecar requires item_id on the issue.",
         )
     from ..models.item import Item  # noqa: PLC0415
@@ -549,7 +549,7 @@ async def _action_retry(
     """retry (sidecar_error) — re-run reconcile for the item; resolve if clean."""
     if issue.item_id is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="retry requires item_id on the issue.",
         )
     from ..models.item import Item  # noqa: PLC0415
@@ -686,7 +686,7 @@ async def issue_action(
     available = actions_for(issue)
     if body.action not in available:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 f"Action {body.action!r} is not available for issue type "
                 f"{issue.issue_type!r}. Available: {available}"

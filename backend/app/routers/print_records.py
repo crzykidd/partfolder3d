@@ -227,7 +227,7 @@ def _require_record_owner_or_admin(rec: PrintRecord, user: User) -> None:
 def _validate_visibility(v: str) -> None:
     if v not in ("private", "public"):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="visibility must be 'private' or 'public'",
         )
 

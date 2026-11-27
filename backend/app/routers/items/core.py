@@ -780,7 +780,7 @@ async def patch_modified_override(
     override = body.override
     if override is not None and override not in ("modified", "original"):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="override must be 'modified', 'original', or null.",
         )
 

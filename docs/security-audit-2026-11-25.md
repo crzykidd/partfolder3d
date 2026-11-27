@@ -390,7 +390,8 @@ Ordered by risk reduced per unit of effort. No task creates an Alembic migration
   * **2a**: Pillow, multipart, cryptography, floors, dev split (low risk). This alone
     takes the backend's language CRITs from 8 to 0 and covers the reachable
     file-write CVE.
-  * **2b**: fastapi/starlette (medium risk).
+  * **2b**: fastapi/starlette (medium risk). **DONE 2026-11-26**: fastapi 0.165.0, starlette 1.10.0
+    (floor >=1.3.1), uvicorn 0.54.0; backend gate green, pip-audit clean (0 findings).
 * **Expected reduction (measured, with a fresh base):** backend 14/135 → **1/34**
   unique. All 62 language-package instances go to 0.
 * **Verify:** **full `make verify`**, plus a **built-image render and openscad smoke

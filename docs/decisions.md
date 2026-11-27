@@ -2,6 +2,14 @@
 
 ADR-style log of non-obvious decisions, newest at top.
 
+## 2026-11-26 — fastapi/starlette major bump (security task 2b)
+
+**Decision:** fastapi 0.165.0 / starlette 1.10.0 / uvicorn 0.54.0, with an explicit `starlette>=1.3.1` floor. No code
+used removed starlette APIs (no `on_event`, `TemplateResponse`, direct `request.form()`; uploads go through
+FastAPI `UploadFile` params), so no explicit form limits were set; starlette's defaults (max_files/max_fields 1000,
+1 MB cap on non-file fields only) accept our real uploads. Renamed `HTTP_422_UNPROCESSABLE_ENTITY` to
+`HTTP_422_UNPROCESSABLE_CONTENT` (deprecation). Remaining warning: starlette TestClient wants `httpx2` eventually.
+
 ## 2026-11-26 — Printer profiles: per-user presets, default auto-fill only on create
 
 **Decision:** profiles live in their own router (`routers/printer_profiles.py`, `/api/me/printer-profiles`) rather

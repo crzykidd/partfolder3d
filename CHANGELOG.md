@@ -42,6 +42,13 @@ prefix appears only on git tags and GitHub releases.
   (e.g. a huge import) are left alone. Guards against bugs like the v0.9.0 `extract_archives` one leaving
   permanent queued rows.
 
+### Security
+
+- **fastapi 0.115.6 → 0.165.0, starlette 0.41.3 → 1.10.0 (new floor `>=1.3.1`), uvicorn 0.32.1 → 0.54.0.**
+  Clears all 14 starlette advisories, including the Range-header DoS on `FileResponse` downloads/shares and
+  ignored `request.form()` limits on uploads. Also renamed the removed `HTTP_422_UNPROCESSABLE_ENTITY` constant
+  to `HTTP_422_UNPROCESSABLE_CONTENT` (same 422 status).
+
 ## [0.9.0] — 2026-11-25
 
 ### Added

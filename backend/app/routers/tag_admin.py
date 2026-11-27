@@ -381,7 +381,7 @@ async def merge_tag(
     """
     if source_id == target_id:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Cannot merge a tag into itself.",
         )
 

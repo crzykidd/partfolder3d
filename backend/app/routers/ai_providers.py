@@ -93,7 +93,7 @@ def _parse_provider_type(value: str) -> AiProviderType:
         return AiProviderType(value)
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 f"Invalid provider type: {value!r}. "
                 "Must be one of: claude, openai, ollama"
