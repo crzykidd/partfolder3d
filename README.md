@@ -18,7 +18,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.9.0-0FA4AB)
+![Version](https://img.shields.io/badge/version-0.10.0-0FA4AB)
 ![Status](https://img.shields.io/badge/status-alpha-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 
@@ -28,31 +28,25 @@
 
 ## What's New
 
-**Latest — v0.9.0 (2026-11-25):** **catalog multi-select with bulk actions** — select many items
-and log a print, add/remove tags, move, rescan, or delete them in one go. The **Version page**
-now shows every component's build (frontend, nginx, backend, worker) and warns on mismatches.
-Also fixes `extract_archives` jobs stuck in "queued".
+### v0.10.0 (2026-11-27)
+
+**Latest:** **printer profiles** — save named printer/material/nozzle/layer presets in
+Settings (one can be the default) and load them into the Log-print form, or save the current
+settings as a new profile right from the form. Catalog items you've printed now show a
+**printer badge** ("Printed 3 times"). Queued jobs can be cancelled, and stuck queued jobs are
+cleaned up automatically.
 
 > [!IMPORTANT]
-> **v0.9.0 is a recommended security update — upgrade all images.** A full scan of the
-> v0.8.1 images found **23 critical / 190 high** CVEs across the stack; v0.9.0 removes most of
-> them:
-> - **Backend:** patched Pillow, python-multipart (fixes a path-traversal file write reachable
->   via uploads), cryptography, lxml and transitive deps — critical CVEs **14 → 1** (the one
->   left is an unreachable Debian library with no fix yet). Test/lint tools no longer ship in
->   the image, and the base is pinned to `python:3.12-slim-trixie`.
-> - **Frontend:** the published image is now Alpine + static files only — **821 MB → 15 MB**,
->   critical/high **4/47 → 0/0**.
-> - **nginx:** rebuilt on the patched 1.30 line — critical/high **6/35 → 0/0**.
->
-> Pull `:latest` (or `:0.9.0`) for **all** services and recreate them, including the one-shot
-> `frontend` container, then confirm on the **Version page** that every component shows
-> v0.9.0. Full findings: [`docs/security-audit-2026-11-25.md`](docs/security-audit-2026-11-25.md).
+> **Security:** fastapi/starlette/uvicorn upgraded (starlette 0.41 → 1.10), clearing all 14
+> starlette advisories — including a Range-header DoS on downloads/share links. Pull `:latest`
+> (or `:0.10.0`) for **all** services, including the one-shot `frontend` container; migration
+> `0028` runs automatically on backend start. Check the **Version page** afterwards.
 
 **Top features by minor version** — full detail for *every* release (including patch
 releases and fixes) lives in **[CHANGELOG.md](CHANGELOG.md)** and the
 [GitHub releases](https://github.com/crzykidd/partfolder3d/releases):
 
+- **v0.10** — printer profiles (Log-print presets, save-as-profile) · printed-before catalog badge · cancel/auto-clean queued jobs · fastapi/starlette security upgrade
 - **v0.9** — catalog multi-select + bulk log-print/tags/move/rescan/delete · per-component build info on the Version page · security dependency + image refresh
 - **v0.8** — in-app description/tag editing · server-side OpenSCAD render · in-app PDF viewer · one-click clear-failed jobs · stlflix.com import
 - **v0.7** — OpenSCAD `.scad` source viewer + playground hand-off · prinnit.com import · built-in HTTPS/TLS at nginx · bulk review approve/reject
@@ -72,7 +66,7 @@ metadata travels with the files — enabling manual re-import, instance-to-insta
 transfer, and resilience against database loss.
 
 > [!NOTE]
-> The full feature set below is **built and released** (v0.9.0) — see the
+> The full feature set below is **built and released** (v0.10.0) — see the
 > [Roadmap](#roadmap--status) for phase status and [Getting started](#getting-started) to run it.
 
 ### Why / design principles
@@ -349,7 +343,7 @@ sync, raising an Issue when they genuinely conflict.
 
 ## Roadmap / status
 
-Honest snapshot — this project is in **active development** (v0.9.0).
+Honest snapshot — this project is in **active development** (v0.10.0).
 
 - [x] Product Requirements Document drafted (`PRD.md`, 18 sections)
 - [x] Brand assets — logo, icons, favicons, colors (`docs/images/`)
@@ -569,6 +563,6 @@ and app `<head>` / `manifest.json` references).
 
 <div align="center">
 
-<sub>PartFolder 3D — v0.9.0 · built by <code>crzykidd</code></sub>
+<sub>PartFolder 3D — v0.10.0 · built by <code>crzykidd</code></sub>
 
 </div>

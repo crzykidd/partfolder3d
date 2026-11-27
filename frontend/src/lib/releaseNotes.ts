@@ -18,6 +18,17 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: Record<string, ReleaseNote> = {
+  '0.10.0': {
+    title: "What's New in v0.10.0",
+    bullets: [
+      'Printer profiles: save named printer/material/nozzle/layer presets under Settings → Printer profiles (mark one as default), then load one into the Log-print form from the "Load from profile" dropdown — single item or bulk',
+      'Filled out a print\'s settings? Click "Save as profile" right in the Log-print form to keep them for next time',
+      'Catalog items you\'ve printed now show a small printer icon — hover it to see how many times ("Printed 3 times")',
+      'Queued jobs can now be cancelled from the Job Monitor, superseded jobs can be archived/deleted/cleared, and jobs stuck in "queued" are cleaned up automatically',
+      'Security: fastapi/starlette/uvicorn upgraded, clearing all known starlette vulnerabilities (including a download Range-header DoS)',
+    ],
+    githubReleaseUrl: 'https://github.com/crzykidd/partfolder3d/releases/tag/v0.10.0',
+  },
   '0.9.0': {
     title: "What's New in v0.9.0",
     bullets: [
